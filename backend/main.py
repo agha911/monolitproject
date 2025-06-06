@@ -256,3 +256,7 @@ def clear_users():
     save_users()
     return {"status": "cleared"}
 
+@app.get("/api/debug/users")
+def get_all_users():
+    return users
+
