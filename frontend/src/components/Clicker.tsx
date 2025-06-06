@@ -21,36 +21,46 @@ const Clicker: React.FC = () => {
   const [loading, setLoading] = useState(true);
 
   // Получаем Telegram user
-  // Регистрация и загрузка прогресса
-useEffect(() => {
-  if (!telegramUser) return;
-
-  const initializeUser = async () => {
-    try {
-      // Просто отправляем user_id — остальное делает backend
-      await fetch(`${API_BASE_URL}/api/user/register`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ user_id: telegramUser.id }),
-      });
-
-      const finalRes = await fetch(`${API_BASE_URL}/api/game/progress/${telegramUser.id}`);
-      const data = await finalRes.json();
-      setXp(data.xp);
-      setLevel(data.level);
-      setEnergy(data.energy);
-      setTotalXp(data.total_xp ?? data.xp);
-      setLastEnergyUpdate(data.lastEnergyUpdate ? new Date(data.lastEnergyUpdate) : null);
-      setMaxEnergy(data.max_energy ?? 100);
-      setLoading(false);
-    } catch (error) {
-      console.error('Ошибка инициализации пользователя:', error);
+  useEffect(() => {
+    WebApp.ready();
+    const user = WebApp.initDataUnsafe?.user;
+    if (user) {
+      setTelegramUser(user);
+    } else {
+      alert("Ошибка: не удалось получить данные Telegram-пользователя.");
+      console.warn("initDataUnsafe.user = ", WebApp.initDataUnsafe);
     }
-  };
+  }, []);
 
-  initializeUser();
-}, [telegramUser]);
+  // Регистрация и загрузка прогресса
+  useEffect(() => {
+    if (!telegramUser) return;
 
+    const initializeUser = async () => {
+      try {
+        // Просто отправляем user_id — остальное делает backend
+        await fetch(`${API_BASE_URL}/api/user/register`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ user_id: telegramUser.id }),
+        });
+
+        const finalRes = await fetch(`${API_BASE_URL}/api/game/progress/${telegramUser.id}`);
+        const data = await finalRes.json();
+        setXp(data.xp);
+        setLevel(data.level);
+        setEnergy(data.energy);
+        setTotalXp(data.total_xp ?? data.xp);
+        setLastEnergyUpdate(data.lastEnergyUpdate ? new Date(data.lastEnergyUpdate) : null);
+        setMaxEnergy(data.max_energy ?? 100);
+        setLoading(false);
+      } catch (error) {
+        console.error('Ошибка инициализации пользователя:', error);
+      }
+    };
+
+    initializeUser();
+  }, [telegramUser]);
 
   useEffect(() => {
     const interval = setInterval(async () => {
@@ -177,6 +187,7 @@ useEffect(() => {
 };
 
 export default Clicker;
+
 
 
 
