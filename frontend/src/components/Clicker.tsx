@@ -33,9 +33,9 @@ const Clicker: React.FC = () => {
   useEffect(() => {
     const initializeUser = async () => {
       try {
-        const res = await fetch(`http://localhost:8000/api/game/progress/${telegramUserId}`);
+        const res = await fetch(`https://monolitproject.onrender.com/api/game/progress/${telegramUserId}`);
         if (res.status === 404) {
-          const regRes = await fetch('http://localhost:8000/api/user/register', {
+          const regRes = await fetch('https://monolitproject.onrender.com/api/user/register', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(telegramUser),
@@ -43,7 +43,7 @@ const Clicker: React.FC = () => {
           if (!regRes.ok) throw new Error('Регистрация не удалась');
         }
 
-        const finalRes = await fetch(`http://localhost:8000/api/game/progress/${telegramUserId}`);
+        const finalRes = await fetch(`https://monolitproject.onrender.com/api/game/progress/${telegramUserId}`);
         const data = await finalRes.json();
         setXp(data.xp);
         setLevel(data.level);
@@ -65,7 +65,7 @@ const Clicker: React.FC = () => {
       if (energy >= maxEnergy) return;
 
       try {
-        const res = await fetch(`http://localhost:8000/api/game/progress/${telegramUserId}`);
+        const res = await fetch(`https://monolitproject.onrender.com/api/game/progress/${telegramUserId}`);
         const data = await res.json();
         setEnergy(data.energy);
         setLastEnergyUpdate(data.lastEnergyUpdate ? new Date(data.lastEnergyUpdate) : null);
@@ -120,13 +120,13 @@ const Clicker: React.FC = () => {
     setLevel(newLevel);
     setTotalXp(newTotalXp);
 
-    fetch('http://localhost:8000/api/game/click', {
+    fetch('https://monolitproject.onrender.com/api/game/click', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ user_id: telegramUserId }),
     });
 
-    fetch('http://localhost:8000/api/game/save_progress', {
+    fetch('https://monolitproject.onrender.com/api/game/save_progress', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
