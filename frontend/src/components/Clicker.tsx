@@ -21,54 +21,36 @@ const Clicker: React.FC = () => {
   const [loading, setLoading] = useState(true);
 
   // Получаем Telegram user
-  useEffect(() => {
-    WebApp.ready();
-    const user = WebApp.initDataUnsafe?.user;
-    if (user) {
-      setTelegramUser(user);
-    } else {
-      alert("Ошибка: не удалось получить данные Telegram-пользователя.");
-      console.warn("initDataUnsafe.user = ", WebApp.initDataUnsafe);
-    }
-  }, []);
-
   // Регистрация и загрузка прогресса
-  useEffect(() => {
-    if (!telegramUser) return;
+useEffect(() => {
+  if (!telegramUser) return;
 
-    const initializeUser = async () => {
-      try {
-        const res = await fetch(`${API_BASE_URL}/api/game/progress/${telegramUser.id}`);
-        if (res.status === 404) {
-          const regRes = await fetch(`${API_BASE_URL}/api/user/register`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              user_id: telegramUser.id,
-              first_name: telegramUser.first_name,
-              last_name: telegramUser.last_name,
-              username: telegramUser.username,
-            }),
-          });
-          if (!regRes.ok) throw new Error('Регистрация не удалась');
-        }
+  const initializeUser = async () => {
+    try {
+      // Просто отправляем user_id — остальное делает backend
+      await fetch(`${API_BASE_URL}/api/user/register`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user_id: telegramUser.id }),
+      });
 
-        const finalRes = await fetch(`${API_BASE_URL}/api/game/progress/${telegramUser.id}`);
-        const data = await finalRes.json();
-        setXp(data.xp);
-        setLevel(data.level);
-        setEnergy(data.energy);
-        setTotalXp(data.total_xp ?? data.xp);
-        setLastEnergyUpdate(data.lastEnergyUpdate ? new Date(data.lastEnergyUpdate) : null);
-        setMaxEnergy(data.max_energy ?? 100);
-        setLoading(false);
-      } catch (error) {
-        console.error('Ошибка инициализации пользователя:', error);
-      }
-    };
+      const finalRes = await fetch(`${API_BASE_URL}/api/game/progress/${telegramUser.id}`);
+      const data = await finalRes.json();
+      setXp(data.xp);
+      setLevel(data.level);
+      setEnergy(data.energy);
+      setTotalXp(data.total_xp ?? data.xp);
+      setLastEnergyUpdate(data.lastEnergyUpdate ? new Date(data.lastEnergyUpdate) : null);
+      setMaxEnergy(data.max_energy ?? 100);
+      setLoading(false);
+    } catch (error) {
+      console.error('Ошибка инициализации пользователя:', error);
+    }
+  };
 
-    initializeUser();
-  }, [telegramUser]);
+  initializeUser();
+}, [telegramUser]);
+
 
   useEffect(() => {
     const interval = setInterval(async () => {
