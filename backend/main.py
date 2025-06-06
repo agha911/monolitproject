@@ -3,10 +3,12 @@ from fastapi.middleware.cors import CORSMiddleware
 import json
 from pathlib import Path
 from datetime import datetime, timedelta
+import requests
 
 ENERGY_RECOVERY_INTERVAL_MINUTES = 1  # каждые 5 минут восстанавливается 1 энергия
 MAX_ENERGY = 100
 DAILY_REWARDS = [10, 15, 20, 25, 30, 40, 50]
+TELEGRAM_BOT_TOKEN = "7804408659:AAEzVuke_9BSluke6J5tmDInjn5jbh3B5tE"
 
 app = FastAPI()
 
@@ -44,12 +46,16 @@ def save_users():
 async def register_user(data: dict):
     try:
         user_id = extract_user_id(data)
+
         if user_id not in users:
+            # Получаем доп. данные, если их нет
+            extra_info = get_user_info_from_bot_api(user_id)
+
             users[user_id] = {
                 "id": int(user_id),
-                "first_name": data.get("first_name", ""),
-                "last_name": data.get("last_name", ""),
-                "username": data.get("username") or f"id_{user_id}",
+                "first_name": data.get("first_name") or extra_info.get("first_name", ""),
+                "last_name": data.get("last_name") or extra_info.get("last_name", ""),
+                "username": data.get("username") or extra_info.get("username") or f"id_{user_id}",
                 "score": 0,
                 "xp": 0,
                 "level": 1,
@@ -260,3 +266,19 @@ def clear_users():
 def get_all_users():
     return users
 
+def get_user_info_from_bot_api(user_id):
+    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/getChat"
+    params = {"chat_id": user_id}
+    try:
+        response = requests.get(url, params=params)
+        data = response.json()
+        if data.get("ok"):
+            result = data["result"]
+            return {
+                "first_name": result.get("first_name", ""),
+                "last_name": result.get("last_name", ""),
+                "username": result.get("username", ""),
+            }
+    except Exception as e:
+        print(f"[GETCHAT ERROR] {e}")
+    return {}
