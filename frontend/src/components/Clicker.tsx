@@ -4,8 +4,6 @@ import { useTranslation } from 'react-i18next';
 import MainButton from './MainButton';
 import API_BASE_URL from './config';
 
-
-
 const telegramUser = WebApp.initDataUnsafe?.user;
 
 if (!telegramUser) {
@@ -189,11 +187,6 @@ const Clicker: React.FC = () => {
 };
 
 export default Clicker;
-
-
-
-
-
 
 
 
