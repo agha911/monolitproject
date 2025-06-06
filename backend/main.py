@@ -49,7 +49,7 @@ async def register_user(data: dict):
                 "id": int(user_id),
                 "first_name": data.get("first_name", ""),
                 "last_name": data.get("last_name", ""),
-                "username": data.get("username", ""),
+                "username": data.get("username") or f"id_{user_id}",
                 "score": 0,
                 "xp": 0,
                 "level": 1,
