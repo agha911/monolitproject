@@ -5,7 +5,7 @@ from pathlib import Path
 from datetime import datetime, timedelta
 import requests
 
-ENERGY_RECOVERY_INTERVAL_MINUTES = 1  # каждые 5 минут восстанавливается 1 энергия
+ENERGY_RECOVERY_INTERVAL_MINUTES = 1
 MAX_ENERGY = 100
 DAILY_REWARDS = [10, 15, 20, 25, 30, 40, 50]
 TELEGRAM_BOT_TOKEN = "7804408659:AAEzVuke_9BSluke6J5tmDInjn5jbh3B5tE"
@@ -18,7 +18,6 @@ def extract_user_id(data):
         raise ValueError("Недопустимый user_id")
     return user_id
 
-# Разрешаем фронтенду обращаться к API
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -27,20 +26,34 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Файл с "базой данных"
 DB_FILE = Path("users.json")
 
-# Загружаем базу пользователей из файла
 if DB_FILE.exists():
     with open(DB_FILE, "r", encoding="utf-8") as f:
         users = json.load(f)
 else:
     users = {}
 
-# Сохраняем базу пользователей в файл
 def save_users():
     with open(DB_FILE, "w", encoding="utf-8") as f:
         json.dump(users, f, ensure_ascii=False, indent=2)
+
+def get_user_info_from_bot_api(user_id):
+    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/getChat"
+    params = {"chat_id": user_id}
+    try:
+        response = requests.get(url, params=params)
+        data = response.json()
+        if data.get("ok"):
+            result = data["result"]
+            return {
+                "first_name": result.get("first_name", ""),
+                "last_name": result.get("last_name", ""),
+                "username": result.get("username", ""),
+            }
+    except Exception as e:
+        print(f"[GETCHAT ERROR] {e}")
+    return {}
 
 @app.post("/api/user/register")
 async def register_user(data: dict):
@@ -48,14 +61,12 @@ async def register_user(data: dict):
         user_id = extract_user_id(data)
 
         if user_id not in users:
-            # Получаем доп. данные, если их нет
-            extra_info = get_user_info_from_bot_api(user_id)
-
+            user_info = get_user_info_from_bot_api(user_id)
             users[user_id] = {
                 "id": int(user_id),
-                "first_name": data.get("first_name") or extra_info.get("first_name", ""),
-                "last_name": data.get("last_name") or extra_info.get("last_name", ""),
-                "username": data.get("username") or extra_info.get("username") or f"id_{user_id}",
+                "first_name": user_info.get("first_name", ""),
+                "last_name": user_info.get("last_name", ""),
+                "username": user_info.get("username", f"id_{user_id}"),
                 "score": 0,
                 "xp": 0,
                 "level": 1,
@@ -117,16 +128,7 @@ async def save_progress(data: dict):
     try:
         user_id = extract_user_id(data)
         if user_id not in users:
-            users[user_id] = {
-                "first_name": "",
-                "last_name": "",
-                "username": "",
-                "score": 0,
-                "xp": 0,
-                "level": 1,
-                "energy": 100,
-                "total_xp": 0
-            }
+            return {"status": "error", "message": "User not registered"}
 
         users[user_id]["xp"] = data["xp"]
         users[user_id]["level"] = data["level"]
@@ -166,91 +168,6 @@ def leaderboard():
         for u in sorted_users
     ]
 
-
-@app.post("/api/shop/buy_max_energy")
-def buy_max_energy(data: dict):
-    try:
-        user_id = extract_user_id(data)
-        user = users.get(user_id)
-
-        if not user:
-            return {"status": "error", "message": "User not found"}
-
-        if user["total_xp"] < 50:
-            return {"status": "error", "message": "Not enough MONO"}
-
-        user["total_xp"] -= 50
-        user["max_energy"] = user.get("max_energy", 100) + 100
-        save_users()
-        return {"status": "success", "new_max_energy": user["max_energy"], "remaining_mono": user["total_xp"]}
-    except Exception as e:
-        return {"status": "error", "message": str(e)}
-
-@app.post("/api/task/complete")
-def complete_task(data: dict):
-    try:
-        user_id = extract_user_id(data)
-        task_id = data.get("task_id")
-
-        if not task_id or task_id != "follow_instagram":
-            return {"status": "error", "message": "Invalid task"}
-
-        user = users.get(user_id)
-        if not user:
-            return {"status": "error", "message": "User not found"}
-
-        if "completed_tasks" not in user:
-            user["completed_tasks"] = []
-
-        if task_id in user["completed_tasks"]:
-            return {"status": "already_completed"}
-
-        user["completed_tasks"].append(task_id)
-        user["total_xp"] += 50
-        save_users()
-
-        return {"status": "success", "reward": 50}
-    except Exception as e:
-        return {"status": "error", "message": str(e)}
-
-@app.post("/api/task/daily_checkin")
-def daily_checkin(data: dict):
-    try:
-        user_id = extract_user_id(data)
-        user = users.get(user_id)
-
-        if not user:
-            return {"status": "error", "message": "User not found"}
-
-        now = datetime.utcnow()
-        last_checkin_str = user.get("last_checkin")
-        last_checkin = datetime.fromisoformat(last_checkin_str) if last_checkin_str else None
-        streak = user.get("daily_streak", 0)
-
-        if last_checkin and (now - last_checkin) < timedelta(hours=24):
-            return {"status": "already_checked_in", "day": streak, "reward": DAILY_REWARDS[streak - 1]}
-
-        if last_checkin and (now - last_checkin) > timedelta(hours=48):
-            streak = 0
-
-        streak = min(streak + 1, len(DAILY_REWARDS))
-        reward = DAILY_REWARDS[streak - 1]
-
-        user["daily_streak"] = streak
-        user["last_checkin"] = now.isoformat()
-        user["total_xp"] = user.get("total_xp", 0) + reward
-
-        save_users()
-
-        return {
-            "status": "success",
-            "day": streak,
-            "reward": reward,
-            "next_reset_utc": (now + timedelta(hours=24)).isoformat()
-        }
-    except Exception as e:
-        return {"status": "error", "message": str(e)}
-
 @app.get("/")
 def root():
     return {"status": "ok", "message": "Backend is live!"}
@@ -266,19 +183,3 @@ def clear_users():
 def get_all_users():
     return users
 
-def get_user_info_from_bot_api(user_id):
-    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/getChat"
-    params = {"chat_id": user_id}
-    try:
-        response = requests.get(url, params=params)
-        data = response.json()
-        if data.get("ok"):
-            result = data["result"]
-            return {
-                "first_name": result.get("first_name", ""),
-                "last_name": result.get("last_name", ""),
-                "username": result.get("username", ""),
-            }
-    except Exception as e:
-        print(f"[GETCHAT ERROR] {e}")
-    return {}
