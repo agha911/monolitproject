@@ -1,0 +1,19 @@
+{
+  "123456": {
+    "first_name": "",
+    "last_name": "",
+    "username": "",
+    "score": 0,
+    "xp": 92,
+    "level": 2,
+    "energy": 392,
+    "total_xp": 102,
+    "max_energy": 400,
+    "lastEnergyUpdate": "2025-06-06T13:52:03.008405",
+    "completed_tasks": [
+      "follow_instagram"
+    ],
+    "daily_streak": 1,
+    "last_checkin": "2025-06-05T22:48:44.491661"
+  }
+}
