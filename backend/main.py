@@ -36,25 +36,34 @@ def save_users():
 
 @app.post("/api/user/register")
 async def register_user(data: dict):
-    user_id = str(data["user_id"])
-    if user_id not in users:
-        users[user_id] = {
-            "id": int(user_id),
-            "first_name": data.get("first_name", ""),
-            "last_name": data.get("last_name", ""),
-            "username": data.get("username", ""),
-            "score": 0,
-            "xp": 0,
-            "level": 1,
-            "energy": 100,
-            "total_xp": 0,
-            "max_energy": 100
-        }
-        print(f"[REGISTERED] {user_id}")
-        save_users()
-    else:
-        print(f"[ALREADY REGISTERED] {user_id}")
-    return {"status": "ok"}
+    try:
+        user_id = str(data.get("user_id") or data.get("id"))
+        if not user_id:
+            return {"status": "error", "message": "Missing user_id"}
+
+        if user_id not in users:
+            users[user_id] = {
+                "id": int(user_id),
+                "first_name": data.get("first_name", ""),
+                "last_name": data.get("last_name", ""),
+                "username": data.get("username", ""),
+                "score": 0,
+                "xp": 0,
+                "level": 1,
+                "energy": 100,
+                "total_xp": 0,
+                "max_energy": 100
+            }
+            print(f"[REGISTERED] {user_id}")
+            save_users()
+        else:
+            print(f"[ALREADY REGISTERED] {user_id}")
+        return {"status": "ok"}
+
+    except Exception as e:
+        print(f"[REGISTER ERROR] {e}")
+        return {"status": "error", "message": str(e)}
+
 
 @app.get("/api/game/progress/{user_id}")
 async def get_progress(user_id: str):
