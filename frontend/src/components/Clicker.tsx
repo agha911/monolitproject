@@ -4,19 +4,12 @@ import { useTranslation } from 'react-i18next';
 import MainButton from './MainButton';
 import API_BASE_URL from './config';
 
-const telegramUser = WebApp.initDataUnsafe?.user;
-
-if (!telegramUser) {
-  alert("Ошибка: не удалось получить данные Telegram-пользователя.");
-  throw new Error("Telegram user not found");
-}
-
-const telegramUserId = telegramUser.id;
 const ENERGY_RESTORE_INTERVAL_MS = 1 * 60 * 1000; // 1 минута
 
 const Clicker: React.FC = () => {
   const { t } = useTranslation();
 
+  const [telegramUser, setTelegramUser] = useState<WebAppUser | null>(null);
   const [score, setScore] = useState(0);
   const [xp, setXp] = useState(0);
   const [totalXp, setTotalXp] = useState(0);
@@ -27,10 +20,25 @@ const Clicker: React.FC = () => {
   const [timeToNextEnergy, setTimeToNextEnergy] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
+  // Получаем Telegram user
   useEffect(() => {
+    WebApp.ready();
+    const user = WebApp.initDataUnsafe?.user;
+    if (user) {
+      setTelegramUser(user);
+    } else {
+      alert("Ошибка: не удалось получить данные Telegram-пользователя.");
+      console.warn("initDataUnsafe.user = ", WebApp.initDataUnsafe);
+    }
+  }, []);
+
+  // Регистрация и загрузка прогресса
+  useEffect(() => {
+    if (!telegramUser) return;
+
     const initializeUser = async () => {
       try {
-        const res = await fetch(`${API_BASE_URL}/api/game/progress/${telegramUserId}`);
+        const res = await fetch(`${API_BASE_URL}/api/game/progress/${telegramUser.id}`);
         if (res.status === 404) {
           const regRes = await fetch(`${API_BASE_URL}/api/user/register`, {
             method: 'POST',
@@ -45,7 +53,7 @@ const Clicker: React.FC = () => {
           if (!regRes.ok) throw new Error('Регистрация не удалась');
         }
 
-        const finalRes = await fetch(`${API_BASE_URL}/api/game/progress/${telegramUserId}`);
+        const finalRes = await fetch(`${API_BASE_URL}/api/game/progress/${telegramUser.id}`);
         const data = await finalRes.json();
         setXp(data.xp);
         setLevel(data.level);
@@ -60,14 +68,14 @@ const Clicker: React.FC = () => {
     };
 
     initializeUser();
-  }, []);
+  }, [telegramUser]);
 
   useEffect(() => {
     const interval = setInterval(async () => {
-      if (energy >= maxEnergy) return;
+      if (!telegramUser || energy >= maxEnergy) return;
 
       try {
-        const res = await fetch(`${API_BASE_URL}/api/game/progress/${telegramUserId}`);
+        const res = await fetch(`${API_BASE_URL}/api/game/progress/${telegramUser.id}`);
         const data = await res.json();
         setEnergy(data.energy);
         setLastEnergyUpdate(data.lastEnergyUpdate ? new Date(data.lastEnergyUpdate) : null);
@@ -78,7 +86,7 @@ const Clicker: React.FC = () => {
     }, 10000);
 
     return () => clearInterval(interval);
-  }, [energy, maxEnergy]);
+  }, [telegramUser, energy, maxEnergy]);
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -101,7 +109,7 @@ const Clicker: React.FC = () => {
   }, [lastEnergyUpdate, energy, maxEnergy]);
 
   const handleClick = () => {
-    if (loading || energy <= 0 || level >= 100) return;
+    if (!telegramUser || loading || energy <= 0 || level >= 100) return;
 
     const newXp = xp + 1;
     const newTotalXp = totalXp + 1;
@@ -125,14 +133,14 @@ const Clicker: React.FC = () => {
     fetch(`${API_BASE_URL}/api/game/click`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ user_id: telegramUserId }),
+      body: JSON.stringify({ user_id: telegramUser.id }),
     });
 
     fetch(`${API_BASE_URL}/api/game/save_progress`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        user_id: telegramUserId,
+        user_id: telegramUser.id,
         xp: adjustedXp,
         level: newLevel,
         energy: newEnergy,
@@ -187,6 +195,7 @@ const Clicker: React.FC = () => {
 };
 
 export default Clicker;
+
 
 
 
