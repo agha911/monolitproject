@@ -1,9 +1,12 @@
 import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import API_BASE_URL from '../config';
+import WebApp from '@twa-dev/sdk';
 
 const Tasks: React.FC = () => {
   const { t } = useTranslation();
+  const telegramUser = WebApp.initDataUnsafe?.user;
+  const telegramUserId = telegramUser?.id;
 
   const [completed, setCompleted] = useState(false);
   const [message, setMessage] = useState('');
@@ -14,12 +17,17 @@ const Tasks: React.FC = () => {
   const [checkinMessage, setCheckinMessage] = useState('');
 
   const handleComplete = async () => {
+    if (!telegramUserId) {
+      setMessage('Ошибка: пользователь не определён');
+      return;
+    }
+
     try {
       const res = await fetch(`${API_BASE_URL}/api/task/complete`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          user_id: 123456, // заменить на telegramUserId
+          user_id: telegramUserId,
           task_id: 'follow_instagram',
         }),
       });
@@ -39,11 +47,16 @@ const Tasks: React.FC = () => {
   };
 
   const handleCheckIn = async () => {
+    if (!telegramUserId) {
+      setCheckinMessage('Ошибка: пользователь не определён');
+      return;
+    }
+
     try {
       const res = await fetch(`${API_BASE_URL}/api/task/daily_checkin`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ user_id: 123456 }),
+        body: JSON.stringify({ user_id: telegramUserId }),
       });
 
       const data = await res.json();
@@ -131,6 +144,7 @@ const Tasks: React.FC = () => {
 };
 
 export default Tasks;
+
 
 
 
