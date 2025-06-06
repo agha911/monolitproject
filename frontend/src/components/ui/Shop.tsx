@@ -1,21 +1,32 @@
 import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import API_BASE_URL from '../config';
+import WebApp from '@twa-dev/sdk';
 
 const Shop: React.FC = () => {
   const { t } = useTranslation();
   const [message, setMessage] = useState('');
   const [loading, setLoading] = useState(false);
 
+  const telegramUser = WebApp.initDataUnsafe?.user;
+  const telegramUserId = telegramUser?.id;
+
   const handleBuyEnergyUpgrade = async () => {
     setLoading(true);
     setMessage('');
+
+    if (!telegramUserId) {
+      setMessage('Ошибка: пользователь не определён. Открой приложение через Telegram.');
+      setLoading(false);
+      return;
+    }
+
     try {
       const res = await fetch(`${API_BASE_URL}/api/shop/buy_max_energy`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          user_id: 123456, // Заменить на telegramUserId
+          user_id: telegramUserId,
         }),
       });
 
