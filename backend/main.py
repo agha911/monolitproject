@@ -10,6 +10,12 @@ DAILY_REWARDS = [10, 15, 20, 25, 30, 40, 50]
 
 app = FastAPI()
 
+def extract_user_id(data):
+    user_id = str(data.get("user_id") or data.get("id", "")).strip()
+    if not user_id or user_id.lower() == "undefined" or user_id == "123456":
+        raise ValueError("Недопустимый user_id")
+    return user_id
+
 # Разрешаем фронтенду обращаться к API
 app.add_middleware(
     CORSMiddleware,
@@ -37,10 +43,7 @@ def save_users():
 @app.post("/api/user/register")
 async def register_user(data: dict):
     try:
-        user_id = str(data.get("user_id") or data.get("id"))
-        if not user_id:
-            return {"status": "error", "message": "Missing user_id"}
-
+        user_id = extract_user_id(data)
         if user_id not in users:
             users[user_id] = {
                 "id": int(user_id),
@@ -63,7 +66,6 @@ async def register_user(data: dict):
     except Exception as e:
         print(f"[REGISTER ERROR] {e}")
         return {"status": "error", "message": str(e)}
-
 
 @app.get("/api/game/progress/{user_id}")
 async def get_progress(user_id: str):
@@ -104,43 +106,43 @@ async def get_progress(user_id: str):
         "lastEnergyUpdate": user["lastEnergyUpdate"],
     }
 
-
 @app.post("/api/game/save_progress")
 async def save_progress(data: dict):
-    user_id = str(data["user_id"])
+    try:
+        user_id = extract_user_id(data)
+        if user_id not in users:
+            users[user_id] = {
+                "first_name": "",
+                "last_name": "",
+                "username": "",
+                "score": 0,
+                "xp": 0,
+                "level": 1,
+                "energy": 100,
+                "total_xp": 0
+            }
 
-    # Если пользователь не найден — создаём его
-    if user_id not in users:
-        users[user_id] = {
-            "first_name": "",
-            "last_name": "",
-            "username": "",
-            "score": 0,
-            "xp": 0,
-            "level": 1,
-            "energy": 100,
-            "total_xp": 0
-        }
+        users[user_id]["xp"] = data["xp"]
+        users[user_id]["level"] = data["level"]
+        users[user_id]["energy"] = data["energy"]
+        users[user_id]["total_xp"] = data.get("total_xp", users[user_id].get("total_xp", 0))
 
-    users[user_id]["xp"] = data["xp"]
-    users[user_id]["level"] = data["level"]
-    users[user_id]["energy"] = data["energy"]
-    users[user_id]["total_xp"] = data.get("total_xp", users[user_id].get("total_xp", 0))
-
-    save_users()
-    print(f"[SAVED] {user_id} → XP: {data['xp']}, LVL: {data['level']}, ENERGY: {data['energy']}")
-    return {"status": "saved"}
-
+        save_users()
+        print(f"[SAVED] {user_id} → XP: {data['xp']}, LVL: {data['level']}, ENERGY: {data['energy']}")
+        return {"status": "saved"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
 
 @app.post("/api/game/click")
 async def click(data: dict):
-    user_id = str(data["user_id"])
-    if user_id in users:
-        users[user_id]["total_xp"] += 1
-        save_users()
-    return {"status": "clicked"}
-
-
+    try:
+        user_id = extract_user_id(data)
+        if user_id in users:
+            users[user_id]["total_xp"] += 1
+            save_users()
+        return {"status": "clicked"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
 
 @app.get("/api/game/leaderboard")
 def leaderboard():
@@ -156,85 +158,89 @@ def leaderboard():
 
 @app.post("/api/shop/buy_max_energy")
 def buy_max_energy(data: dict):
-    user_id = str(data["user_id"])
-    user = users.get(user_id)
+    try:
+        user_id = extract_user_id(data)
+        user = users.get(user_id)
 
-    if not user:
-        return {"status": "error", "message": "User not found"}
+        if not user:
+            return {"status": "error", "message": "User not found"}
 
-    if user["total_xp"] < 50:
-        return {"status": "error", "message": "Not enough MONO"}
+        if user["total_xp"] < 50:
+            return {"status": "error", "message": "Not enough MONO"}
 
-    user["total_xp"] -= 50
-    user["max_energy"] = user.get("max_energy", 100) + 100
-    save_users()
-    return {"status": "success", "new_max_energy": user["max_energy"], "remaining_mono": user["total_xp"]}
-
+        user["total_xp"] -= 50
+        user["max_energy"] = user.get("max_energy", 100) + 100
+        save_users()
+        return {"status": "success", "new_max_energy": user["max_energy"], "remaining_mono": user["total_xp"]}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
 
 @app.post("/api/task/complete")
 def complete_task(data: dict):
-    user_id = str(data["user_id"])
-    task_id = data.get("task_id")
+    try:
+        user_id = extract_user_id(data)
+        task_id = data.get("task_id")
 
-    if not task_id or task_id != "follow_instagram":
-        return {"status": "error", "message": "Invalid task"}
+        if not task_id or task_id != "follow_instagram":
+            return {"status": "error", "message": "Invalid task"}
 
-    user = users.get(user_id)
-    if not user:
-        return {"status": "error", "message": "User not found"}
+        user = users.get(user_id)
+        if not user:
+            return {"status": "error", "message": "User not found"}
 
-    # Защита от повторного выполнения
-    if "completed_tasks" not in user:
-        user["completed_tasks"] = []
+        if "completed_tasks" not in user:
+            user["completed_tasks"] = []
 
-    if task_id in user["completed_tasks"]:
-        return {"status": "already_completed"}
+        if task_id in user["completed_tasks"]:
+            return {"status": "already_completed"}
 
-    # Выполняем задание
-    user["completed_tasks"].append(task_id)
-    user["total_xp"] += 50
-    save_users()
+        user["completed_tasks"].append(task_id)
+        user["total_xp"] += 50
+        save_users()
 
-    return {"status": "success", "reward": 50}
-
+        return {"status": "success", "reward": 50}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
 
 @app.post("/api/task/daily_checkin")
 def daily_checkin(data: dict):
-    user_id = str(data["user_id"])
-    user = users.get(user_id)
+    try:
+        user_id = extract_user_id(data)
+        user = users.get(user_id)
 
-    if not user:
-        return {"status": "error", "message": "User not found"}
+        if not user:
+            return {"status": "error", "message": "User not found"}
 
-    now = datetime.utcnow()
-    last_checkin_str = user.get("last_checkin")
-    last_checkin = datetime.fromisoformat(last_checkin_str) if last_checkin_str else None
-    streak = user.get("daily_streak", 0)
+        now = datetime.utcnow()
+        last_checkin_str = user.get("last_checkin")
+        last_checkin = datetime.fromisoformat(last_checkin_str) if last_checkin_str else None
+        streak = user.get("daily_streak", 0)
 
-    if last_checkin and (now - last_checkin) < timedelta(hours=24):
-        return {"status": "already_checked_in", "day": streak, "reward": DAILY_REWARDS[streak - 1]}
+        if last_checkin and (now - last_checkin) < timedelta(hours=24):
+            return {"status": "already_checked_in", "day": streak, "reward": DAILY_REWARDS[streak - 1]}
 
-    # Сбросить, если прошло больше 48ч
-    if last_checkin and (now - last_checkin) > timedelta(hours=48):
-        streak = 0
+        if last_checkin and (now - last_checkin) > timedelta(hours=48):
+            streak = 0
 
-    # Увеличиваем прогресс
-    streak = min(streak + 1, len(DAILY_REWARDS))
-    reward = DAILY_REWARDS[streak - 1]
+        streak = min(streak + 1, len(DAILY_REWARDS))
+        reward = DAILY_REWARDS[streak - 1]
 
-    user["daily_streak"] = streak
-    user["last_checkin"] = now.isoformat()
-    user["total_xp"] = user.get("total_xp", 0) + reward
+        user["daily_streak"] = streak
+        user["last_checkin"] = now.isoformat()
+        user["total_xp"] = user.get("total_xp", 0) + reward
 
-    save_users()
+        save_users()
 
-    return {
-        "status": "success",
-        "day": streak,
-        "reward": reward,
-        "next_reset_utc": (now + timedelta(hours=24)).isoformat()
-    }
+        return {
+            "status": "success",
+            "day": streak,
+            "reward": reward,
+            "next_reset_utc": (now + timedelta(hours=24)).isoformat()
+        }
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
 
 @app.get("/")
 def root():
     return {"status": "ok", "message": "Backend is live!"}
+
