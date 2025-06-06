@@ -225,3 +225,7 @@ def daily_checkin(data: dict):
         "reward": reward,
         "next_reset_utc": (now + timedelta(hours=24)).isoformat()
     }
+
+@app.get("/")
+def root():
+    return {"status": "ok", "message": "Backend is live!"}
