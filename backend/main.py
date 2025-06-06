@@ -152,8 +152,8 @@ def leaderboard():
             "id": u.get("id"),
             "username": (
                 u.get("username")
-                or u.get("first_name")
-                or f"id_{u.get('id')}"
+                if u.get("username") and u.get("username") != "undefined"
+                else u.get("first_name") or f"user_{u.get('id')}"
             ),
             "total_xp": u.get("total_xp", 0)
         }
