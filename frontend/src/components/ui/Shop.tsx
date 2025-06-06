@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import API_BASE_URL from '../config';
 
 const Shop: React.FC = () => {
   const { t } = useTranslation();
@@ -10,7 +11,7 @@ const Shop: React.FC = () => {
     setLoading(true);
     setMessage('');
     try {
-      const res = await fetch('http://localhost:8000/api/shop/buy_max_energy', {
+      const res = await fetch(`${API_BASE_URL}/api/shop/buy_max_energy`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

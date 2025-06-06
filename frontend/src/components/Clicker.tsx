@@ -2,8 +2,7 @@ import React, { useState, useEffect } from 'react';
 import WebApp from '@twa-dev/sdk';
 import { useTranslation } from 'react-i18next';
 import MainButton from './MainButton';
-
-const API_BASE_URL = 'https://monolitproject.onrender.com';
+import API_BASE_URL from './config';
 
 const telegramUser = WebApp.initDataUnsafe?.user;
 
@@ -188,6 +187,7 @@ const Clicker: React.FC = () => {
 };
 
 export default Clicker;
+
 
 
 
