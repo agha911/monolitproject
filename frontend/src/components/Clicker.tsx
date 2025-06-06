@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { WebApp } from '@twa-dev/sdk';
+import WebApp from '@twa-dev/sdk'; // ✅ исправлено
 import { useTranslation } from 'react-i18next';
 import MainButton from './MainButton';
 
