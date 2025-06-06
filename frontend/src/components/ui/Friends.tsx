@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import API_BASE_URL from '../config';
 
 interface UserEntry {
   id: number;
@@ -14,7 +15,7 @@ const Friends: React.FC = () => {
   useEffect(() => {
     const fetchLeaderboard = async () => {
       try {
-        const res = await fetch('http://localhost:8000/api/game/leaderboard');
+        const res = await fetch(`${API_BASE_URL}/api/game/leaderboard`);
         const data = await res.json();
         setLeaderboard(data);
       } catch (error) {

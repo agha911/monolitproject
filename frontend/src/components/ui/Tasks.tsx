@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import API_BASE_URL from '../config';
 
 const Tasks: React.FC = () => {
   const { t } = useTranslation();
@@ -14,7 +15,7 @@ const Tasks: React.FC = () => {
 
   const handleComplete = async () => {
     try {
-      const res = await fetch('http://localhost:8000/api/task/complete', {
+      const res = await fetch(`${API_BASE_URL}/api/task/complete`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -39,7 +40,7 @@ const Tasks: React.FC = () => {
 
   const handleCheckIn = async () => {
     try {
-      const res = await fetch('http://localhost:8000/api/task/daily_checkin', {
+      const res = await fetch(`${API_BASE_URL}/api/task/daily_checkin`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ user_id: 123456 }),
