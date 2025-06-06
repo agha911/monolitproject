@@ -53,7 +53,11 @@ const Friends: React.FC = () => {
                   }`}
                 >
                   <td className="px-4 py-2 border border-[#00f0ff10]">{index + 1}</td>
-                  <td className="px-4 py-2 border border-[#00f0ff10]">@{user.username}</td>
+                  <td className="px-4 py-2 border border-[#00f0ff10]">
+                    {user.username
+                      ? (user.username.startsWith('@') ? user.username : `@${user.username}`)
+                      : `user_${user.id}`}
+                  </td>
                   <td className="px-4 py-2 border border-[#00f0ff10]">{user.total_xp}</td>
                 </tr>
               ))}
