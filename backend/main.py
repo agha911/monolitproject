@@ -168,6 +168,93 @@ def leaderboard():
         for u in sorted_users
     ]
 
+@app.post("/api/shop/buy_max_energy")
+def buy_max_energy(data: dict):
+    try:
+        user_id = extract_user_id(data)
+        user = users.get(user_id)
+
+        if not user:
+            return {"status": "error", "message": "User not found"}
+
+        if user["total_xp"] < 50:
+            return {"status": "error", "message": "Not enough MONO"}
+
+        user["total_xp"] -= 50
+        user["max_energy"] = user.get("max_energy", 100) + 100
+        save_users()
+        return {"status": "success", "new_max_energy": user["max_energy"], "remaining_mono": user["total_xp"]}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+@app.post("/api/task/complete")
+def complete_task(data: dict):
+    try:
+        user_id = extract_user_id(data)
+        task_id = data.get("task_id")
+
+        if not task_id or task_id != "follow_instagram":
+            return {"status": "error", "message": "Invalid task"}
+
+        user = users.get(user_id)
+        if not user:
+            return {"status": "error", "message": "User not found"}
+
+        if "completed_tasks" not in user:
+            user["completed_tasks"] = []
+
+        if task_id in user["completed_tasks"]:
+            return {"status": "already_completed"}
+
+        user["completed_tasks"].append(task_id)
+        user["total_xp"] += 50
+        save_users()
+
+        return {"status": "success", "reward": 50}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+@app.post("/api/task/daily_checkin")
+def daily_checkin(data: dict):
+    try:
+        user_id = extract_user_id(data)
+        user = users.get(user_id)
+
+        if not user:
+            return {"status": "error", "message": "User not found"}
+
+        now = datetime.utcnow()
+        last_checkin_str = user.get("last_checkin")
+        last_checkin = datetime.fromisoformat(last_checkin_str) if last_checkin_str else None
+        streak = user.get("daily_streak", 0)
+
+        if last_checkin and (now - last_checkin) < timedelta(hours=24):
+            return {"status": "already_checked_in", "day": streak, "reward": DAILY_REWARDS[streak - 1]}
+
+        if last_checkin and (now - last_checkin) > timedelta(hours=48):
+            streak = 0
+
+        streak = min(streak + 1, len(DAILY_REWARDS))
+        reward = DAILY_REWARDS[streak - 1]
+
+        user["daily_streak"] = streak
+        user["last_checkin"] = now.isoformat()
+        user["total_xp"] = user.get("total_xp", 0) + reward
+
+        save_users()
+
+        return {
+            "status": "success",
+            "day": streak,
+            "reward": reward,
+            "next_reset_utc": (now + timedelta(hours=24)).isoformat()
+        }
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
 @app.get("/")
 def root():
     return {"status": "ok", "message": "Backend is live!"}
