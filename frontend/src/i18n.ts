@@ -5,8 +5,28 @@ import en from './locales/en.json';
 import ru from './locales/ru.json';
 import az from './locales/az.json';
 
+// Расширяем тип Window, чтобы TypeScript "знал" о Telegram
+declare global {
+  interface Window {
+    Telegram?: {
+      WebApp?: {
+        initDataUnsafe?: {
+          user?: {
+            language_code?: string;
+          };
+        };
+      };
+    };
+  }
+}
+
 const savedLanguage = localStorage.getItem('lang');
-const fallbackLang = savedLanguage || (window?.Telegram?.WebApp?.initDataUnsafe?.user?.language_code?.split('-')[0]) || 'en';
+
+// Безопасное извлечение языка
+const fallbackLang =
+  savedLanguage ||
+  window.Telegram?.WebApp?.initDataUnsafe?.user?.language_code?.split('-')[0] ||
+  'en';
 
 i18n
   .use(initReactI18next)
