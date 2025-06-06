@@ -244,3 +244,10 @@ def daily_checkin(data: dict):
 def root():
     return {"status": "ok", "message": "Backend is live!"}
 
+@app.post("/api/admin/clear_users")
+def clear_users():
+    global users
+    users = {}
+    save_users()
+    return {"status": "cleared"}
+
