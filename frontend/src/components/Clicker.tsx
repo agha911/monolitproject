@@ -1,18 +1,16 @@
 import React, { useState, useEffect } from 'react';
-import WebApp from '@twa-dev/sdk'; // ✅ исправлено
+import WebApp from '@twa-dev/sdk';
 import { useTranslation } from 'react-i18next';
 import MainButton from './MainButton';
 
-const isTelegram = typeof WebApp !== 'undefined' && WebApp.initDataUnsafe?.user;
+const API_BASE_URL = 'https://monolitproject.onrender.com';
 
-const telegramUser = isTelegram
-  ? WebApp.initDataUnsafe.user
-  : {
-      id: 123456,
-      first_name: 'Dev',
-      last_name: 'User',
-      username: 'dev_user',
-    };
+const telegramUser = WebApp.initDataUnsafe?.user;
+
+if (!telegramUser) {
+  alert("Ошибка: не удалось получить данные Telegram-пользователя.");
+  throw new Error("Telegram user not found");
+}
 
 const telegramUserId = telegramUser.id;
 const ENERGY_RESTORE_INTERVAL_MS = 1 * 60 * 1000; // 1 минута
@@ -33,17 +31,22 @@ const Clicker: React.FC = () => {
   useEffect(() => {
     const initializeUser = async () => {
       try {
-        const res = await fetch(`https://monolitproject.onrender.com/api/game/progress/${telegramUserId}`);
+        const res = await fetch(`${API_BASE_URL}/api/game/progress/${telegramUserId}`);
         if (res.status === 404) {
-          const regRes = await fetch('https://monolitproject.onrender.com/api/user/register', {
+          const regRes = await fetch(`${API_BASE_URL}/api/user/register`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(telegramUser),
+            body: JSON.stringify({
+              user_id: telegramUser.id,
+              first_name: telegramUser.first_name,
+              last_name: telegramUser.last_name,
+              username: telegramUser.username,
+            }),
           });
           if (!regRes.ok) throw new Error('Регистрация не удалась');
         }
 
-        const finalRes = await fetch(`https://monolitproject.onrender.com/api/game/progress/${telegramUserId}`);
+        const finalRes = await fetch(`${API_BASE_URL}/api/game/progress/${telegramUserId}`);
         const data = await finalRes.json();
         setXp(data.xp);
         setLevel(data.level);
@@ -65,7 +68,7 @@ const Clicker: React.FC = () => {
       if (energy >= maxEnergy) return;
 
       try {
-        const res = await fetch(`https://monolitproject.onrender.com/api/game/progress/${telegramUserId}`);
+        const res = await fetch(`${API_BASE_URL}/api/game/progress/${telegramUserId}`);
         const data = await res.json();
         setEnergy(data.energy);
         setLastEnergyUpdate(data.lastEnergyUpdate ? new Date(data.lastEnergyUpdate) : null);
@@ -120,13 +123,13 @@ const Clicker: React.FC = () => {
     setLevel(newLevel);
     setTotalXp(newTotalXp);
 
-    fetch('https://monolitproject.onrender.com/api/game/click', {
+    fetch(`${API_BASE_URL}/api/game/click`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ user_id: telegramUserId }),
     });
 
-    fetch('https://monolitproject.onrender.com/api/game/save_progress', {
+    fetch(`${API_BASE_URL}/api/game/save_progress`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -185,6 +188,7 @@ const Clicker: React.FC = () => {
 };
 
 export default Clicker;
+
 
 
 
