@@ -150,11 +150,16 @@ def leaderboard():
     return [
         {
             "id": u.get("id"),
-            "username": u.get("username") or f"id_{u.get('id')}",
+            "username": (
+                u.get("username")
+                or u.get("first_name")
+                or f"id_{u.get('id')}"
+            ),
             "total_xp": u.get("total_xp", 0)
         }
         for u in sorted_users
     ]
+
 
 @app.post("/api/shop/buy_max_energy")
 def buy_max_energy(data: dict):
