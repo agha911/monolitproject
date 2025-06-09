@@ -1,13 +1,11 @@
 from sqlalchemy import Column, Integer, String, DateTime, JSON
-from sqlalchemy.orm import declarative_base
+from app.database import Base  # ✅ используем общую базу
 from datetime import datetime
-
-Base = declarative_base()
 
 class User(Base):
     __tablename__ = "users"
 
-    id = Column(Integer, primary_key=True, index=True)  # Telegram user ID
+    id = Column(Integer, primary_key=True, index=True)
     username = Column(String, index=True)
     first_name = Column(String)
     last_name = Column(String)
@@ -21,4 +19,5 @@ class User(Base):
     last_checkin = Column(DateTime, nullable=True)
     daily_streak = Column(Integer, default=0)
     completed_tasks = Column(JSON, default=[])
+
 
