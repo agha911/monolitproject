@@ -1,6 +1,6 @@
 import asyncio
 from database import engine, Base
-from app.models.user import User  # ⬅️ не удаляй: нужно, чтобы таблица попала в metadata
+from models.user import User  # ⬅️ не удаляй: нужно, чтобы таблица попала в metadata
 
 async def init_models():
     async with engine.begin() as conn:
