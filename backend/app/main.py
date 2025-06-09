@@ -1,0 +1,161 @@
+from fastapi import FastAPI, Depends
+from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import text
+from datetime import datetime, timedelta
+import requests
+from typing import Optional
+
+from app.database import get_async_session
+from app.crud import user as crud_user
+
+ENERGY_RECOVERY_INTERVAL_MINUTES = 1
+MAX_ENERGY = 100
+DAILY_REWARDS = [10, 15, 20, 25, 30, 40, 50]
+TELEGRAM_BOT_TOKEN = "7804408659:AAEzVuke_9BSluke6J5tmDInjn5jbh3B5tE"
+
+app = FastAPI()
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+def extract_user_id(data):
+    user_id = str(data.get("user_id") or data.get("id", "")).strip()
+    if not user_id or user_id.lower() == "undefined" or user_id == "123456":
+        raise ValueError("Недопустимый user_id")
+    return int(user_id)
+
+def get_user_info_from_bot_api(user_id):
+    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/getChat"
+    params = {"chat_id": user_id}
+    try:
+        response = requests.get(url, params=params)
+        data = response.json()
+        if data.get("ok"):
+            result = data["result"]
+            return {
+                "first_name": result.get("first_name", ""),
+                "last_name": result.get("last_name", ""),
+                "username": result.get("username", ""),
+            }
+    except Exception as e:
+        print(f"[GETCHAT ERROR] {e}")
+    return {}
+
+@app.post("/api/user/register")
+async def register_user(data: dict, session: AsyncSession = Depends(get_async_session)):
+    try:
+        user_id = extract_user_id(data)
+        existing = await crud_user.get_user(session, user_id)
+        if existing:
+            print(f"[ALREADY REGISTERED] {user_id}")
+            return {"status": "ok"}
+
+        info = get_user_info_from_bot_api(user_id)
+        await crud_user.create_user(
+            session=session,
+            user_id=user_id,
+            username=info.get("username", f"id_{user_id}"),
+            first_name=info.get("first_name", ""),
+            last_name=info.get("last_name", "")
+        )
+        print(f"[REGISTERED] {user_id}")
+        return {"status": "ok"}
+
+    except Exception as e:
+        print(f"[REGISTER ERROR] {e}")
+        return {"status": "error", "message": str(e)}
+
+@app.get("/api/game/progress/{user_id}")
+async def get_progress(user_id: int, session: AsyncSession = Depends(get_async_session)):
+    user = await crud_user.get_user(session, user_id)
+    if not user:
+        return {
+            "xp": 0, "level": 1, "energy": 100, "total_xp": 0,
+            "max_energy": 100, "lastEnergyUpdate": None,
+        }
+
+    now = datetime.utcnow()
+    last_update = user.lastEnergyUpdate
+    max_energy = user.max_energy or 100
+
+    if last_update:
+        minutes_passed = int((now - last_update).total_seconds() // 60)
+        energy_to_restore = minutes_passed // ENERGY_RECOVERY_INTERVAL_MINUTES
+
+        if energy_to_restore > 0 and user.energy < max_energy:
+            new_energy = min(max_energy, user.energy + energy_to_restore)
+            await crud_user.update_energy_and_time(session, user_id, new_energy, now)
+            user.energy = new_energy
+            user.lastEnergyUpdate = now
+    else:
+        await crud_user.update_energy_and_time(session, user_id, user.energy, now)
+
+    return {
+        "xp": user.xp,
+        "level": user.level,
+        "energy": user.energy,
+        "total_xp": user.total_xp,
+        "max_energy": user.max_energy,
+        "lastEnergyUpdate": user.lastEnergyUpdate.isoformat() if user.lastEnergyUpdate else None,
+    }
+
+@app.post("/api/game/save_progress")
+async def save_progress(data: dict, session: AsyncSession = Depends(get_async_session)):
+    try:
+        user_id = extract_user_id(data)
+        await crud_user.update_progress(
+            session=session,
+            user_id=user_id,
+            xp=data["xp"],
+            level=data["level"],
+            energy=data["energy"],
+            total_xp=data.get("total_xp", 0),
+        )
+        print(f"[SAVED] {user_id} → XP: {data['xp']}, LVL: {data['level']}, ENERGY: {data['energy']}")
+        return {"status": "saved"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+@app.post("/api/game/click")
+async def click(data: dict, session: AsyncSession = Depends(get_async_session)):
+    try:
+        user_id = extract_user_id(data)
+        user = await crud_user.get_user(session, user_id)
+        if user:
+            await crud_user.update_progress(
+                session=session,
+                user_id=user_id,
+                xp=user.xp,
+                level=user.level,
+                energy=user.energy,
+                total_xp=user.total_xp + 1
+            )
+        return {"status": "clicked"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+@app.get("/api/game/leaderboard")
+async def leaderboard(session: AsyncSession = Depends(get_async_session)):
+    users = await crud_user.get_leaderboard(session)
+    return [
+        {
+            "id": u.id,
+            "username": u.username or u.first_name or f"user_{u.id}",
+            "total_xp": u.total_xp
+        } for u in users
+    ]
+
+@app.get("/")
+def root():
+    return {"status": "ok", "message": "Backend is live!"}
+
+@app.get("/ping-db")
+async def ping_db(session: AsyncSession = Depends(get_async_session)):
+    result = await session.execute(text("SELECT 1"))
+    return {"status": "ok", "result": result.scalar()}
