@@ -28,6 +28,9 @@ _ = User  # чтобы Alembic увидел модель
 # Устанавливаем URL из переменной окружения
 config.set_main_option("sqlalchemy.url", os.getenv("DATABASE_URL"))
 
+# Игнорируем служебную таблицу Alembic
+def include_object(object, name, type_, reflected, compare_to):
+    return name != "alembic_version"
 
 def run_migrations_offline():
     """Run migrations in 'offline' mode."""    
@@ -38,6 +41,7 @@ def run_migrations_offline():
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
         include_schemas=True,
+        include_object=include_object,
         version_table_schema="public",
     )
 
@@ -61,6 +65,7 @@ def run_migrations_online():
                     target_metadata=target_metadata,
                     compare_type=True,
                     include_schemas=True,
+                    include_object=include_object,
                     version_table_schema="public",
                 )
             )
@@ -75,4 +80,5 @@ else:
     run_migrations_online()
 
 print("[ALEMBIC] Using DATABASE_URL:", os.getenv("DATABASE_URL"))
+
 
