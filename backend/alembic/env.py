@@ -70,3 +70,4 @@ if context.is_offline_mode():
 else:
     run_migrations_online()
 
+print("[ALEMBIC] Using DATABASE_URL:", os.getenv("DATABASE_URL"))
