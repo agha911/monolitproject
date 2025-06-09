@@ -8,22 +8,18 @@ from sqlalchemy.ext.asyncio import async_engine_from_config
 from alembic import context
 from dotenv import load_dotenv
 
-# Добавляем путь на уровень выше — к директории, где лежит 'app/'
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-# Загружаем переменные окружения
 load_dotenv()
 
-# Alembic config object
 config = context.config
 fileConfig(config.config_file_name)
 
-# Импортируем Base и модели
 from app.database import Base
 from app.models.user import User
 
 target_metadata = Base.metadata
-_ = User  # чтобы Alembic увидел модель
+_ = User
 
 config.set_main_option("sqlalchemy.url", os.getenv("DATABASE_URL"))
 
@@ -34,8 +30,9 @@ def run_migrations_offline():
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
+        include_schemas=True,
+        version_table_schema="public",
     )
-
     with context.begin_transaction():
         context.run_migrations()
 
@@ -53,6 +50,8 @@ def run_migrations_online():
                     connection=conn,
                     target_metadata=target_metadata,
                     compare_type=True,
+                    include_schemas=True,
+                    version_table_schema="public",
                 )
             )
             await connection.run_sync(lambda _: context.run_migrations())
@@ -65,6 +64,7 @@ else:
     run_migrations_online()
 
 print("[ALEMBIC] Using DATABASE_URL:", os.getenv("DATABASE_URL"))
+
 
 
 
