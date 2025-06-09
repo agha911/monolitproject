@@ -30,7 +30,7 @@ def run_migrations_offline():
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
-        include_schemas=True,
+        include_schemas=False,
         version_table_schema=None,
     )
     with context.begin_transaction():
@@ -50,7 +50,7 @@ def run_migrations_online():
                     connection=conn,
                     target_metadata=target_metadata,
                     compare_type=True,
-                    include_schemas=True,
+                    include_schemas=False,
                     version_table_schema=None,
                 )
             )
