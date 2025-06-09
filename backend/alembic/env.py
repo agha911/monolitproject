@@ -20,37 +20,26 @@ fileConfig(config.config_file_name)
 
 # Импортируем Base и модели
 from app.database import Base
-from app.models.user import User  # важно: прямой импорт класса
+from app.models.user import User
 
 target_metadata = Base.metadata
 _ = User  # чтобы Alembic увидел модель
 
-# Устанавливаем URL из переменной окружения
 config.set_main_option("sqlalchemy.url", os.getenv("DATABASE_URL"))
 
-# Игнорируем служебную таблицу Alembic
-def include_object(object, name, type_, reflected, compare_to):
-    return name != "alembic_version"
-
 def run_migrations_offline():
-    """Run migrations in 'offline' mode."""    
     url = config.get_main_option("sqlalchemy.url")
     context.configure(
         url=url,
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
-        include_schemas=True,
-        include_object=include_object,
-        version_table_schema="public",
     )
 
     with context.begin_transaction():
         context.run_migrations()
 
-
 def run_migrations_online():
-    """Run migrations in 'online' mode."""    
     connectable = async_engine_from_config(
         config.get_section(config.config_ini_section),
         prefix="sqlalchemy.",
@@ -64,15 +53,11 @@ def run_migrations_online():
                     connection=conn,
                     target_metadata=target_metadata,
                     compare_type=True,
-                    include_schemas=True,
-                    include_object=include_object,
-                    version_table_schema="public",
                 )
             )
             await connection.run_sync(lambda _: context.run_migrations())
 
     asyncio.run(do_migrations())
-
 
 if context.is_offline_mode():
     run_migrations_offline()
@@ -80,5 +65,6 @@ else:
     run_migrations_online()
 
 print("[ALEMBIC] Using DATABASE_URL:", os.getenv("DATABASE_URL"))
+
 
 
