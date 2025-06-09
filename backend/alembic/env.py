@@ -1,32 +1,36 @@
+import sys
+import os
 import asyncio
 from logging.config import fileConfig
+
 from sqlalchemy import pool
 from sqlalchemy.ext.asyncio import async_engine_from_config
 from alembic import context
-import os
 from dotenv import load_dotenv
-from app.models.user import User
 
-target_metadata = Base.metadata  # ← этого достаточно, но import должен быть прямой
-_ = User  # просто чтобы избежать "unused import"
+# Добавляем путь на уровень выше — к директории, где лежит 'app/'
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-# Загружаем .env
+# Загружаем переменные окружения
 load_dotenv()
 
-# Alembic Config
+# Alembic config object
 config = context.config
 fileConfig(config.config_file_name)
 
 # Импортируем Base и модели
 from app.database import Base
-from app.models import user  # добавляй сюда другие модели по мере необходимости
+from app.models.user import User  # важно: прямой импорт класса
 
 target_metadata = Base.metadata
+_ = User  # чтобы Python не выкинул как "неиспользуемое", и Alembic увидел модель
 
-# Устанавливаем URL из .env
+# Устанавливаем URL из переменной окружения
 config.set_main_option("sqlalchemy.url", os.getenv("DATABASE_URL"))
 
+
 def run_migrations_offline():
+    """Run migrations in 'offline' mode."""
     url = config.get_main_option("sqlalchemy.url")
     context.configure(
         url=url,
@@ -38,7 +42,9 @@ def run_migrations_offline():
     with context.begin_transaction():
         context.run_migrations()
 
+
 def run_migrations_online():
+    """Run migrations in 'online' mode."""
     connectable = async_engine_from_config(
         config.get_section(config.config_ini_section),
         prefix="sqlalchemy.",
@@ -59,8 +65,8 @@ def run_migrations_online():
     asyncio.run(do_migrations())
 
 
-
 if context.is_offline_mode():
     run_migrations_offline()
 else:
     run_migrations_online()
+
