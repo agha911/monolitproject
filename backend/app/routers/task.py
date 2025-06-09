@@ -4,7 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import datetime
 from app.database import get_async_session
 from app.models.user import User
-from app.crud import get_user, complete_task, daily_checkin
+from app.crud.user import get_user, complete_task, daily_checkin
 
 router = APIRouter()
 
