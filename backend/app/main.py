@@ -5,7 +5,7 @@ from sqlalchemy import text
 from datetime import datetime, timedelta
 import requests
 from typing import Optional
-
+import os
 from app.database import get_async_session
 from app.crud import user as crud_user
 
@@ -15,6 +15,7 @@ DAILY_REWARDS = [10, 15, 20, 25, 30, 40, 50]
 TELEGRAM_BOT_TOKEN = "7804408659:AAEzVuke_9BSluke6J5tmDInjn5jbh3B5tE"
 
 app = FastAPI()
+print("[APP] Using DATABASE_URL:", os.getenv("DATABASE_URL"))
 
 app.add_middleware(
     CORSMiddleware,
