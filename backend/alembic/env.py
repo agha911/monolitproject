@@ -5,6 +5,10 @@ from sqlalchemy.ext.asyncio import async_engine_from_config
 from alembic import context
 import os
 from dotenv import load_dotenv
+from app.models.user import User
+
+target_metadata = Base.metadata  # ← этого достаточно, но import должен быть прямой
+_ = User  # просто чтобы избежать "unused import"
 
 # Загружаем .env
 load_dotenv()
