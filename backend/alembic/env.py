@@ -23,20 +23,22 @@ from app.database import Base
 from app.models.user import User  # важно: прямой импорт класса
 
 target_metadata = Base.metadata
-_ = User  # чтобы Python не выкинул как "неиспользуемое", и Alembic увидел модель
+_ = User  # чтобы Alembic увидел модель
 
 # Устанавливаем URL из переменной окружения
 config.set_main_option("sqlalchemy.url", os.getenv("DATABASE_URL"))
 
 
 def run_migrations_offline():
-    """Run migrations in 'offline' mode."""
+    """Run migrations in 'offline' mode."""    
     url = config.get_main_option("sqlalchemy.url")
     context.configure(
         url=url,
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
+        include_schemas=True,
+        version_table_schema="public",
     )
 
     with context.begin_transaction():
@@ -44,7 +46,7 @@ def run_migrations_offline():
 
 
 def run_migrations_online():
-    """Run migrations in 'online' mode."""
+    """Run migrations in 'online' mode."""    
     connectable = async_engine_from_config(
         config.get_section(config.config_ini_section),
         prefix="sqlalchemy.",
@@ -58,6 +60,8 @@ def run_migrations_online():
                     connection=conn,
                     target_metadata=target_metadata,
                     compare_type=True,
+                    include_schemas=True,
+                    version_table_schema="public",
                 )
             )
             await connection.run_sync(lambda _: context.run_migrations())
@@ -71,3 +75,4 @@ else:
     run_migrations_online()
 
 print("[ALEMBIC] Using DATABASE_URL:", os.getenv("DATABASE_URL"))
+
