@@ -32,12 +32,19 @@ async def create_user(
     return user
 
 async def update_progress(session: AsyncSession, telegram_id: int, xp: int, level: int, energy: int, total_xp: int):
-    await session.execute(
-        update(User)
-        .where(User.telegram_id == telegram_id)
-        .values(xp=xp, level=level, energy=energy, total_xp=total_xp)
-    )
+    user = await get_user(session, telegram_id)
+    if not user:
+        print(f"[ERROR] User with telegram_id={telegram_id} not found")
+        return
+
+    user.xp = xp
+    user.level = level
+    user.energy = energy
+    user.total_xp = total_xp
+
     await session.commit()
+    await session.refresh(user)
+
 
 
 async def update_energy_and_time(session: AsyncSession, telegram_id: int, energy: int, time: datetime):
