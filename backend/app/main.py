@@ -11,6 +11,7 @@ from app.crud import user as crud_user
 from app.routers import task, shop, invites
 from sqlalchemy.future import select
 from app.models.user import User
+from app.utils import parse_telegram_user_id
 
 ENERGY_RECOVERY_INTERVAL_MINUTES = 1
 MAX_ENERGY = 100
@@ -27,12 +28,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-def extract_user_id(data):
-    user_id = str(data.get("user_id") or data.get("id", "")).strip()
-    if not user_id or user_id.lower() == "undefined" or user_id == "123456":
-        raise ValueError("Недопустимый user_id")
-    return int(user_id)
 
 def get_user_info_from_bot_api(user_id):
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/getChat"
@@ -57,8 +52,6 @@ async def register_user(
     inviter_id: Optional[int] = None,
     session: AsyncSession = Depends(get_async_session),
 ):
-    from app.utils import parse_telegram_user_id
-
     telegram_id = parse_telegram_user_id(init_data)
 
     result = await session.execute(select(User).where(User.telegram_id == telegram_id))
@@ -88,9 +81,10 @@ async def register_user(
 
     return {"status": "ok"}
 
-@app.get("/api/game/progress/{user_id}")
-async def get_progress(user_id: int, session: AsyncSession = Depends(get_async_session)):
-    user = await crud_user.get_user(session, user_id)
+@app.post("/api/game/progress")
+async def get_progress(data: dict, session: AsyncSession = Depends(get_async_session)):
+    telegram_id = parse_telegram_user_id(data["init_data"])
+    user = await crud_user.get_user(session, telegram_id)
     if not user:
         return {
             "xp": 0, "level": 1, "energy": 100, "total_xp": 0,
@@ -107,11 +101,11 @@ async def get_progress(user_id: int, session: AsyncSession = Depends(get_async_s
 
         if energy_to_restore > 0 and user.energy < max_energy:
             new_energy = min(max_energy, user.energy + energy_to_restore)
-            await crud_user.update_energy_and_time(session, user.telegram_id, new_energy, now)
+            await crud_user.update_energy_and_time(session, telegram_id, new_energy, now)
             user.energy = new_energy
             user.lastEnergyUpdate = now
     else:
-        await crud_user.update_energy_and_time(session, user.telegram_id, user.energy, now)
+        await crud_user.update_energy_and_time(session, telegram_id, user.energy, now)
 
     return {
         "xp": user.xp,
@@ -125,7 +119,7 @@ async def get_progress(user_id: int, session: AsyncSession = Depends(get_async_s
 @app.post("/api/game/save_progress")
 async def save_progress(data: dict, session: AsyncSession = Depends(get_async_session)):
     try:
-        telegram_id = extract_user_id(data)
+        telegram_id = parse_telegram_user_id(data["init_data"])
         await crud_user.update_progress(
             session=session,
             telegram_id=telegram_id,
@@ -142,7 +136,7 @@ async def save_progress(data: dict, session: AsyncSession = Depends(get_async_se
 @app.post("/api/game/click")
 async def click(data: dict, session: AsyncSession = Depends(get_async_session)):
     try:
-        telegram_id = extract_user_id(data)
+        telegram_id = parse_telegram_user_id(data["init_data"])
         user = await crud_user.get_user(session, telegram_id)
         if user:
             await crud_user.update_progress(
@@ -180,4 +174,5 @@ async def ping_db(session: AsyncSession = Depends(get_async_session)):
 app.include_router(task.router, prefix="/api/task")
 app.include_router(shop.router, prefix="/api/shop")
 app.include_router(invites.router)
+
 
