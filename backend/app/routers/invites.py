@@ -1,27 +1,27 @@
-from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
-from app.database import SessionLocal
+from fastapi import APIRouter, Depends
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
+
+from app.database import get_async_session
 from app.models.user import User
+from app.utils import parse_telegram_user_id  # если нужно
 
 router = APIRouter()
 
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
-
-def current_user(db: Session = Depends(get_db), init_data: str = Depends(...)) -> User:
-    # твоя логика — заменить ... на обработку initData
-    telegram_id = parse_telegram_user_id(init_data)
-    user = db.query(User).filter(User.telegram_id == telegram_id).first()
-    if not user:
-        raise HTTPException(status_code=401, detail="User not found")
-    return user
-
 @router.get("/api/user/invites")
-def get_user_invites(db: Session = Depends(get_db), user: User = Depends(current_user)):
-    invited = user.invited_users[:4]
-    return {"invited": [i < len(invited) for i in range(4)]}
+async def get_user_invites(
+    init_data: str,
+    session: AsyncSession = Depends(get_async_session),
+):
+    telegram_id = parse_telegram_user_id(init_data)
+
+    result = await session.execute(select(User).where(User.telegram_id == telegram_id))
+    user = result.scalar_one_or_none()
+
+    if not user:
+        return {"invited": [False, False, False, False]}
+
+    invited_users = user.invited_users[:4]
+    return {"invited": [i < len(invited_users) for i in range(4)]}
+
 
