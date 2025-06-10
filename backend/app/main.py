@@ -9,6 +9,7 @@ import os
 from app.database import get_async_session
 from app.crud import user as crud_user
 from app.routers import task, shop, invites
+from sqlalchemy.future import select
 
 ENERGY_RECOVERY_INTERVAL_MINUTES = 1
 MAX_ENERGY = 100
@@ -50,44 +51,42 @@ def get_user_info_from_bot_api(user_id):
     return {}
 
 @app.post("/api/user/register")
-async def register_user(data: dict, session: AsyncSession = Depends(get_async_session)):
-    try:
-        user_id = extract_user_id(data)
-        existing = await crud_user.get_user(session, user_id)
-        if existing:
-            print(f"[ALREADY REGISTERED] {user_id}")
-            return {"status": "ok"}
+async def register_user(
+    init_data: str,
+    inviter_id: Optional[int] = None,
+    session: AsyncSession = Depends(get_async_session),
+):
+    from app.utils import parse_telegram_user_id, get_user_info_from_bot_api  # адаптируй под себя
 
-        # Получаем данные пользователя из Telegram Bot API
-        info = get_user_info_from_bot_api(user_id)
+    telegram_id = parse_telegram_user_id(init_data)
 
-        # Поддержка инвайта
-        ref_id = data.get("ref")  # ожидаем что frontend пришлёт { ref: telegram_id }
-        invited_by = None
+    result = await session.execute(select(User).where(User.telegram_id == telegram_id))
+    existing = result.scalar_one_or_none()
+    if existing:
+        raise HTTPException(status_code=400, detail="User already registered")
 
-        if ref_id and str(ref_id).isdigit() and int(ref_id) != user_id:
-            ref_user = await crud_user.get_user(session, int(ref_id))
-            if ref_user:
-                invited_by = ref_user.telegram_id
-                ref_user.invites_count += 1
-                await session.commit()
+    inviter = None
+    if inviter_id:
+        result = await session.execute(select(User).where(User.id == inviter_id))
+        inviter = result.scalar_one_or_none()
+        if inviter:
+            inviter.invites_count = (inviter.invites_count or 0) + 1
+            session.add(inviter)
 
-        # Создаём нового пользователя
-        await crud_user.create_user(
-            session=session,
-            user_id=user_id,
-            username=info.get("username", f"id_{user_id}"),
-            first_name=info.get("first_name", ""),
-            last_name=info.get("last_name", ""),
-            invited_by=invited_by
-        )
+    # Получаем имя, username и т.п. из Bot API
+    info = get_user_info_from_bot_api(telegram_id)
 
-        print(f"[REGISTERED] {user_id} invited_by={invited_by}")
-        return {"status": "ok"}
+    new_user = User(
+        telegram_id=telegram_id,
+        invited_by=inviter.id if inviter else None,
+        username=info.get("username"),
+        first_name=info.get("first_name"),
+        last_name=info.get("last_name"),
+    )
+    session.add(new_user)
+    await session.commit()
 
-    except Exception as e:
-        print(f"[REGISTER ERROR] {e}")
-        return {"status": "error", "message": str(e)}
+    return {"status": "ok"}
 
 
 @app.get("/api/game/progress/{user_id}")
