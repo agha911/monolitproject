@@ -38,10 +38,15 @@ const Clicker: React.FC = () => {
 
     const initializeUser = async () => {
       try {
+        const inviterId = WebApp.initDataUnsafe?.start_param;
+
         await fetch(`${API_BASE_URL}/api/user/register`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ user_id: telegramUser.id }),
+          body: JSON.stringify({
+            init_data: WebApp.initData,
+            inviter_id: inviterId ? parseInt(inviterId) : undefined,
+          }),
         });
 
         const finalRes = await fetch(`${API_BASE_URL}/api/game/progress/${telegramUser.id}`);
