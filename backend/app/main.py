@@ -8,7 +8,7 @@ from typing import Optional
 import os
 from app.database import get_async_session
 from app.crud import user as crud_user
-from app.routers import task, shop
+from app.routers import task, shop, invites
 
 ENERGY_RECOVERY_INTERVAL_MINUTES = 1
 MAX_ENERGY = 100
@@ -181,3 +181,4 @@ async def ping_db(session: AsyncSession = Depends(get_async_session)):
 
 app.include_router(task.router, prefix="/api/task")
 app.include_router(shop.router, prefix="/api/shop")
+app.include_router(invites.router)
