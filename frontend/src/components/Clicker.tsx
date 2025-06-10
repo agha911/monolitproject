@@ -146,47 +146,70 @@ const Clicker: React.FC = () => {
   const energyProgress = Math.min((energy / maxEnergy) * 100, 100);
 
   return (
-    <div className="w-full min-h-screen bg-[#131f2f] text-center flex flex-col items-center justify-start pt-8 px-4 text-[#00f0ff]">
-      <h2 className="text-2xl font-bold mb-2 drop-shadow-md">$GAP: {totalXp}</h2>
-      <h3 className="text-lg font-medium mb-4">{t('level')}: {level} / 100</h3>
+  <div className="w-full min-h-screen bg-[#131f2f] text-center flex flex-col items-center justify-start pt-8 px-4 text-[#00f0ff]">
+    <h2 className="text-2xl font-bold mb-2 drop-shadow-md">$GAP: {totalXp}</h2>
+    <h3 className="text-lg font-medium mb-4">
+      {t('level')}: {level} / 100
+    </h3>
 
-      <div className="my-4 w-full max-w-md">
-        <label className="block mb-1 text-sm text-[#7ee9ff]">
-          {t('xp')}: {xp} / {xpNeeded}
-        </label>
-        <div className="w-full h-4 bg-[#0d273d] rounded overflow-hidden shadow-inner">
-          <div className="h-full bg-gradient-to-r from-[#00f0ff] to-[#00c2ff] transition-all" style={{ width: `${xpProgress}%` }} />
-        </div>
-      </div>
-
-      <div className="my-4 w-full max-w-md">
-        <label className="block mb-1 text-sm text-[#7ee9ff]">
-          {t('energy')}: {energy} / {maxEnergy}
-        </label>
-        <div className="w-full h-4 bg-[#0d273d] rounded overflow-hidden shadow-inner">
-          <div className="h-full bg-gradient-to-r from-[#7af9ff] to-[#00f0ff] transition-all" style={{ width: `${energyProgress}%` }} />
-        </div>
-        {energy < maxEnergy && timeToNextEnergy && (
-          <p className="text-xs mt-1 text-[#89dfff]">
-            +1 {t('energy')} {t('in')} {timeToNextEnergy}
-          </p>
-        )}
-      </div>
-
-      <div className="relative w-64 h-64 mt-6">
-        <div className="absolute inset-0 flex items-center justify-center">
-          <MainButton onHoldTick={handleClick} energy={energy} />
-        </div>
-        <div className="absolute top-0 left-0 w-8 h-8 rounded-full bg-[#00f0ff40] shadow-[0_0_10px_2px_#00f0ff]" />
-        <div className="absolute top-0 right-0 w-8 h-8 rounded-full bg-[#00f0ff40] shadow-[0_0_10px_2px_#00f0ff]" />
-        <div className="absolute bottom-0 left-0 w-8 h-8 rounded-full bg-[#00f0ff40] shadow-[0_0_10px_2px_#00f0ff]" />
-        <div className="absolute bottom-0 right-0 w-8 h-8 rounded-full bg-[#00f0ff40] shadow-[0_0_10px_2px_#00f0ff]" />
+    <div className="my-4 w-full max-w-md">
+      <label className="block mb-1 text-sm text-[#7ee9ff]">
+        {t('xp')}: {xp} / {xpNeeded}
+      </label>
+      <div className="w-full h-4 bg-[#0d273d] rounded overflow-hidden shadow-inner">
+        <div
+          className="h-full bg-gradient-to-r from-[#00f0ff] to-[#00c2ff] transition-all"
+          style={{ width: `${xpProgress}%` }}
+        />
       </div>
     </div>
-  );
-};
 
-export default Clicker;
+    <div className="my-4 w-full max-w-md">
+      <label className="block mb-1 text-sm text-[#7ee9ff]">
+        {t('energy')}: {energy} / {maxEnergy}
+      </label>
+      <div className="w-full h-4 bg-[#0d273d] rounded overflow-hidden shadow-inner">
+        <div
+          className="h-full bg-gradient-to-r from-[#7af9ff] to-[#00f0ff] transition-all"
+          style={{ width: `${energyProgress}%` }}
+        />
+      </div>
+      {energy < maxEnergy && timeToNextEnergy && (
+        <p className="text-xs mt-1 text-[#89dfff]">
+          +1 {t('energy')} {t('in')} {timeToNextEnergy}
+        </p>
+      )}
+    </div>
+
+    <div className="relative w-64 h-64 mt-6">
+      <div className="absolute inset-0 flex items-center justify-center">
+        <MainButton onHoldTick={handleClick} energy={energy} />
+      </div>
+
+      <FriendInviteButton
+        invited={invitedFriends[0]}
+        onClick={() => handleInviteClick(0)}
+        position="top-left"
+      />
+      <FriendInviteButton
+        invited={invitedFriends[1]}
+        onClick={() => handleInviteClick(1)}
+        position="top-right"
+      />
+      <FriendInviteButton
+        invited={invitedFriends[2]}
+        onClick={() => handleInviteClick(2)}
+        position="bottom-left"
+      />
+      <FriendInviteButton
+        invited={invitedFriends[3]}
+        onClick={() => handleInviteClick(3)}
+        position="bottom-right"
+      />
+    </div>
+  </div>
+);
+
 
 
 
