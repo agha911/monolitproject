@@ -4,7 +4,7 @@ from sqlalchemy import select
 
 from app.database import get_async_session
 from app.models.user import User
-from app.utils import parse_telegram_user_id  # если нужно
+
 
 router = APIRouter()
 
