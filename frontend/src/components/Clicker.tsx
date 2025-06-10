@@ -147,7 +147,7 @@ const Clicker: React.FC = () => {
 
   return (
     <div className="w-full min-h-screen bg-[#131f2f] text-center flex flex-col items-center justify-start pt-8 px-4 text-[#00f0ff]">
-      <h2 className="text-2xl font-bold mb-2 drop-shadow-md">💰 $MONO: {totalXp}</h2>
+      <h2 className="text-2xl font-bold mb-2 drop-shadow-md">$GAP: {totalXp}</h2>
       <h3 className="text-lg font-medium mb-4">{t('level')}: {level} / 100</h3>
 
       <div className="my-4 w-full max-w-md">
