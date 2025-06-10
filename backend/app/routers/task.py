@@ -21,21 +21,36 @@ async def complete_task_endpoint(payload: TaskPayload, session: AsyncSession = D
     user = await get_user(session, payload.user_id)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
-    success = await complete_task(session, user, payload.task_id)
+
+    reward = 50  # можно сделать динамически потом
+    success = await complete_task(session, user, payload.task_id, reward)
+
     if not success:
-        raise HTTPException(status_code=400, detail="Task already completed")
-    return {"status": "completed", "task_id": payload.task_id}
+        return {"status": "already_completed"}
+
+    return {
+        "status": "success",
+        "reward": reward,
+        "task_id": payload.task_id
+    }
 
 @router.post("/daily_checkin")
 async def daily_checkin_endpoint(payload: UserIdPayload, session: AsyncSession = Depends(get_async_session)):
     user = await get_user(session, payload.user_id)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
+
     now = datetime.utcnow()
     streak = (user.daily_streak or 0) + 1
     reward = 10 * streak
     updated_user = await daily_checkin(session, user, now, reward, streak)
-    return {"status": "checked_in", "reward": reward, "streak": updated_user.daily_streak}
+
+    return {
+        "status": "success",
+        "reward": reward,
+        "day": updated_user.daily_streak
+    }
+
 
     now = datetime.utcnow()
     streak = (user.daily_streak or 0) + 1
