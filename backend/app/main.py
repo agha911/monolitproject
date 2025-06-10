@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Depends, HTTPException
+from fastapi import FastAPI, Depends, HTTPException, Body
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
@@ -6,13 +6,13 @@ from datetime import datetime, timedelta
 import requests
 from typing import Optional
 import os
+
 from app.database import get_async_session
 from app.crud import user as crud_user
 from app.routers import task, shop, invites
 from sqlalchemy.future import select
 from app.models.user import User
 from app.utils import parse_telegram_user_id
-from fastapi import Body
 
 ENERGY_RECOVERY_INTERVAL_MINUTES = 1
 MAX_ENERGY = 100
@@ -49,10 +49,14 @@ def get_user_info_from_bot_api(user_id):
 
 @app.post("/api/user/register")
 async def register_user(
-    data: dict = Body(...),  # 🔧 получаем init_data из JSON-тела
+    data: dict = Body(...),
     inviter_id: Optional[int] = None,
     session: AsyncSession = Depends(get_async_session),
 ):
+    init_data = data.get("init_data")
+    if not init_data:
+        raise HTTPException(status_code=400, detail="init_data is required")
+
     telegram_id = parse_telegram_user_id(init_data)
 
     result = await session.execute(select(User).where(User.telegram_id == telegram_id))
@@ -83,7 +87,7 @@ async def register_user(
     return {"status": "ok"}
 
 @app.post("/api/game/progress")
-async def get_progress(data: dict, session: AsyncSession = Depends(get_async_session)):
+async def get_progress(data: dict = Body(...), session: AsyncSession = Depends(get_async_session)):
     telegram_id = parse_telegram_user_id(data["init_data"])
     user = await crud_user.get_user(session, telegram_id)
     if not user:
@@ -118,7 +122,7 @@ async def get_progress(data: dict, session: AsyncSession = Depends(get_async_ses
     }
 
 @app.post("/api/game/save_progress")
-async def save_progress(data: dict, session: AsyncSession = Depends(get_async_session)):
+async def save_progress(data: dict = Body(...), session: AsyncSession = Depends(get_async_session)):
     try:
         telegram_id = parse_telegram_user_id(data["init_data"])
         await crud_user.update_progress(
@@ -135,7 +139,7 @@ async def save_progress(data: dict, session: AsyncSession = Depends(get_async_se
         return {"status": "error", "message": str(e)}
 
 @app.post("/api/game/click")
-async def click(data: dict, session: AsyncSession = Depends(get_async_session)):
+async def click(data: dict = Body(...), session: AsyncSession = Depends(get_async_session)):
     try:
         telegram_id = parse_telegram_user_id(data["init_data"])
         user = await crud_user.get_user(session, telegram_id)
@@ -175,5 +179,6 @@ async def ping_db(session: AsyncSession = Depends(get_async_session)):
 app.include_router(task.router, prefix="/api/task")
 app.include_router(shop.router, prefix="/api/shop")
 app.include_router(invites.router)
+
 
 
