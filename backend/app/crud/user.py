@@ -31,18 +31,19 @@ async def create_user(
     await session.refresh(user)
     return user
 
-async def update_progress(session: AsyncSession, user_id: int, xp: int, level: int, energy: int, total_xp: int):
+async def update_progress(session: AsyncSession, telegram_id: int, xp: int, level: int, energy: int, total_xp: int):
     await session.execute(
         update(User)
-        .where(User.id == user_id)
+        .where(User.telegram_id == telegram_id)
         .values(xp=xp, level=level, energy=energy, total_xp=total_xp)
     )
     await session.commit()
 
-async def update_energy_and_time(session: AsyncSession, user_id: int, energy: int, time: datetime):
+
+async def update_energy_and_time(session: AsyncSession, telegram_id: int, energy: int, time: datetime):
     await session.execute(
         update(User)
-        .where(User.id == user_id)
+        .where(User.telegram_id == telegram_id)
         .values(energy=energy, lastEnergyUpdate=time)
     )
     await session.commit()
