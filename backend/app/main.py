@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Depends
+from fastapi import FastAPI, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
@@ -10,11 +10,12 @@ from app.database import get_async_session
 from app.crud import user as crud_user
 from app.routers import task, shop, invites
 from sqlalchemy.future import select
+from app.models.user import User
 
 ENERGY_RECOVERY_INTERVAL_MINUTES = 1
 MAX_ENERGY = 100
 DAILY_REWARDS = [10, 15, 20, 25, 30, 40, 50]
-TELEGRAM_BOT_TOKEN = "7804408659:AAEzVuke_9BSluke6J5tmDInjn5jbh3B5tE"
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN") or ""
 
 app = FastAPI()
 print("[APP] Using DATABASE_URL:", os.getenv("DATABASE_URL"))
@@ -56,7 +57,7 @@ async def register_user(
     inviter_id: Optional[int] = None,
     session: AsyncSession = Depends(get_async_session),
 ):
-    from app.utils import parse_telegram_user_id, get_user_info_from_bot_api  # адаптируй под себя
+    from app.utils import parse_telegram_user_id
 
     telegram_id = parse_telegram_user_id(init_data)
 
@@ -73,7 +74,6 @@ async def register_user(
             inviter.invites_count = (inviter.invites_count or 0) + 1
             session.add(inviter)
 
-    # Получаем имя, username и т.п. из Bot API
     info = get_user_info_from_bot_api(telegram_id)
 
     new_user = User(
@@ -87,7 +87,6 @@ async def register_user(
     await session.commit()
 
     return {"status": "ok"}
-
 
 @app.get("/api/game/progress/{user_id}")
 async def get_progress(user_id: int, session: AsyncSession = Depends(get_async_session)):
@@ -108,11 +107,11 @@ async def get_progress(user_id: int, session: AsyncSession = Depends(get_async_s
 
         if energy_to_restore > 0 and user.energy < max_energy:
             new_energy = min(max_energy, user.energy + energy_to_restore)
-            await crud_user.update_energy_and_time(session, user_id, new_energy, now)
+            await crud_user.update_energy_and_time(session, user.telegram_id, new_energy, now)
             user.energy = new_energy
             user.lastEnergyUpdate = now
     else:
-        await crud_user.update_energy_and_time(session, user_id, user.energy, now)
+        await crud_user.update_energy_and_time(session, user.telegram_id, user.energy, now)
 
     return {
         "xp": user.xp,
@@ -126,16 +125,16 @@ async def get_progress(user_id: int, session: AsyncSession = Depends(get_async_s
 @app.post("/api/game/save_progress")
 async def save_progress(data: dict, session: AsyncSession = Depends(get_async_session)):
     try:
-        user_id = extract_user_id(data)
+        telegram_id = extract_user_id(data)
         await crud_user.update_progress(
             session=session,
-            user_id=user_id,
+            telegram_id=telegram_id,
             xp=data["xp"],
             level=data["level"],
             energy=data["energy"],
             total_xp=data.get("total_xp", 0),
         )
-        print(f"[SAVED] {user_id} → XP: {data['xp']}, LVL: {data['level']}, ENERGY: {data['energy']}")
+        print(f"[SAVED] {telegram_id} → XP: {data['xp']}, LVL: {data['level']}, ENERGY: {data['energy']}")
         return {"status": "saved"}
     except Exception as e:
         return {"status": "error", "message": str(e)}
@@ -143,12 +142,12 @@ async def save_progress(data: dict, session: AsyncSession = Depends(get_async_se
 @app.post("/api/game/click")
 async def click(data: dict, session: AsyncSession = Depends(get_async_session)):
     try:
-        user_id = extract_user_id(data)
-        user = await crud_user.get_user(session, user_id)
+        telegram_id = extract_user_id(data)
+        user = await crud_user.get_user(session, telegram_id)
         if user:
             await crud_user.update_progress(
                 session=session,
-                user_id=user_id,
+                telegram_id=telegram_id,
                 xp=user.xp,
                 level=user.level,
                 energy=user.energy,
@@ -181,3 +180,4 @@ async def ping_db(session: AsyncSession = Depends(get_async_session)):
 app.include_router(task.router, prefix="/api/task")
 app.include_router(shop.router, prefix="/api/shop")
 app.include_router(invites.router)
+
