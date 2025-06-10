@@ -39,7 +39,7 @@ const Friends: React.FC = () => {
               <tr>
                 <th className="px-4 py-2 border border-[#00f0ff20]">#</th>
                 <th className="px-4 py-2 border border-[#00f0ff20]">{t('user')}</th>
-                <th className="px-4 py-2 border border-[#00f0ff20]">$MONO</th>
+                <th className="px-4 py-2 border border-[#00f0ff20]">$GAP</th>
               </tr>
             </thead>
             <tbody>
