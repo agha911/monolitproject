@@ -122,8 +122,9 @@ const Clicker: React.FC = () => {
   const handleInviteClick = (index: number) => {
     if (!telegramUser) return;
     const userId = telegramUser.id;
-    const inviteUrl = `https://t.me/monolit_42_bot?start=${userId}`; // замените на имя вашего бота
-    window.open(inviteUrl, '_blank');
+    const botUsername = 'monolit_42_bot';
+    const shareUrl = `https://t.me/share/url?url=https://t.me/${botUsername}?start=${userId}&text=${encodeURIComponent('Qaqa, Sumqayıta gedirəm, 20 gəpiyin olmaz?')}`;
+    window.open(shareUrl, '_blank');
   };
 
   const handleClick = () => {
@@ -241,6 +242,7 @@ const Clicker: React.FC = () => {
 };
 
 export default Clicker;
+
 
 
 
