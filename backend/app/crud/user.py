@@ -5,9 +5,10 @@ from typing import Optional
 from datetime import datetime
 from app.models.user import User
 from sqlalchemy.orm.attributes import flag_modified
+from sqlalchemy import BigInteger
 
-async def get_user(session: AsyncSession, user_id: int) -> Optional[User]:
-    result = await session.execute(select(User).where(User.id == user_id))
+async def get_user(session: AsyncSession, telegram_id: int):
+    result = await session.execute(select(User).where(User.telegram_id == telegram_id))
     return result.scalar_one_or_none()
 
 async def create_user(
