@@ -49,7 +49,12 @@ const Clicker: React.FC = () => {
           }),
         });
 
-        const finalRes = await fetch(`${API_BASE_URL}/api/game/progress/${telegramUser.id}`);
+        const finalRes = await fetch(`${API_BASE_URL}/api/game/progress`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ init_data: WebApp.initData }),
+        });
+
         const data = await finalRes.json();
         setXp(data.xp);
         setLevel(data.level);
@@ -91,7 +96,11 @@ const Clicker: React.FC = () => {
       if (!telegramUser || energy >= maxEnergy) return;
 
       try {
-        const res = await fetch(`${API_BASE_URL}/api/game/progress/${telegramUser.id}`);
+        const res = await fetch(`${API_BASE_URL}/api/game/progress`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ init_data: WebApp.initData }),
+        });
         const data = await res.json();
         setEnergy(data.energy);
         setLastEnergyUpdate(data.lastEnergyUpdate ? new Date(data.lastEnergyUpdate) : null);
@@ -160,14 +169,14 @@ const Clicker: React.FC = () => {
     fetch(`${API_BASE_URL}/api/game/click`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ user_id: telegramUser.id }),
+      body: JSON.stringify({ init_data: WebApp.initData }),
     });
 
     fetch(`${API_BASE_URL}/api/game/save_progress`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        user_id: telegramUser.id,
+        init_data: WebApp.initData,
         xp: adjustedXp,
         level: newLevel,
         energy: newEnergy,
@@ -247,6 +256,7 @@ const Clicker: React.FC = () => {
 };
 
 export default Clicker;
+
 
 
 
