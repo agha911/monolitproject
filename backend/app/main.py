@@ -17,7 +17,7 @@ from app.utils import parse_telegram_user_id
 ENERGY_RECOVERY_INTERVAL_MINUTES = 1
 MAX_ENERGY = 100
 DAILY_REWARDS = [10, 15, 20, 25, 30, 40, 50]
-TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN") or ""
+TELEGRAM_BOT_TOKEN = "7804408659:AAEzVuke_9BSluke6J5tmDInjn5jbh3B5tE"
 
 app = FastAPI()
 print("[APP] Using DATABASE_URL:", os.getenv("DATABASE_URL"))
