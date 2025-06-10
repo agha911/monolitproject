@@ -4,6 +4,7 @@ from sqlalchemy import update
 from typing import Optional
 from datetime import datetime
 from app.models.user import User
+from sqlalchemy.orm.attributes import flag_modified
 
 async def get_user(session: AsyncSession, user_id: int) -> Optional[User]:
     result = await session.execute(select(User).where(User.id == user_id))
@@ -56,6 +57,7 @@ async def complete_task(session: AsyncSession, user: User, task_id: str, reward:
     if task_id in user.completed_tasks:
         return False
     user.completed_tasks.append(task_id)
+    flag_modified(user, "completed_tasks")
     user.total_xp += reward
     await session.commit()
     await session.refresh(user)
