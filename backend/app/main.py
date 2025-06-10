@@ -8,7 +8,7 @@ from typing import Optional
 import os
 from app.database import get_async_session
 from app.crud import user as crud_user
-from app.routers import task, shop, invites
+from app.routers import task, shop, invite
 from sqlalchemy.future import select
 
 ENERGY_RECOVERY_INTERVAL_MINUTES = 1
