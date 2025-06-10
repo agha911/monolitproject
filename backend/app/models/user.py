@@ -2,10 +2,11 @@ from sqlalchemy import Column, Integer, String, DateTime, JSON, ForeignKey
 from sqlalchemy.orm import relationship
 from app.database import Base  # ✅ используем общую базу
 from datetime import datetime
+from sqlalchemy import BigInteger
 
 class User(Base):
     __tablename__ = "users"
-
+    telegram_id = Column(BigInteger, unique=True, index=True, nullable=False)  
     id = Column(Integer, primary_key=True, index=True)
     username = Column(String, index=True)
     first_name = Column(String)
