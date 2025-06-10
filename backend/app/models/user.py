@@ -19,5 +19,8 @@ class User(Base):
     last_checkin = Column(DateTime, nullable=True)
     daily_streak = Column(Integer, default=0)
     completed_tasks = Column(JSON, default=[])
+    invited_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    invites_count = Column(Integer, default=0)
 
+    inviter = relationship("User", remote_side=[id], backref="invited_users")
 
