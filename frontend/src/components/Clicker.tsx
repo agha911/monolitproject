@@ -34,43 +34,56 @@ const Clicker: React.FC = () => {
   }, []);
 
   useEffect(() => {
-    if (!telegramUser) return;
+  if (!telegramUser) return;
 
-    const initializeUser = async () => {
-      try {
-        await fetch(`${API_BASE_URL}/api/user/register`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ init_data: WebApp.initData }),
-        });
+  const initializeUser = async () => {
+    try {
+      // Регистрация
+      await fetch(`${API_BASE_URL}/api/user/register`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ init_data: WebApp.initData }),
+      });
 
-        const res = await fetch(`${API_BASE_URL}/api/game/progress`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ init_data: WebApp.initData }),
-        });
+      // Прогресс
+      const res = await fetch(`${API_BASE_URL}/api/game/progress`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ init_data: WebApp.initData }),
+      });
 
-        const data = await res.json();
-        setXp(data.xp);
-        setLevel(data.level);
-        setEnergy(data.energy);
-        setTotalXp(data.total_xp ?? data.xp);
-        setLastEnergyUpdate(data.lastEnergyUpdate ? new Date(data.lastEnergyUpdate) : null);
-        setMaxEnergy(data.max_energy ?? 100);
-        setLoading(false);
+      const data = await res.json();
+      setXp(data.xp);
+      setLevel(data.level);
+      setEnergy(data.energy);
+      setTotalXp(data.total_xp ?? data.xp);
+      setLastEnergyUpdate(data.lastEnergyUpdate ? new Date(data.lastEnergyUpdate) : null);
+      setMaxEnergy(data.max_energy ?? 100);
+      setLoading(false);
 
-        const invitesRes = await fetch(`${API_BASE_URL}/api/user/invites?init_data=${encodeURIComponent(WebApp.initData)}`);
-        const invitesData = await invitesRes.json();
-        if (Array.isArray(invitesData.invited)) {
-          setInvitedFriends(invitesData.invited);
-        }
-      } catch (error) {
-        console.error('Ошибка инициализации пользователя:', error);
+      // Приглашения
+      const invitesRes = await fetch(
+        `${API_BASE_URL}/api/user/invites?init_data=${encodeURIComponent(WebApp.initData)}`
+      );
+      const invitesData = await invitesRes.json();
+
+      if (
+        invitesData &&
+        Array.isArray(invitesData.invited) &&
+        invitesData.invited.length === 4
+      ) {
+        setInvitedFriends(invitesData.invited.map(Boolean));
+      } else {
+        setInvitedFriends([false, false, false, false]);
       }
-    };
+    } catch (error) {
+      console.error('Ошибка инициализации пользователя:', error);
+    }
+  };
 
-    initializeUser();
-  }, [telegramUser]);
+  initializeUser();
+}, [telegramUser]);
+
 
   useEffect(() => {
     const interval = setInterval(async () => {
