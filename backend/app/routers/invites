@@ -1,0 +1,23 @@
+from fastapi import APIRouter, Depends
+from sqlalchemy.orm import Session
+
+from app.models.user import User
+from app.dependencies import get_db, current_user  # предполагается, что они есть
+
+router = APIRouter(
+    prefix="/api/user",
+    tags=["invites"],
+)
+
+@router.get("/invites")
+def get_user_invites(
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+):
+    # Получаем список приглашённых пользователей (через relationship)
+    invited = user.invited_users[:4]  # максимум 4 кнопки
+
+    # Преобразуем в список из 4 булевых значений
+    invited_slots = [i < len(invited) for i in range(4)]
+
+    return {"invited": invited_slots}
