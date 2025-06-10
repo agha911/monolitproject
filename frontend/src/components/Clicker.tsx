@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import WebApp from '@twa-dev/sdk';
 import { useTranslation } from 'react-i18next';
 import MainButton from './MainButton';
+import FriendInviteButton from './FriendInviteButton';
 import API_BASE_URL from './config';
 
 const ENERGY_RESTORE_INTERVAL_MS = 1 * 60 * 1000; // 1 минута
@@ -19,8 +20,8 @@ const Clicker: React.FC = () => {
   const [lastEnergyUpdate, setLastEnergyUpdate] = useState<Date | null>(null);
   const [timeToNextEnergy, setTimeToNextEnergy] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [invitedFriends, setInvitedFriends] = useState<boolean[]>([false, false, false, false]);
 
-  // Получаем Telegram user
   useEffect(() => {
     WebApp.ready();
     const user = WebApp.initDataUnsafe?.user;
@@ -32,13 +33,11 @@ const Clicker: React.FC = () => {
     }
   }, []);
 
-  // Регистрация и загрузка прогресса
   useEffect(() => {
     if (!telegramUser) return;
 
     const initializeUser = async () => {
       try {
-        // Просто отправляем user_id — остальное делает backend
         await fetch(`${API_BASE_URL}/api/user/register`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -60,6 +59,26 @@ const Clicker: React.FC = () => {
     };
 
     initializeUser();
+  }, [telegramUser]);
+
+  useEffect(() => {
+    if (!telegramUser) return;
+
+    const loadInvites = async () => {
+      try {
+        const res = await fetch(
+          `${API_BASE_URL}/api/user/invites?init_data=${encodeURIComponent(WebApp.initData)}`
+        );
+        const data = await res.json();
+        if (Array.isArray(data.invited)) {
+          setInvitedFriends(data.invited);
+        }
+      } catch (err) {
+        console.error('Ошибка при загрузке приглашённых друзей:', err);
+      }
+    };
+
+    loadInvites();
   }, [telegramUser]);
 
   useEffect(() => {
@@ -99,6 +118,13 @@ const Clicker: React.FC = () => {
 
     return () => clearInterval(interval);
   }, [lastEnergyUpdate, energy, maxEnergy]);
+
+  const handleInviteClick = (index: number) => {
+    if (!telegramUser) return;
+    const userId = telegramUser.id;
+    const inviteUrl = `https://t.me/YourBotUsername?start=${userId}`; // замените на имя вашего бота
+    window.open(inviteUrl, '_blank');
+  };
 
   const handleClick = () => {
     if (!telegramUser || loading || energy <= 0 || level >= 100) return;
@@ -146,69 +172,73 @@ const Clicker: React.FC = () => {
   const energyProgress = Math.min((energy / maxEnergy) * 100, 100);
 
   return (
-  <div className="w-full min-h-screen bg-[#131f2f] text-center flex flex-col items-center justify-start pt-8 px-4 text-[#00f0ff]">
-    <h2 className="text-2xl font-bold mb-2 drop-shadow-md">$GAP: {totalXp}</h2>
-    <h3 className="text-lg font-medium mb-4">
-      {t('level')}: {level} / 100
-    </h3>
+    <div className="w-full min-h-screen bg-[#131f2f] text-center flex flex-col items-center justify-start pt-8 px-4 text-[#00f0ff]">
+      <h2 className="text-2xl font-bold mb-2 drop-shadow-md">$GAP: {totalXp}</h2>
+      <h3 className="text-lg font-medium mb-4">
+        {t('level')}: {level} / 100
+      </h3>
 
-    <div className="my-4 w-full max-w-md">
-      <label className="block mb-1 text-sm text-[#7ee9ff]">
-        {t('xp')}: {xp} / {xpNeeded}
-      </label>
-      <div className="w-full h-4 bg-[#0d273d] rounded overflow-hidden shadow-inner">
-        <div
-          className="h-full bg-gradient-to-r from-[#00f0ff] to-[#00c2ff] transition-all"
-          style={{ width: `${xpProgress}%` }}
+      <div className="my-4 w-full max-w-md">
+        <label className="block mb-1 text-sm text-[#7ee9ff]">
+          {t('xp')}: {xp} / {xpNeeded}
+        </label>
+        <div className="w-full h-4 bg-[#0d273d] rounded overflow-hidden shadow-inner">
+          <div
+            className="h-full bg-gradient-to-r from-[#00f0ff] to-[#00c2ff] transition-all"
+            style={{ width: `${xpProgress}%` }}
+          />
+        </div>
+      </div>
+
+      <div className="my-4 w-full max-w-md">
+        <label className="block mb-1 text-sm text-[#7ee9ff]">
+          {t('energy')}: {energy} / {maxEnergy}
+        </label>
+        <div className="w-full h-4 bg-[#0d273d] rounded overflow-hidden shadow-inner">
+          <div
+            className="h-full bg-gradient-to-r from-[#7af9ff] to-[#00f0ff] transition-all"
+            style={{ width: `${energyProgress}%` }}
+          />
+        </div>
+        {energy < maxEnergy && timeToNextEnergy && (
+          <p className="text-xs mt-1 text-[#89dfff]">
+            +1 {t('energy')} {t('in')} {timeToNextEnergy}
+          </p>
+        )}
+      </div>
+
+      <div className="relative w-64 h-64 mt-6">
+        <div className="absolute inset-0 flex items-center justify-center">
+          <MainButton onHoldTick={handleClick} energy={energy} />
+        </div>
+
+        <FriendInviteButton
+          invited={invitedFriends[0]}
+          onClick={() => handleInviteClick(0)}
+          position="top-left"
+        />
+        <FriendInviteButton
+          invited={invitedFriends[1]}
+          onClick={() => handleInviteClick(1)}
+          position="top-right"
+        />
+        <FriendInviteButton
+          invited={invitedFriends[2]}
+          onClick={() => handleInviteClick(2)}
+          position="bottom-left"
+        />
+        <FriendInviteButton
+          invited={invitedFriends[3]}
+          onClick={() => handleInviteClick(3)}
+          position="bottom-right"
         />
       </div>
     </div>
+  );
+};
 
-    <div className="my-4 w-full max-w-md">
-      <label className="block mb-1 text-sm text-[#7ee9ff]">
-        {t('energy')}: {energy} / {maxEnergy}
-      </label>
-      <div className="w-full h-4 bg-[#0d273d] rounded overflow-hidden shadow-inner">
-        <div
-          className="h-full bg-gradient-to-r from-[#7af9ff] to-[#00f0ff] transition-all"
-          style={{ width: `${energyProgress}%` }}
-        />
-      </div>
-      {energy < maxEnergy && timeToNextEnergy && (
-        <p className="text-xs mt-1 text-[#89dfff]">
-          +1 {t('energy')} {t('in')} {timeToNextEnergy}
-        </p>
-      )}
-    </div>
+export default Clicker;
 
-    <div className="relative w-64 h-64 mt-6">
-      <div className="absolute inset-0 flex items-center justify-center">
-        <MainButton onHoldTick={handleClick} energy={energy} />
-      </div>
-
-      <FriendInviteButton
-        invited={invitedFriends[0]}
-        onClick={() => handleInviteClick(0)}
-        position="top-left"
-      />
-      <FriendInviteButton
-        invited={invitedFriends[1]}
-        onClick={() => handleInviteClick(1)}
-        position="top-right"
-      />
-      <FriendInviteButton
-        invited={invitedFriends[2]}
-        onClick={() => handleInviteClick(2)}
-        position="bottom-left"
-      />
-      <FriendInviteButton
-        invited={invitedFriends[3]}
-        onClick={() => handleInviteClick(3)}
-        position="bottom-right"
-      />
-    </div>
-  </div>
-);
 
 
 
