@@ -1,23 +1,27 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
-
+from app.database import SessionLocal
 from app.models.user import User
-from app.dependencies import get_db, current_user  # предполагается, что они есть
 
-router = APIRouter(
-    prefix="/api/user",
-    tags=["invites"],
-)
+router = APIRouter()
 
-@router.get("/invites")
-def get_user_invites(
-    db: Session = Depends(get_db),
-    user: User = Depends(current_user),
-):
-    # Получаем список приглашённых пользователей (через relationship)
-    invited = user.invited_users[:4]  # максимум 4 кнопки
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
 
-    # Преобразуем в список из 4 булевых значений
-    invited_slots = [i < len(invited) for i in range(4)]
+def current_user(db: Session = Depends(get_db), init_data: str = Depends(...)) -> User:
+    # твоя логика — заменить ... на обработку initData
+    telegram_id = parse_telegram_user_id(init_data)
+    user = db.query(User).filter(User.telegram_id == telegram_id).first()
+    if not user:
+        raise HTTPException(status_code=401, detail="User not found")
+    return user
 
-    return {"invited": invited_slots}
+@router.get("/api/user/invites")
+def get_user_invites(db: Session = Depends(get_db), user: User = Depends(current_user)):
+    invited = user.invited_users[:4]
+    return {"invited": [i < len(invited) for i in range(4)]}
+
