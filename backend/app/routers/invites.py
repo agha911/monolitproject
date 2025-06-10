@@ -17,9 +17,13 @@ async def get_user_invites(
         decoded = urllib.parse.unquote(init_data)
         parsed = json.loads(decoded) if decoded.startswith('{') else dict(urllib.parse.parse_qsl(decoded))
 
+        user_data = parsed.get("user")
+        if isinstance(user_data, str):
+            user_data = json.loads(user_data)
+
         user_id = (
-            parsed.get("user", {}).get("id")
-            if isinstance(parsed.get("user"), dict)
+            user_data.get("id")
+            if isinstance(user_data, dict)
             else parsed.get("id")
         )
 
@@ -38,7 +42,17 @@ async def get_user_invites(
         return {"invited": [False, False, False, False]}
 
     invited_users = user.invited_users[:4]
-    return {"invited": [i < len(invited_users) for i in range(4)]}
+
+    invited_flags = [
+        bool(invited and invited.telegram_id)
+        for invited in invited_users
+    ]
+
+    # Дополняем до 4 флагов
+    invited_flags += [False] * (4 - len(invited_flags))
+
+    return {"invited": invited_flags}
+
 
 
 
