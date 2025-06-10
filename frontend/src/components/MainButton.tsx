@@ -19,7 +19,7 @@ const MainButton: React.FC<MainButtonProps> = ({ onHoldTick, energy }) => {
       `}
     >
       <img
-        src="/logo.png"
+        src="./logo.png"
         alt="Main Coin"
         className="w-full h-full object-cover"
       />
