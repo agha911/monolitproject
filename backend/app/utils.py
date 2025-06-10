@@ -1,13 +1,11 @@
-import base64
 import json
 from urllib.parse import parse_qs
 
 def parse_telegram_user_id(init_data: str) -> int:
     try:
         parsed = parse_qs(init_data)
-        user_encoded = parsed.get("user", [None])[0]
-        if user_encoded:
-            user_json = base64.b64decode(user_encoded + '===').decode("utf-8")
+        user_json = parsed.get("user", [None])[0]
+        if user_json:
             user = json.loads(user_json)
             return int(user["id"])
     except Exception as e:
