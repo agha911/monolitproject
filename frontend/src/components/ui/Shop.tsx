@@ -49,7 +49,7 @@ const Shop: React.FC = () => {
 
       <div className="bg-[#0e1a2b] border border-[#00f0ff40] p-4 rounded-xl shadow-[0_0_10px_#00f0ff30] text-center space-y-2 max-w-md mx-auto">
         <h3 className="text-lg font-semibold text-[#7ee9ff]">🔋 {t('energy_upgrade')}</h3>
-        <p className="text-sm text-[#a0f6ff]">50 $MONO</p>
+        <p className="text-sm text-[#a0f6ff]">50 $GAP</p>
 
         <button
           onClick={handleBuyEnergyUpgrade}
