@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import WebApp from '@twa-dev/sdk';
 import { useTranslation } from 'react-i18next';
 import MainButton from './MainButton';
+import FriendInviteButton from './FriendInviteButton';
 import API_BASE_URL from './config';
 
 const ENERGY_RESTORE_INTERVAL_MS = 1 * 60 * 1000; // 1 минута
@@ -57,6 +58,12 @@ const Clicker: React.FC = () => {
         setLastEnergyUpdate(data.lastEnergyUpdate ? new Date(data.lastEnergyUpdate) : null);
         setMaxEnergy(data.max_energy ?? 100);
         setLoading(false);
+
+        const invitesRes = await fetch(`${API_BASE_URL}/api/user/invites?init_data=${encodeURIComponent(WebApp.initData)}`);
+        const invitesData = await invitesRes.json();
+        if (Array.isArray(invitesData.invited)) {
+          setInvitedFriends(invitesData.invited);
+        }
       } catch (error) {
         console.error('Ошибка инициализации пользователя:', error);
       }
@@ -110,10 +117,13 @@ const Clicker: React.FC = () => {
   const handleClick = () => {
     if (!telegramUser || loading || energy <= 0 || level >= 100) return;
 
-    const newXp = xp + 1;
-    const newTotalXp = totalXp + 1;
+    const bonus = invitedFriends.filter(Boolean).length;
+    const gain = 1 + bonus;
+
+    const newXp = xp + gain;
+    const newTotalXp = totalXp + gain;
     const newEnergy = energy - 1;
-    const newScore = score + 1;
+    const newScore = score + gain;
     let newLevel = level;
     let adjustedXp = newXp;
 
@@ -148,6 +158,15 @@ const Clicker: React.FC = () => {
     });
   };
 
+  const handleInviteClick = (index: number) => {
+    if (invitedFriends[index]) return;
+
+    const url = `https://t.me/share/url?url=https://t.me/monolit_42_bot?start=${telegramUser?.id}&text=${encodeURIComponent(
+      'Qaqa, Sumqayıta gedirəm, 20 gəpiyin olmaz?'
+    )}`;
+    window.open(url, '_blank');
+  };
+
   const xpNeeded = level * 100;
   const xpProgress = Math.min((xp / xpNeeded) * 100, 100);
   const energyProgress = Math.min((energy / maxEnergy) * 100, 100);
@@ -155,31 +174,19 @@ const Clicker: React.FC = () => {
   return (
     <div className="w-full min-h-screen bg-[#131f2f] text-center flex flex-col items-center justify-start pt-8 px-4 text-[#00f0ff]">
       <h2 className="text-2xl font-bold mb-2 drop-shadow-md">$GAP: {totalXp}</h2>
-      <h3 className="text-lg font-medium mb-4">
-        {t('level')}: {level} / 100
-      </h3>
+      <h3 className="text-lg font-medium mb-4">{t('level')}: {level} / 100</h3>
 
       <div className="my-4 w-full max-w-md">
-        <label className="block mb-1 text-sm text-[#7ee9ff]">
-          {t('xp')}: {xp} / {xpNeeded}
-        </label>
+        <label className="block mb-1 text-sm text-[#7ee9ff]">{t('xp')}: {xp} / {xpNeeded}</label>
         <div className="w-full h-4 bg-[#0d273d] rounded overflow-hidden shadow-inner">
-          <div
-            className="h-full bg-gradient-to-r from-[#00f0ff] to-[#00c2ff] transition-all"
-            style={{ width: `${xpProgress}%` }}
-          />
+          <div className="h-full bg-gradient-to-r from-[#00f0ff] to-[#00c2ff] transition-all" style={{ width: `${xpProgress}%` }} />
         </div>
       </div>
 
       <div className="my-4 w-full max-w-md">
-        <label className="block mb-1 text-sm text-[#7ee9ff]">
-          {t('energy')}: {energy} / {maxEnergy}
-        </label>
+        <label className="block mb-1 text-sm text-[#7ee9ff]">{t('energy')}: {energy} / {maxEnergy}</label>
         <div className="w-full h-4 bg-[#0d273d] rounded overflow-hidden shadow-inner">
-          <div
-            className="h-full bg-gradient-to-r from-[#7af9ff] to-[#00f0ff] transition-all"
-            style={{ width: `${energyProgress}%` }}
-          />
+          <div className="h-full bg-gradient-to-r from-[#7af9ff] to-[#00f0ff] transition-all" style={{ width: `${energyProgress}%` }} />
         </div>
         {energy < maxEnergy && timeToNextEnergy && (
           <p className="text-xs mt-1 text-[#89dfff]">
@@ -192,27 +199,10 @@ const Clicker: React.FC = () => {
         <div className="absolute inset-0 flex items-center justify-center">
           <MainButton onHoldTick={handleClick} energy={energy} />
         </div>
-
-        <FriendInviteButton
-          invited={invitedFriends[0]}
-          onClick={() => handleInviteClick(0)}
-          position="top-left"
-        />
-        <FriendInviteButton
-          invited={invitedFriends[1]}
-          onClick={() => handleInviteClick(1)}
-          position="top-right"
-        />
-        <FriendInviteButton
-          invited={invitedFriends[2]}
-          onClick={() => handleInviteClick(2)}
-          position="bottom-left"
-        />
-        <FriendInviteButton
-          invited={invitedFriends[3]}
-          onClick={() => handleInviteClick(3)}
-          position="bottom-right"
-        />
+        <FriendInviteButton invited={invitedFriends[0]} onClick={() => handleInviteClick(0)} position="top-left" />
+        <FriendInviteButton invited={invitedFriends[1]} onClick={() => handleInviteClick(1)} position="top-right" />
+        <FriendInviteButton invited={invitedFriends[2]} onClick={() => handleInviteClick(2)} position="bottom-left" />
+        <FriendInviteButton invited={invitedFriends[3]} onClick={() => handleInviteClick(3)} position="bottom-right" />
       </div>
     </div>
   );
