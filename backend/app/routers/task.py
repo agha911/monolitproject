@@ -41,6 +41,16 @@ async def daily_checkin_endpoint(payload: UserIdPayload, session: AsyncSession =
         raise HTTPException(status_code=404, detail="User not found")
 
     now = datetime.utcnow()
+
+    # ✅ Проверка: уже отмечался сегодня?
+    if user.last_checkin and user.last_checkin.date() == now.date():
+        return {
+            "status": "already_checked_in",
+            "reward": 10 * (user.daily_streak or 0),
+            "day": user.daily_streak or 0
+        }
+
+    # 🧮 Начисляем
     streak = (user.daily_streak or 0) + 1
     reward = 10 * streak
     updated_user = await daily_checkin(session, user, now, reward, streak)
@@ -50,6 +60,7 @@ async def daily_checkin_endpoint(payload: UserIdPayload, session: AsyncSession =
         "reward": reward,
         "day": updated_user.daily_streak
     }
+
 
 
     now = datetime.utcnow()
