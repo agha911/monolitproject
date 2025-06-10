@@ -2,7 +2,6 @@ import React, { useState, useEffect } from 'react';
 import WebApp from '@twa-dev/sdk';
 import { useTranslation } from 'react-i18next';
 import MainButton from './MainButton';
-import FriendInviteButton from './FriendInviteButton';
 import API_BASE_URL from './config';
 
 const ENERGY_RESTORE_INTERVAL_MS = 1 * 60 * 1000; // 1 минута
@@ -38,24 +37,19 @@ const Clicker: React.FC = () => {
 
     const initializeUser = async () => {
       try {
-        const inviterId = WebApp.initDataUnsafe?.start_param;
-
         await fetch(`${API_BASE_URL}/api/user/register`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            init_data: WebApp.initData,
-            inviter_id: inviterId ? parseInt(inviterId) : undefined,
-          }),
-        });
-
-        const finalRes = await fetch(`${API_BASE_URL}/api/game/progress`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ init_data: WebApp.initData }),
         });
 
-        const data = await finalRes.json();
+        const res = await fetch(`${API_BASE_URL}/api/game/progress`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ init_data: WebApp.initData }),
+        });
+
+        const data = await res.json();
         setXp(data.xp);
         setLevel(data.level);
         setEnergy(data.energy);
@@ -69,26 +63,6 @@ const Clicker: React.FC = () => {
     };
 
     initializeUser();
-  }, [telegramUser]);
-
-  useEffect(() => {
-    if (!telegramUser) return;
-
-    const loadInvites = async () => {
-      try {
-        const res = await fetch(
-          `${API_BASE_URL}/api/user/invites?init_data=${encodeURIComponent(WebApp.initData)}`
-        );
-        const data = await res.json();
-        if (Array.isArray(data.invited)) {
-          setInvitedFriends(data.invited);
-        }
-      } catch (err) {
-        console.error('Ошибка при загрузке приглашённых друзей:', err);
-      }
-    };
-
-    loadInvites();
   }, [telegramUser]);
 
   useEffect(() => {
@@ -133,22 +107,11 @@ const Clicker: React.FC = () => {
     return () => clearInterval(interval);
   }, [lastEnergyUpdate, energy, maxEnergy]);
 
-  const handleInviteClick = (index: number) => {
-    if (!telegramUser) return;
-    const userId = telegramUser.id;
-    const botUsername = 'monolit_42_bot';
-    const shareUrl = `https://t.me/share/url?url=https://t.me/${botUsername}?start=${userId}&text=${encodeURIComponent('Qaqa, Sumqayıta gedirəm, 20 gəpiyin olmaz?')}`;
-    window.open(shareUrl, '_blank');
-  };
-
   const handleClick = () => {
     if (!telegramUser || loading || energy <= 0 || level >= 100) return;
 
-    const inviteBonus = invitedFriends.filter(Boolean).length;
-    const gain = 1 + inviteBonus;
-
-    const newXp = xp + gain;
-    const newTotalXp = totalXp + gain;
+    const newXp = xp + 1;
+    const newTotalXp = totalXp + 1;
     const newEnergy = energy - 1;
     const newScore = score + 1;
     let newLevel = level;
