@@ -58,20 +58,37 @@ async def register_user(data: dict, session: AsyncSession = Depends(get_async_se
             print(f"[ALREADY REGISTERED] {user_id}")
             return {"status": "ok"}
 
+        # Получаем данные пользователя из Telegram Bot API
         info = get_user_info_from_bot_api(user_id)
+
+        # Поддержка инвайта
+        ref_id = data.get("ref")  # ожидаем что frontend пришлёт { ref: telegram_id }
+        invited_by = None
+
+        if ref_id and str(ref_id).isdigit() and int(ref_id) != user_id:
+            ref_user = await crud_user.get_user(session, int(ref_id))
+            if ref_user:
+                invited_by = ref_user.telegram_id
+                ref_user.invites_count += 1
+                await session.commit()
+
+        # Создаём нового пользователя
         await crud_user.create_user(
             session=session,
             user_id=user_id,
             username=info.get("username", f"id_{user_id}"),
             first_name=info.get("first_name", ""),
-            last_name=info.get("last_name", "")
+            last_name=info.get("last_name", ""),
+            invited_by=invited_by
         )
-        print(f"[REGISTERED] {user_id}")
+
+        print(f"[REGISTERED] {user_id} invited_by={invited_by}")
         return {"status": "ok"}
 
     except Exception as e:
         print(f"[REGISTER ERROR] {e}")
         return {"status": "error", "message": str(e)}
+
 
 @app.get("/api/game/progress/{user_id}")
 async def get_progress(user_id: int, session: AsyncSession = Depends(get_async_session)):
