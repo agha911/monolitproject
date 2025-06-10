@@ -10,12 +10,20 @@ async def get_user(session: AsyncSession, user_id: int) -> Optional[User]:
     result = await session.execute(select(User).where(User.id == user_id))
     return result.scalar_one_or_none()
 
-async def create_user(session: AsyncSession, user_id: int, username: str, first_name: str, last_name: str) -> User:
+async def create_user(
+    session: AsyncSession,
+    user_id: int,
+    username: str,
+    first_name: str,
+    last_name: str,
+    invited_by: Optional[int] = None
+) -> User:
     user = User(
         id=user_id,
         username=username,
         first_name=first_name,
-        last_name=last_name
+        last_name=last_name,
+        invited_by=invited_by
     )
     session.add(user)
     await session.commit()
