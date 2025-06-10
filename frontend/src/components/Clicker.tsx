@@ -129,8 +129,11 @@ const Clicker: React.FC = () => {
   const handleClick = () => {
     if (!telegramUser || loading || energy <= 0 || level >= 100) return;
 
-    const newXp = xp + 1;
-    const newTotalXp = totalXp + 1;
+    const inviteBonus = invitedFriends.filter(Boolean).length;
+    const gain = 1 + inviteBonus;
+
+    const newXp = xp + gain;
+    const newTotalXp = totalXp + gain;
     const newEnergy = energy - 1;
     const newScore = score + 1;
     let newLevel = level;
