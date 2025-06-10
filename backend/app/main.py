@@ -12,6 +12,7 @@ from app.routers import task, shop, invites
 from sqlalchemy.future import select
 from app.models.user import User
 from app.utils import parse_telegram_user_id
+from fastapi import Body
 
 ENERGY_RECOVERY_INTERVAL_MINUTES = 1
 MAX_ENERGY = 100
@@ -48,7 +49,7 @@ def get_user_info_from_bot_api(user_id):
 
 @app.post("/api/user/register")
 async def register_user(
-    init_data: str,
+    init_data: str = Body(...),  # 🔧 получаем init_data из JSON-тела
     inviter_id: Optional[int] = None,
     session: AsyncSession = Depends(get_async_session),
 ):
