@@ -49,7 +49,7 @@ def get_user_info_from_bot_api(user_id):
 
 @app.post("/api/user/register")
 async def register_user(
-    data: dict = Body(...),
+    data: dict = Body(...),  # получаем init_data из тела запроса
     inviter_id: Optional[int] = None,
     session: AsyncSession = Depends(get_async_session),
 ):
@@ -85,6 +85,7 @@ async def register_user(
     await session.commit()
 
     return {"status": "ok"}
+
 
 @app.post("/api/game/progress")
 async def get_progress(data: dict = Body(...), session: AsyncSession = Depends(get_async_session)):
