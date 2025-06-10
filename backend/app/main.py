@@ -49,7 +49,7 @@ def get_user_info_from_bot_api(user_id):
 
 @app.post("/api/user/register")
 async def register_user(
-    init_data: str = Body(...),  # 🔧 получаем init_data из JSON-тела
+    data: dict = Body(...),  # 🔧 получаем init_data из JSON-тела
     inviter_id: Optional[int] = None,
     session: AsyncSession = Depends(get_async_session),
 ):
