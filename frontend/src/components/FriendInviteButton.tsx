@@ -1,7 +1,7 @@
 import React from 'react';
 
 interface FriendInviteButtonProps {
-  invited: boolean; // true — приглашён, false — ещё нет
+  invited: boolean;
   onClick: () => void;
   position: 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right';
 }
@@ -18,15 +18,16 @@ const FriendInviteButton: React.FC<FriendInviteButtonProps> = ({
   onClick,
   position,
 }) => {
+  const baseStyle = 'absolute w-12 h-12 rounded-full flex items-center justify-center text-xl font-bold transition-all duration-300';
+  const glow = invited
+    ? 'bg-red-600 shadow-[0_0_12px_3px_#ff3b3b] text-white cursor-default'
+    : 'bg-[#00ff9d] shadow-[0_0_12px_3px_#00ffcc] text-black hover:scale-110';
+
   return (
     <button
       onClick={onClick}
       disabled={invited}
-      className={`
-        absolute w-12 h-12 rounded-full transition-all duration-300
-        ${positionStyles[position]}
-        ${invited ? 'bg-green-400 cursor-default' : 'bg-yellow-400 hover:scale-105'}
-      `}
+      className={`${baseStyle} ${positionStyles[position]} ${glow}`}
       title={invited ? 'Friend invited!' : 'Invite a friend'}
     >
       {invited ? '✓' : '+'}
@@ -35,3 +36,4 @@ const FriendInviteButton: React.FC<FriendInviteButtonProps> = ({
 };
 
 export default FriendInviteButton;
+
