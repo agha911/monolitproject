@@ -1,4 +1,5 @@
 from sqlalchemy import Column, Integer, String, DateTime, JSON
+from sqlalchemy.orm import relationship
 from app.database import Base  # ✅ используем общую базу
 from datetime import datetime
 
