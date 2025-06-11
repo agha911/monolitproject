@@ -1,11 +1,11 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from sqlalchemy.orm import selectinload
 from app.database import get_async_session
 from app.models.user import User
 import urllib.parse
 import json
-from sqlalchemy.orm import selectinload
 
 router = APIRouter()
 
@@ -36,11 +36,13 @@ async def get_user_invites(
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Invalid init_data: {str(e)}")
 
+    # 🧠 Не забываем выбрать связь через selectinload
     result = await session.execute(
         select(User)
         .options(selectinload(User.invited_users))
         .where(User.telegram_id == telegram_id)
     )
+    user = result.scalar_one_or_none()
 
     if not user:
         return {"count": 0}
