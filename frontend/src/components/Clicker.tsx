@@ -32,37 +32,44 @@ const Clicker: React.FC = () => {
   }, []);
 
   useEffect(() => {
-    if (!telegramUser) return;
+  if (!telegramUser) return;
 
-    const initializeUser = async () => {
-      try {
-        await fetch(`${API_BASE_URL}/api/user/register`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ init_data: WebApp.initData }),
-        });
+  const initializeUser = async () => {
+    try {
+      const inviterId = WebApp.initDataUnsafe?.start_param;
 
-        const res = await fetch(`${API_BASE_URL}/api/game/progress`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ init_data: WebApp.initData }),
-        });
+      const registerUrl = inviterId
+        ? `${API_BASE_URL}/api/user/register?inviter_id=${inviterId}`
+        : `${API_BASE_URL}/api/user/register`;
 
-        const data = await res.json();
-        setXp(data.xp);
-        setLevel(data.level);
-        setEnergy(data.energy);
-        setTotalXp(data.total_xp ?? data.xp);
-        setLastEnergyUpdate(data.lastEnergyUpdate ? new Date(data.lastEnergyUpdate) : null);
-        setMaxEnergy(data.max_energy ?? 100);
-        setLoading(false);
-      } catch (error) {
-        console.error('Ошибка инициализации пользователя:', error);
-      }
-    };
+      await fetch(registerUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ init_data: WebApp.initData }),
+      });
 
-    initializeUser();
-  }, [telegramUser]);
+      const res = await fetch(`${API_BASE_URL}/api/game/progress`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ init_data: WebApp.initData }),
+      });
+
+      const data = await res.json();
+      setXp(data.xp);
+      setLevel(data.level);
+      setEnergy(data.energy);
+      setTotalXp(data.total_xp ?? data.xp);
+      setLastEnergyUpdate(data.lastEnergyUpdate ? new Date(data.lastEnergyUpdate) : null);
+      setMaxEnergy(data.max_energy ?? 100);
+      setLoading(false);
+    } catch (error) {
+      console.error('Ошибка инициализации пользователя:', error);
+    }
+  };
+
+  initializeUser();
+}, [telegramUser]);
+
 
   useEffect(() => {
     const interval = setInterval(async () => {
