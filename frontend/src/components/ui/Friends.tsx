@@ -41,7 +41,7 @@ const Friends: React.FC = () => {
 
   const handleInvite = () => {
     const link = `https://t.me/monolit_42_bot?start=${WebApp.initDataUnsafe.user?.id}`;
-    const message = encodeURIComponent("Qaqa, Sumqayıta gedirəm, 20 gəpiyin olmaz?");
+    const message = encodeURIComponent("Qaqa, Sumqayıta gedirəm, 20 $GAPiyin olmaz?");
     window.open(`https://t.me/share/url?url=${link}&text=${message}`, '_blank');
   };
 
