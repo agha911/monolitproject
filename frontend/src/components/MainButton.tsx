@@ -22,7 +22,7 @@ const MainButton: React.FC<MainButtonProps> = ({ onClick, energy }) => {
       className={`w-72 h-72 rounded-full overflow-hidden border-4 transition-transform duration-150 ease-out
         ${
           energy > 0
-            ? `border-[#00f0ff] bg-[#0e1a2b] ${clicked ? 'scale-90' : 'scale-100'}`
+            ? `${clicked ? 'scale-90' : 'scale-100'} border-[#00f0ff] bg-[#0e1a2b] shadow-[0_0_25px_#00f0ff]`
             : 'border-gray-500 bg-[#1a1a1a] opacity-50 cursor-not-allowed'
         }
       `}
@@ -37,6 +37,7 @@ const MainButton: React.FC<MainButtonProps> = ({ onClick, energy }) => {
 };
 
 export default MainButton;
+
 
 
 
