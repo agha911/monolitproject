@@ -10,7 +10,7 @@ const MainButton: React.FC<MainButtonProps> = ({ onHoldTick, energy }) => {
     <button
       onClick={onHoldTick}
       disabled={energy <= 0}
-      className={`w-32 h-32 rounded-full overflow-hidden border-4 transition-all duration-200
+      className={`w-64 h-64 rounded-full overflow-hidden border-4 transition-all duration-200
         ${
           energy > 0
             ? 'border-[#00f0ff] bg-[#0e1a2b] hover:scale-105 animate-pulseNeon'
