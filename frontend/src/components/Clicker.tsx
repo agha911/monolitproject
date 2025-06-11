@@ -174,7 +174,7 @@ const Clicker: React.FC = () => {
         )}
       </div>
 
-      <div className="relative w-100 h-100 mt-6">
+      <div className="relative w-80 h-80 mt-6">
         <div className="absolute inset-0 flex items-center justify-center">
           <MainButton onHoldTick={handleClick} energy={energy} />
         </div>
