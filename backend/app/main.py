@@ -1,7 +1,7 @@
 from fastapi import FastAPI, Depends, HTTPException, Body
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import text
+from sqlalchemy import text, func
 from datetime import datetime, timedelta
 import requests
 from typing import Optional
@@ -176,6 +176,12 @@ def root():
 async def ping_db(session: AsyncSession = Depends(get_async_session)):
     result = await session.execute(text("SELECT 1"))
     return {"status": "ok", "result": result.scalar()}
+
+@app.get("/api/user/count")
+async def count_users(session: AsyncSession = Depends(get_async_session)):
+    result = await session.execute(select(func.count(User.id)))
+    count = result.scalar()
+    return {"count": count}
 
 app.include_router(task.router, prefix="/api/task")
 app.include_router(shop.router, prefix="/api/shop")
