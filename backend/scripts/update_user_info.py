@@ -7,8 +7,8 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 import asyncio
 import requests
 from sqlalchemy.ext.asyncio import AsyncSession
-from backend.app.database import async_session_maker
-from backend.app.models.user import User
+from app.database import async_session_maker
+from app.models.user import User
 from sqlalchemy import select
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN") or ""
