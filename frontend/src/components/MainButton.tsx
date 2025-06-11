@@ -19,10 +19,10 @@ const MainButton: React.FC<MainButtonProps> = ({ onClick, energy }) => {
     <button
       onClick={handleClick}
       disabled={energy <= 0}
-      className={`w-96 h-96 rounded-full overflow-hidden border-4 transition-all duration-150 ease-out
+      className={`w-72 h-72 rounded-full overflow-hidden border-4 transition-transform duration-150 ease-out
         ${
           energy > 0
-            ? `border-[#00f0ff] bg-[#0e1a2b] hover:scale-105 ${clicked ? 'scale-110' : ''}`
+            ? `border-[#00f0ff] bg-[#0e1a2b] ${clicked ? 'scale-90' : 'scale-100'}`
             : 'border-gray-500 bg-[#1a1a1a] opacity-50 cursor-not-allowed'
         }
       `}
@@ -37,6 +37,7 @@ const MainButton: React.FC<MainButtonProps> = ({ onClick, energy }) => {
 };
 
 export default MainButton;
+
 
 
 
