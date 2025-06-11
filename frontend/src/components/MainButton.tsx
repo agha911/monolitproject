@@ -19,7 +19,7 @@ const MainButton: React.FC<MainButtonProps> = ({ onClick, energy }) => {
     <button
       onClick={handleClick}
       disabled={energy <= 0}
-      className={`w-86 h-86 rounded-full overflow-hidden border-4 transition-all duration-150 ease-out
+      className={`w-96 h-96 rounded-full overflow-hidden border-4 transition-all duration-150 ease-out
         ${
           energy > 0
             ? `border-[#00f0ff] bg-[#0e1a2b] hover:scale-105 ${clicked ? 'scale-110' : ''}`
