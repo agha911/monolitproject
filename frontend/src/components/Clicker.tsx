@@ -2,10 +2,9 @@ import React, { useState, useEffect } from 'react';
 import WebApp from '@twa-dev/sdk';
 import { useTranslation } from 'react-i18next';
 import MainButton from './MainButton';
-import FriendInviteButton from './FriendInviteButton';
 import API_BASE_URL from './config';
 
-const ENERGY_RESTORE_INTERVAL_MS = 1 * 60 * 1000; // 1 минута
+const ENERGY_RESTORE_INTERVAL_MS = 1 * 60 * 1000;
 
 const Clicker: React.FC = () => {
   const { t } = useTranslation();
@@ -20,7 +19,6 @@ const Clicker: React.FC = () => {
   const [lastEnergyUpdate, setLastEnergyUpdate] = useState<Date | null>(null);
   const [timeToNextEnergy, setTimeToNextEnergy] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [invitedFriends, setInvitedFriends] = useState<boolean[]>([false, false, false, false]);
 
   useEffect(() => {
     WebApp.ready();
@@ -28,62 +26,43 @@ const Clicker: React.FC = () => {
     if (user) {
       setTelegramUser(user);
     } else {
-      alert("Ошибка: не удалось получить данные Telegram-пользователя.");
-      console.warn("initDataUnsafe.user = ", WebApp.initDataUnsafe);
+      alert('Ошибка: не удалось получить данные Telegram-пользователя.');
+      console.warn('initDataUnsafe.user = ', WebApp.initDataUnsafe);
     }
   }, []);
 
   useEffect(() => {
-  if (!telegramUser) return;
+    if (!telegramUser) return;
 
-  const initializeUser = async () => {
-    try {
-      // Регистрация
-      await fetch(`${API_BASE_URL}/api/user/register`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ init_data: WebApp.initData }),
-      });
+    const initializeUser = async () => {
+      try {
+        await fetch(`${API_BASE_URL}/api/user/register`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ init_data: WebApp.initData }),
+        });
 
-      // Прогресс
-      const res = await fetch(`${API_BASE_URL}/api/game/progress`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ init_data: WebApp.initData }),
-      });
+        const res = await fetch(`${API_BASE_URL}/api/game/progress`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ init_data: WebApp.initData }),
+        });
 
-      const data = await res.json();
-      setXp(data.xp);
-      setLevel(data.level);
-      setEnergy(data.energy);
-      setTotalXp(data.total_xp ?? data.xp);
-      setLastEnergyUpdate(data.lastEnergyUpdate ? new Date(data.lastEnergyUpdate) : null);
-      setMaxEnergy(data.max_energy ?? 100);
-      setLoading(false);
-
-      // Приглашения
-      const invitesRes = await fetch(
-        `${API_BASE_URL}/api/user/invites?init_data=${encodeURIComponent(WebApp.initData)}`
-      );
-      const invitesData = await invitesRes.json();
-
-      if (
-        invitesData &&
-        Array.isArray(invitesData.invited) &&
-        invitesData.invited.length === 4
-      ) {
-        setInvitedFriends(invitesData.invited.map(Boolean));
-      } else {
-        setInvitedFriends([false, false, false, false]);
+        const data = await res.json();
+        setXp(data.xp);
+        setLevel(data.level);
+        setEnergy(data.energy);
+        setTotalXp(data.total_xp ?? data.xp);
+        setLastEnergyUpdate(data.lastEnergyUpdate ? new Date(data.lastEnergyUpdate) : null);
+        setMaxEnergy(data.max_energy ?? 100);
+        setLoading(false);
+      } catch (error) {
+        console.error('Ошибка инициализации пользователя:', error);
       }
-    } catch (error) {
-      console.error('Ошибка инициализации пользователя:', error);
-    }
-  };
+    };
 
-  initializeUser();
-}, [telegramUser]);
-
+    initializeUser();
+  }, [telegramUser]);
 
   useEffect(() => {
     const interval = setInterval(async () => {
@@ -117,10 +96,8 @@ const Clicker: React.FC = () => {
       const now = new Date();
       const msPassed = now.getTime() - lastEnergyUpdate.getTime();
       const msToNext = ENERGY_RESTORE_INTERVAL_MS - (msPassed % ENERGY_RESTORE_INTERVAL_MS);
-
       const minutes = Math.floor(msToNext / 60000);
       const seconds = Math.floor((msToNext % 60000) / 1000);
-
       setTimeToNextEnergy(`${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`);
     }, 1000);
 
@@ -130,9 +107,7 @@ const Clicker: React.FC = () => {
   const handleClick = () => {
     if (!telegramUser || loading || energy <= 0 || level >= 100) return;
 
-    const bonus = invitedFriends.filter(Boolean).length;
-    const gain = 1 + bonus;
-
+    const gain = 1;
     const newXp = xp + gain;
     const newTotalXp = totalXp + gain;
     const newEnergy = energy - 1;
@@ -171,15 +146,6 @@ const Clicker: React.FC = () => {
     });
   };
 
-  const handleInviteClick = (index: number) => {
-    if (invitedFriends[index]) return;
-
-    const url = `https://t.me/share/url?url=https://t.me/monolit_42_bot?start=${telegramUser?.id}&text=${encodeURIComponent(
-      'Qaqa, Sumqayıta gedirəm, 20 gəpiyin olmaz?'
-    )}`;
-    window.open(url, '_blank');
-  };
-
   const xpNeeded = level * 100;
   const xpProgress = Math.min((xp / xpNeeded) * 100, 100);
   const energyProgress = Math.min((energy / maxEnergy) * 100, 100);
@@ -208,20 +174,17 @@ const Clicker: React.FC = () => {
         )}
       </div>
 
-      <div className="relative w-64 h-64 mt-6">
+      <div className="relative w-80 h-80 mt-6">
         <div className="absolute inset-0 flex items-center justify-center">
           <MainButton onHoldTick={handleClick} energy={energy} />
         </div>
-        <FriendInviteButton invited={invitedFriends[0]} onClick={() => handleInviteClick(0)} position="top-left" />
-        <FriendInviteButton invited={invitedFriends[1]} onClick={() => handleInviteClick(1)} position="top-right" />
-        <FriendInviteButton invited={invitedFriends[2]} onClick={() => handleInviteClick(2)} position="bottom-left" />
-        <FriendInviteButton invited={invitedFriends[3]} onClick={() => handleInviteClick(3)} position="bottom-right" />
       </div>
     </div>
   );
 };
 
 export default Clicker;
+
 
 
 
