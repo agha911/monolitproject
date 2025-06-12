@@ -13,6 +13,7 @@ from app.routers import task, shop, invites
 from sqlalchemy.future import select
 from app.models.user import User
 from app.utils import parse_telegram_user_id
+from app.core.referral_cache import referral_cache
 
 
 
@@ -49,13 +50,19 @@ def get_user_info_from_bot_api(user_id):
         print(f"[GETCHAT ERROR] {e}")
     return {}
 
-
+@bot.message_handler(commands=["start"])
+def handle_start(message: types.Message):
+    parts = message.text.split()
+    if len(parts) > 1 and parts[1].isdigit():
+        inviter_id = int(parts[1])
+        user_id = message.from_user.id
+        referral_cache[user_id] = inviter_id
+        print(f"[REF-CACHE] {user_id} invited by {inviter_id}")
 
 
 @app.post("/api/user/register")
 async def register_user(
     data: dict = Body(...),
-    inviter_id: Optional[int] = None,
     session: AsyncSession = Depends(get_async_session),
 ):
     init_data = data.get("init_data")
@@ -67,11 +74,13 @@ async def register_user(
     result = await session.execute(select(User).where(User.telegram_id == telegram_id))
     user = result.scalar_one_or_none()
 
-    # Получаем информацию из Bot API
     info = get_user_info_from_bot_api(telegram_id)
 
+    # Получаем inviter_id из кэша, если есть
+    inviter_id = referral_cache.get(telegram_id)
+    inviter = None
+
     if user:
-        # ✅ Если уже есть пользователь и нет invited_by — можно установить
         if inviter_id and user.invited_by is None:
             inviter_result = await session.execute(select(User).where(User.id == inviter_id))
             inviter = inviter_result.scalar_one_or_none()
@@ -83,8 +92,6 @@ async def register_user(
                 await session.commit()
         return {"status": "already_registered"}
 
-    # 🆕 Новый пользователь
-    inviter = None
     if inviter_id:
         inviter_result = await session.execute(select(User).where(User.id == inviter_id))
         inviter = inviter_result.scalar_one_or_none()
