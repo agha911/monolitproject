@@ -66,25 +66,26 @@ async def register_user(
     info = get_user_info_from_bot_api(telegram_id)
 
     if user:
+        # ✅ Если уже есть пользователь и нет invited_by — можно установить
         if inviter_id and user.invited_by is None:
             inviter_result = await session.execute(select(User).where(User.id == inviter_id))
             inviter = inviter_result.scalar_one_or_none()
             if inviter:
                 user.invited_by = inviter.id
-                inviter.invites_count = (inviter.invites_count or 0) + 1
-                inviter.total_xp = (inviter.total_xp or 0) + 200
+                inviter.invites_count += 1
+                inviter.total_xp += 200
                 session.add_all([user, inviter])
                 await session.commit()
         return {"status": "already_registered"}
 
-    # Если пользователь новый
+    # 🆕 Новый пользователь
     inviter = None
     if inviter_id:
-        result = await session.execute(select(User).where(User.id == inviter_id))
-        inviter = result.scalar_one_or_none()
+        inviter_result = await session.execute(select(User).where(User.id == inviter_id))
+        inviter = inviter_result.scalar_one_or_none()
         if inviter:
-            inviter.invites_count = (inviter.invites_count or 0) + 1
-            inviter.total_xp = (inviter.total_xp or 0) + 200
+            inviter.invites_count += 1
+            inviter.total_xp += 200
             session.add(inviter)
 
     new_user = User(
@@ -98,6 +99,7 @@ async def register_user(
     await session.commit()
 
     return {"status": "ok"}
+
 
 
 
