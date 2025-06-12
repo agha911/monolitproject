@@ -15,6 +15,7 @@ from app.models.user import User
 from app.utils import parse_telegram_user_id
 from app.core.referral_cache import referral_cache
 from telebot import TeleBot, types
+import threading
 
 
 
@@ -219,5 +220,11 @@ app.include_router(task.router, prefix="/api/task")
 app.include_router(shop.router, prefix="/api/shop")
 app.include_router(invites.router)
 
+def run_bot():
+    print("[BOT] Polling started...")
+    bot.infinity_polling()
+
+# Запускаем бота в отдельном потоке, чтобы не блокировать FastAPI
+threading.Thread(target=run_bot, daemon=True).start()
 
 
