@@ -49,7 +49,7 @@ def get_user_info_from_bot_api(user_id):
 
 @app.post("/api/user/register")
 async def register_user(
-    data: dict = Body(...),  # получаем init_data из тела запроса
+    data: dict = Body(...),
     inviter_id: Optional[int] = None,
     session: AsyncSession = Depends(get_async_session),
 ):
@@ -60,33 +60,47 @@ async def register_user(
     telegram_id = parse_telegram_user_id(init_data)
 
     result = await session.execute(select(User).where(User.telegram_id == telegram_id))
-    existing = result.scalar_one_or_none()
-    if existing:
+    user = result.scalar_one_or_none()
+
+    if user:
+        # 🔁 Пользователь уже есть: проверяем, можно ли применить рефералку
+        if inviter_id and user.invited_by is None:
+            inviter_result = await session.execute(select(User).where(User.id == inviter_id))
+            inviter = inviter_result.scalar_one_or_none()
+            if inviter:
+                user.invited_by = inviter.id
+                inviter.invites_count = (inviter.invites_count or 0) + 1
+                inviter.total_xp = (inviter.total_xp or 0) + 200
+                session.add_all([user, inviter])
+                await session.commit()
+                return {"status": "referral_applied"}
         return {"status": "already_registered"}
 
+    # 🆕 Регистрация нового пользователя
     inviter = None
     if inviter_id:
-        print(f"[referral] User {telegram_id} зарегистрирован по пригласительной ссылке от {inviter.telegram_id}")
-        result = await session.execute(select(User).where(User.id == inviter_id))
-        inviter = result.scalar_one_or_none()
-        if inviter:
-            inviter.invites_count = (inviter.invites_count or 0) + 1
-            inviter.total_xp = (inviter.total_xp or 0) + 200
-            session.add(inviter)
+        inviter_result = await session.execute(select(User).where(User.id == inviter_id))
+        inviter = inviter_result.scalar_one_or_none()
 
     info = get_user_info_from_bot_api(telegram_id)
 
     new_user = User(
         telegram_id=telegram_id,
-        invited_by=inviter.id if inviter else None,
+        invited_by=inviter.id if inviter else None,  # явно задаём None
         username=info.get("username"),
         first_name=info.get("first_name"),
         last_name=info.get("last_name"),
     )
+
+    if inviter:
+        inviter.invites_count = (inviter.invites_count or 0) + 1
+        inviter.total_xp = (inviter.total_xp or 0) + 200
+        session.add(inviter)
+
     session.add(new_user)
     await session.commit()
-
     return {"status": "ok"}
+
 
 
 
