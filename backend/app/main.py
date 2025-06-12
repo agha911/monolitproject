@@ -13,8 +13,8 @@ from app.routers import task, shop, invites
 from sqlalchemy.future import select
 from app.models.user import User
 from app.utils import parse_telegram_user_id
-from telebot import TeleBot, types
-import redis
+
+
 
 ENERGY_RECOVERY_INTERVAL_MINUTES = 1
 MAX_ENERGY = 100
@@ -49,13 +49,7 @@ def get_user_info_from_bot_api(user_id):
         print(f"[GETCHAT ERROR] {e}")
     return {}
 
-@bot.message_handler(commands=["start"])
-async def handle_start(message: types.Message):
-    user_id = message.from_user.id
-    parts = message.text.split()
-    if len(parts) > 1 and parts[1].isdigit():
-        inviter_id = int(parts[1])
-        redis.setex(f"ref:{user_id}", 3600, inviter_id)
+
 
 
 @app.post("/api/user/register")
