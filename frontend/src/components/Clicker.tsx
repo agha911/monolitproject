@@ -32,43 +32,45 @@ const Clicker: React.FC = () => {
   }, []);
 
   useEffect(() => {
-  if (!telegramUser) return;
+    if (!telegramUser) return;
 
-  const initializeUser = async () => {
-    try {
-      const inviterId = WebApp.initDataUnsafe?.start_param;
+    const initializeUser = async () => {
+      try {
+        const inviterIdRaw = WebApp.initDataUnsafe?.start_param;
+        const inviterId = inviterIdRaw && /^\d+$/.test(inviterIdRaw) ? parseInt(inviterIdRaw, 10) : undefined;
 
-      const registerUrl = inviterId
-        ? `${API_BASE_URL}/api/user/register?inviter_id=${inviterId}`
-        : `${API_BASE_URL}/api/user/register`;
+        const registerUrl = inviterId
+          ? `${API_BASE_URL}/api/user/register?inviter_id=${inviterId}`
+          : `${API_BASE_URL}/api/user/register`;
 
-      await fetch(registerUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ init_data: WebApp.initData }),
-      });
+        await fetch(registerUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ init_data: WebApp.initDataUnsafe }),
+        });
 
-      const res = await fetch(`${API_BASE_URL}/api/game/progress`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ init_data: WebApp.initData }),
-      });
+        const res = await fetch(`${API_BASE_URL}/api/game/progress`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ init_data: WebApp.initDataUnsafe }),
+        });
 
-      const data = await res.json();
-      setXp(data.xp);
-      setLevel(data.level);
-      setEnergy(data.energy);
-      setTotalXp(data.total_xp ?? data.xp);
-      setLastEnergyUpdate(data.lastEnergyUpdate ? new Date(data.lastEnergyUpdate) : null);
-      setMaxEnergy(data.max_energy ?? 100);
-      setLoading(false);
-    } catch (error) {
-      console.error('Ошибка инициализации пользователя:', error);
-    }
-  };
+        const data = await res.json();
+        setXp(data.xp);
+        setLevel(data.level);
+        setEnergy(data.energy);
+        setTotalXp(data.total_xp ?? data.xp);
+        setLastEnergyUpdate(data.lastEnergyUpdate ? new Date(data.lastEnergyUpdate) : null);
+        setMaxEnergy(data.max_energy ?? 100);
+        setLoading(false);
+      } catch (error) {
+        console.error('Ошибка инициализации пользователя:', error);
+      }
+    };
 
-  initializeUser();
-}, [telegramUser]);
+    initializeUser();
+  }, [telegramUser]);
+
 
 
   useEffect(() => {
