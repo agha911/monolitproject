@@ -36,12 +36,7 @@ const Clicker: React.FC = () => {
 
     const initializeUser = async () => {
       try {
-        const inviterIdRaw = WebApp.initDataUnsafe?.start_param;
-        const inviterId = inviterIdRaw && /^\d+$/.test(inviterIdRaw) ? parseInt(inviterIdRaw, 10) : undefined;
-
-        const registerUrl = inviterId
-          ? `${API_BASE_URL}/api/user/register?inviter_id=${inviterId}`
-          : `${API_BASE_URL}/api/user/register`;
+        const registerUrl = `${API_BASE_URL}/api/user/register`;
 
         await fetch(registerUrl, {
           method: 'POST',
