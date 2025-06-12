@@ -56,10 +56,10 @@ def get_user_info_from_bot_api(user_id):
 def handle_start(message: types.Message):
     parts = message.text.split()
     if len(parts) > 1 and parts[1].isdigit():
-        inviter_id = int(parts[1])
-        user_id = message.from_user.id
-        referral_cache[user_id] = inviter_id
-        print(f"[REF-CACHE] {user_id} invited by {inviter_id}")
+        inviter_telegram_id = int(parts[1])  # 🔄 используем inviter_telegram_id сразу
+        user_telegram_id = message.from_user.id
+        referral_cache[user_telegram_id] = inviter_telegram_id
+        print(f"[REF-CACHE] {user_telegram_id} invited by {inviter_telegram_id}")
 
 
 @app.post("/api/user/register")
@@ -84,7 +84,7 @@ async def register_user(
 
     if user:
         if inviter_id and user.invited_by is None:
-            inviter_result = await session.execute(select(User).where(User.id == inviter_id))
+            inviter_result = await session.execute(select(User).where(User.telegram_id == inviter_id))
             inviter = inviter_result.scalar_one_or_none()
             if inviter:
                 user.invited_by = inviter.id
@@ -95,7 +95,7 @@ async def register_user(
         return {"status": "already_registered"}
 
     if inviter_id:
-        inviter_result = await session.execute(select(User).where(User.id == inviter_id))
+        inviter_result = await session.execute(select(User).where(User.telegram_id == inviter_id))
         inviter = inviter_result.scalar_one_or_none()
         if inviter:
             inviter.invites_count += 1
