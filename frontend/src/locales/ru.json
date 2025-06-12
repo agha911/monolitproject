@@ -10,7 +10,7 @@
   "error": "Произошла ошибка",
   "checkin_get": "Забрать награду",
   "checkin_already": "Уже забрано сегодня",
-  "energy_upgrade": "Энергия +100",
+  "energy_upgrade": "Максимальная энергия +100",
   "buy": "Купить",
   "shop_success": "Лимит энергии увеличен до {{value}}",
   "shop_error": "Недостаточно $GAP",
