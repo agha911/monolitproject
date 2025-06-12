@@ -62,8 +62,10 @@ async def register_user(
     result = await session.execute(select(User).where(User.telegram_id == telegram_id))
     user = result.scalar_one_or_none()
 
+    # Получаем информацию из Bot API
+    info = get_user_info_from_bot_api(telegram_id)
+
     if user:
-        # 🔁 Пользователь уже есть: проверяем, можно ли применить рефералку
         if inviter_id and user.invited_by is None:
             inviter_result = await session.execute(select(User).where(User.id == inviter_id))
             inviter = inviter_result.scalar_one_or_none()
@@ -73,33 +75,30 @@ async def register_user(
                 inviter.total_xp = (inviter.total_xp or 0) + 200
                 session.add_all([user, inviter])
                 await session.commit()
-                return {"status": "referral_applied"}
         return {"status": "already_registered"}
 
-    # 🆕 Регистрация нового пользователя
+    # Если пользователь новый
     inviter = None
     if inviter_id:
-        inviter_result = await session.execute(select(User).where(User.id == inviter_id))
-        inviter = inviter_result.scalar_one_or_none()
-
-    info = get_user_info_from_bot_api(telegram_id)
+        result = await session.execute(select(User).where(User.id == inviter_id))
+        inviter = result.scalar_one_or_none()
+        if inviter:
+            inviter.invites_count = (inviter.invites_count or 0) + 1
+            inviter.total_xp = (inviter.total_xp or 0) + 200
+            session.add(inviter)
 
     new_user = User(
         telegram_id=telegram_id,
-        invited_by=inviter.id if inviter else None,  # явно задаём None
+        invited_by=inviter.id if inviter else None,
         username=info.get("username"),
         first_name=info.get("first_name"),
         last_name=info.get("last_name"),
     )
-
-    if inviter:
-        inviter.invites_count = (inviter.invites_count or 0) + 1
-        inviter.total_xp = (inviter.total_xp or 0) + 200
-        session.add(inviter)
-
     session.add(new_user)
     await session.commit()
+
     return {"status": "ok"}
+
 
 
 
