@@ -70,6 +70,7 @@ async def register_user(
         inviter = result.scalar_one_or_none()
         if inviter:
             inviter.invites_count = (inviter.invites_count or 0) + 1
+            inviter.total_xp = (inviter.total_xp or 0) + 200
             session.add(inviter)
 
     info = get_user_info_from_bot_api(telegram_id)
@@ -85,6 +86,7 @@ async def register_user(
     await session.commit()
 
     return {"status": "ok"}
+
 
 
 @app.post("/api/game/progress")
