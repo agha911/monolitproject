@@ -62,7 +62,7 @@ async def register_user(
     result = await session.execute(select(User).where(User.telegram_id == telegram_id))
     existing = result.scalar_one_or_none()
     if existing:
-        raise HTTPException(status_code=400, detail="User already registered")
+        return {"status": "already_registered"}
 
     inviter = None
     if inviter_id:
