@@ -12,14 +12,15 @@ const MainButton: React.FC<MainButtonProps> = ({ onClick, energy }) => {
     if (energy <= 0) return;
     setClicked(true);
     onClick();
-    setTimeout(() => setClicked(false), 150);
+    setTimeout(() => setClicked(false), 250); // чуть длиннее для мягкости
   };
 
   return (
     <button
       onClick={handleClick}
       disabled={energy <= 0}
-      className={`w-72 h-72 rounded-full overflow-hidden border-4 transition-transform duration-150 ease-out
+      className={`w-72 h-72 rounded-full overflow-hidden border-4 transition-transform duration-300 ease-in-out
+        will-change-transform
         ${
           energy > 0
             ? `${clicked ? 'scale-90' : 'scale-100'} border-[#00f0ff] bg-[#0e1a2b] shadow-[0_0_25px_#00f0ff]`
@@ -37,6 +38,7 @@ const MainButton: React.FC<MainButtonProps> = ({ onClick, energy }) => {
 };
 
 export default MainButton;
+
 
 
 
