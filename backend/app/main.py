@@ -66,6 +66,7 @@ async def register_user(
 
     inviter = None
     if inviter_id:
+        print(f"[referral] User {telegram_id} зарегистрирован по пригласительной ссылке от {inviter.telegram_id}")
         result = await session.execute(select(User).where(User.id == inviter_id))
         inviter = result.scalar_one_or_none()
         if inviter:
