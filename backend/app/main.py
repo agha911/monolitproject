@@ -14,6 +14,7 @@ from sqlalchemy.future import select
 from app.models.user import User
 from app.utils import parse_telegram_user_id
 from app.core.referral_cache import referral_cache
+from telebot import TeleBot, types
 
 
 
@@ -24,6 +25,7 @@ TELEGRAM_BOT_TOKEN = "7804408659:AAEzVuke_9BSluke6J5tmDInjn5jbh3B5tE"
 
 app = FastAPI()
 print("[APP] Using DATABASE_URL:", os.getenv("DATABASE_URL"))
+bot = TeleBot(TELEGRAM_BOT_TOKEN)
 
 app.add_middleware(
     CORSMiddleware,
