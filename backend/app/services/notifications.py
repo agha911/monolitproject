@@ -4,7 +4,7 @@ import httpx
 from datetime import datetime, time, timezone, timedelta
 from app.config import TELEGRAM_BOT_TOKEN
 
-TELEGRAM_API = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}"
+
 
 # Временные рамки для уведомлений (UTC+4)
 def is_within_notify_hours() -> bool:
