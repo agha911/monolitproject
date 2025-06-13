@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Depends, HTTPException, Body
+=from fastapi import FastAPI, Depends, HTTPException, Body
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text, func
@@ -27,7 +27,7 @@ DAILY_REWARDS = [10, 20, 30, 40, 50, 60, 70]
 
 app = FastAPI()
 print("[APP] Using DATABASE_URL:", os.getenv("DATABASE_URL"))
-bot = TeleBot(TELEGRAM_BOT_TOKEN)
+
 
 app.add_middleware(
     CORSMiddleware,
