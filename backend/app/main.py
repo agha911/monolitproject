@@ -18,7 +18,7 @@ from app.core.referral_cache import referral_cache
 from telebot import TeleBot, types
 import threading
 from bot_instance import bot
-from backend.services.notifications import background_notifier
+from services.notifications import background_notifier
 
 
 
