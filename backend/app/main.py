@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 import requests
 from typing import Optional
 import os
+import sys
 
 from app.database import get_async_session
 from app.crud import user as crud_user
@@ -28,7 +29,7 @@ DAILY_REWARDS = [10, 20, 30, 40, 50, 60, 70]
 
 app = FastAPI()
 print("[APP] Using DATABASE_URL:", os.getenv("DATABASE_URL"))
-
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
 app.add_middleware(
