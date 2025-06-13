@@ -16,10 +16,8 @@ from sqlalchemy.future import select
 from app.models.user import User
 from app.utils import parse_telegram_user_id
 from app.core.referral_cache import referral_cache
-from telebot import types
+from telebot import TeleBot, types
 import threading
-from bot_instance import bot
-
 from app.config import TELEGRAM_BOT_TOKEN
 
 
@@ -32,7 +30,7 @@ DAILY_REWARDS = [10, 20, 30, 40, 50, 60, 70]
 app = FastAPI()
 print("[APP] Using DATABASE_URL:", os.getenv("DATABASE_URL"))
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
+bot = TeleBot(TELEGRAM_BOT_TOKEN)
 
 app.add_middleware(
     CORSMiddleware,
