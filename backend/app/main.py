@@ -19,7 +19,7 @@ from app.core.referral_cache import referral_cache
 from telebot import types
 import threading
 from bot_instance import bot
-from app.services.notifications import background_notifier
+
 from app.config import TELEGRAM_BOT_TOKEN
 
 
