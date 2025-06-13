@@ -222,13 +222,7 @@ async def count_users(session: AsyncSession = Depends(get_async_session)):
     count = result.scalar()
     return {"count": count}
 
-@app.on_event("startup")
-async def start_background_tasks():
-    asyncio.create_task(background_notifier())
-    
-app.include_router(task.router, prefix="/api/task")
-app.include_router(shop.router, prefix="/api/shop")
-app.include_router(invites.router)
+
 
 def run_bot():
     print("[BOT] Polling started...")
