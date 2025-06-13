@@ -2,7 +2,7 @@
 
 import httpx
 from datetime import datetime, time, timezone, timedelta
-from config import TELEGRAM_BOT_TOKEN
+from app.config import TELEGRAM_BOT_TOKEN
 
 TELEGRAM_API = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}"
 
