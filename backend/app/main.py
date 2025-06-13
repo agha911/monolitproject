@@ -7,6 +7,7 @@ import requests
 from typing import Optional
 import os
 import sys
+import asyncio
 
 from app.database import get_async_session
 from app.crud import user as crud_user
