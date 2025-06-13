@@ -17,6 +17,7 @@ from app.core.referral_cache import referral_cache
 from telebot import TeleBot, types
 import threading
 from bot_instance import bot
+from backend.services.notifications import background_notifier
 
 
 
@@ -218,6 +219,10 @@ async def count_users(session: AsyncSession = Depends(get_async_session)):
     count = result.scalar()
     return {"count": count}
 
+@app.on_event("startup")
+async def start_background_tasks():
+    asyncio.create_task(background_notifier())
+    
 app.include_router(task.router, prefix="/api/task")
 app.include_router(shop.router, prefix="/api/shop")
 app.include_router(invites.router)
