@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, DateTime, JSON, ForeignKey
+from sqlalchemy import Column, Integer, String, DateTime, JSON, ForeignKey, Boolean
 from sqlalchemy.orm import relationship
 from app.database import Base  # ✅ используем общую базу
 from datetime import datetime
@@ -23,6 +23,6 @@ class User(Base):
     completed_tasks = Column(JSON, default=[])
     invited_by = Column(Integer, ForeignKey("users.id"), nullable=True)
     invites_count = Column(Integer, default=0)
-
     inviter = relationship("User", remote_side=[id], backref="invited_users")
+    energy_notified = Column(Boolean, default=False)
 
