@@ -25,5 +25,10 @@
   "no_data": "Məlumat yoxdur",
   "claiming": "Qəbul olunur...",
   "purchased": "Alındı"
-  "invite_friends": "Dəvət göndər"
+  "title_friends": "Dostlar",
+  "invited_friends": "Dəvət olunanlar",
+  "invite_friends": "Dostunu dəvət et",
+  "reward": "Mükafat",
+  "total_users": "Ümumi istifadəçilər",
+  "user": "İstifadəçi"
 }
