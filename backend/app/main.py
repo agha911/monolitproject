@@ -15,7 +15,7 @@ from app.utils import parse_telegram_user_id
 from app.core.referral_cache import referral_cache
 from telebot import TeleBot, types
 import threading
-from config import TELEGRAM_BOT_TOKEN
+from app.config import TELEGRAM_BOT_TOKEN
 
 
 
