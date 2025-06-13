@@ -25,4 +25,10 @@
   "no_data": "No data",
   "claiming": "Claiming...",
   "purchased": "Purchased"
+  "title_friends": "Friends",
+  "invited_friends": "Invited Friends",
+  "invite_friends": "Invite Friends",
+  "reward": "Reward",
+  "total_users": "Total Users",
+  "user": "User"
 }
