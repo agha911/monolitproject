@@ -89,7 +89,7 @@ const Tasks: React.FC = () => {
       <div className="bg-[#0e1a2b] border border-[#00f0ff40] p-4 rounded-xl shadow-[0_0_10px_#00f0ff20] space-y-2 text-center">
         <h3 className="text-lg font-semibold text-[#7ee9ff]">{t('subscribe_instagram')}</h3>
         <a
-          href="https://instagram.com/afandiyev_4.2"
+          href="https://www.instagram.com/gap_pick"
           target="_blank"
           rel="noreferrer"
           className="text-[#00f0ff] underline"
