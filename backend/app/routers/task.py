@@ -7,7 +7,7 @@ from app.database import get_async_session
 from app.models.user import User
 from app.crud.user import get_user, complete_task, daily_checkin
 
-router = APIRouter()
+router = APIRouter(prefix="/api/task")
 
 # 🔧 Модели запроса
 class UserIdPayload(BaseModel):
