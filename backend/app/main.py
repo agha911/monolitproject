@@ -228,6 +228,6 @@ def run_bot():
     bot.infinity_polling()
 
 # Запускаем бота в отдельном потоке, чтобы не блокировать FastAPI
-#threading.Thread(target=run_bot, daemon=True).start()
+threading.Thread(target=run_bot, daemon=True).start()
 
 
