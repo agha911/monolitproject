@@ -218,6 +218,10 @@ async def count_users(session: AsyncSession = Depends(get_async_session)):
     return {"count": count}
 
 
+app.include_router(task.router)
+app.include_router(shop.router)
+app.include_router(invites.router)
+
 
 def run_bot():
     print("[BOT] Polling started...")
