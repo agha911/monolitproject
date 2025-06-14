@@ -6,7 +6,7 @@ from app.database import get_async_session
 from app.models.user import User
 from app.crud.user import get_user, buy_max_energy
 
-router = APIRouter()
+router = APIRouter(prefix="/api/shop")
 
 # 🔧 Модель запроса
 class UserIdPayload(BaseModel):
