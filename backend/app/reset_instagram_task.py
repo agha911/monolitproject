@@ -1,7 +1,7 @@
 import asyncio
 from sqlalchemy import select
-from app.database import async_session_maker
-from app.models.user import User
+from database import async_session_maker
+from models.user import User
 
 async def reset_instagram_task():
     async with async_session_maker() as session:
