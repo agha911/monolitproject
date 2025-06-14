@@ -96,7 +96,7 @@ const Tasks: React.FC = () => {
         >
           @gap_pick
         </a>
-        <p className="text-sm text-[#a0f6ff]">{t('reward_received', { amount: 50 })}</p>
+        <p className="text-sm text-[#a0f6ff]">{t('reward_received', { amount: 1000 })}</p>
 
         <button
           onClick={handleComplete}
