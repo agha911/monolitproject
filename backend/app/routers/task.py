@@ -22,7 +22,7 @@ async def complete_task_endpoint(payload: TaskPayload, session: AsyncSession = D
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
-    reward = 50  # можно сделать динамически потом
+    reward = 1000  # можно сделать динамически потом
     success = await complete_task(session, user, payload.task_id, reward)
 
     if not success:
