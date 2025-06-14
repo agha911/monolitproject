@@ -5,7 +5,7 @@
   "daily_checkin": "Ежедневный чек-ин",
   "subscribe_instagram": "Подпишись на наш Instagram",
   "i_subscribed": "Я подписался",
-  "reward_received": "Вы получили {{amount}} $GAP!",
+  "reward_received": "Вы получите {{amount}} $GAP!",
   "already_done": "Уже выполнено",
   "error": "Произошла ошибка",
   "checkin_get": "Забрать награду",
