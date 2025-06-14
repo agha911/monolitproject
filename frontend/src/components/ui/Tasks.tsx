@@ -94,7 +94,7 @@ const Tasks: React.FC = () => {
           rel="noreferrer"
           className="text-[#00f0ff] underline"
         >
-          @afandiyev_4.2
+          @gap_pick
         </a>
         <p className="text-sm text-[#a0f6ff]">{t('reward_received', { amount: 50 })}</p>
 
