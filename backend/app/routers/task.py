@@ -3,9 +3,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import datetime
 from pydantic import BaseModel
 
-from app.database import get_async_session
-from app.models.user import User
-from app.crud.user import get_user, complete_task, daily_checkin
+from database import get_async_session
+from models.user import User
+from crud.user import get_user, complete_task, daily_checkin
 
 router = APIRouter(prefix="/api/task")
 
