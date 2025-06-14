@@ -5,7 +5,7 @@
   "daily_checkin": "Daily Check-in",
   "subscribe_instagram": "Subscribe to our Instagram",
   "i_subscribed": "I subscribed",
-  "reward_received": "You received {{amount}} $GAP!",
+  "reward_received": "You will received {{amount}} $GAP!",
   "already_done": "Already completed",
   "error": "An error occurred",
   "checkin_get": "Claim reward",
