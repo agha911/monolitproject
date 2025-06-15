@@ -10,11 +10,17 @@ const Tasks: React.FC = () => {
 
   const [completed, setCompleted] = useState(false);
   const [message, setMessage] = useState('');
+  const [openedInstagram, setOpenedInstagram] = useState(false);
 
   const [streak, setStreak] = useState<number | null>(null);
   const [reward, setReward] = useState<number | null>(null);
   const [checkedIn, setCheckedIn] = useState(false);
   const [checkinMessage, setCheckinMessage] = useState('');
+
+  const handleInstagramClick = () => {
+    window.open('https://www.instagram.com/gap_pick', '_blank');
+    setOpenedInstagram(true);
+  };
 
   const handleComplete = async () => {
     if (!telegramUserId) {
@@ -38,6 +44,7 @@ const Tasks: React.FC = () => {
         setMessage(t('reward_received', { amount: data.reward }));
       } else if (data.status === 'already_completed') {
         setMessage(t('already_done'));
+        setCompleted(true);
       } else {
         setMessage(t('error'));
       }
@@ -98,13 +105,22 @@ const Tasks: React.FC = () => {
         </a>
         <p className="text-sm text-[#a0f6ff]">{t('reward_received', { amount: 1000 })}</p>
 
-        <button
-          onClick={handleComplete}
-          disabled={completed}
-          className="bg-[#00f0ff] text-[#0e1a2b] font-semibold px-4 py-2 rounded hover:scale-105 transition-all disabled:opacity-40"
-        >
-          {completed ? t('already_done') : t('i_subscribed')}
-        </button>
+        {!openedInstagram ? (
+          <button
+            onClick={handleInstagramClick}
+            className="bg-[#00f0ff] text-[#0e1a2b] font-semibold px-4 py-2 rounded hover:scale-105 transition-all"
+          >
+            {t('go_to_instagram')}
+          </button>
+        ) : (
+          <button
+            onClick={handleComplete}
+            disabled={completed}
+            className="bg-[#00f0ff] text-[#0e1a2b] font-semibold px-4 py-2 rounded hover:scale-105 transition-all disabled:opacity-40"
+          >
+            {completed ? t('already_done') : t('i_subscribed')}
+          </button>
+        )}
 
         {message && <p className="text-sm mt-2 text-[#a0f6ff]">{message}</p>}
       </div>
@@ -144,6 +160,7 @@ const Tasks: React.FC = () => {
 };
 
 export default Tasks;
+
 
 
 
