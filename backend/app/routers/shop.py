@@ -17,8 +17,32 @@ async def buy_max_energy_endpoint(payload: UserIdPayload, session: AsyncSession 
     user = await get_user(session, payload.user_id)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
+
     success = await buy_max_energy(session, user)
     if not success:
         raise HTTPException(status_code=400, detail="Not enough XP to buy energy")
+
     return {"status": "success", "new_max_energy": user.max_energy}
 
+
+# ✅ Новый эндпоинт — восстановление энергии
+@router.post("/refill_energy")
+async def refill_energy_endpoint(payload: UserIdPayload, session: AsyncSession = Depends(get_async_session)):
+    user = await get_user(session, payload.user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    COST = 500
+
+    if user.total_xp < COST:
+        raise HTTPException(status_code=400, detail="Not enough XP to refill energy")
+
+    if user.energy >= user.max_energy:
+        raise HTTPException(status_code=400, detail="Energy already full")
+
+    user.energy = user.max_energy
+    user.total_xp -= COST
+    session.add(user)
+    await session.commit()
+
+    return {"status": "success", "energy": user.energy, "xp": user.total_xp}
