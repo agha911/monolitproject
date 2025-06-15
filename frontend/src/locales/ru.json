@@ -31,5 +31,9 @@
   "reward": "Награда",
   "total_users": "Всего пользователей",
   "user": "Пользователь",
-  "go_to_instagram": "Перейти в Instagram"
+  "go_to_instagram": "Перейти в Instagram",
+  "restore_energy": "Восполнить энергию",
+  "shop_restored": "Энергия восстановлена до максимума!",
+  "shop_error": "Недостаточно монет или лимит достигнут",
+  "error": "Произошла ошибка"
 }
