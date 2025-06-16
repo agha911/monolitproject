@@ -35,5 +35,7 @@
   "refill_energy": "Enerjini bərpa et",
   "shop_restored": "Enerji tam bərpa olundu!",
   "shop_error": "Yetərli GAP yoxdur və ya limitə çatılıb",
-  "error": "Xəta baş verdi"
+  "error": "Xəta baş verdi",
+  "refill_energy": "Enerjini doldur",
+  "refill_success": "Enerji uğurla dolduruldu!"
 }
