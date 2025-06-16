@@ -18,6 +18,7 @@ import threading
 from app.config import TELEGRAM_BOT_TOKEN
 import time
 from telebot.apihelper import ApiTelegramException
+from app.notifications.notify_energy import notify_max_energy_users
 
 
 ENERGY_RECOVERY_INTERVAL_MINUTES = 1
