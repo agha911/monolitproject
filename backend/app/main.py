@@ -28,7 +28,7 @@ DAILY_REWARDS = [10, 20, 30, 40, 50, 60, 70]
 app = FastAPI()
 print("[APP] Using DATABASE_URL:", os.getenv("DATABASE_URL"))
 
-bot = TeleBot(TELEGRAM_BOT_TOKEN)
+
 
 app.add_middleware(
     CORSMiddleware,
