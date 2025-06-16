@@ -226,20 +226,18 @@ app.include_router(shop.router)
 app.include_router(invites.router)
 
 
-def run_notifications():
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
+@app.on_event("startup")
+async def start_background_tasks():
+    asyncio.create_task(notify_loop())
 
-    async def periodic():
-        while True:
-            now = datetime.utcnow() + timedelta(hours=4)  # UTC+4
-            if 10 <= now.hour < 22:
+async def notify_loop():
+    while True:
+        now = datetime.utcnow() + timedelta(hours=4)
+        if 10 <= now.hour < 22:
+            try:
                 await notify_max_energy_users()
-            await asyncio.sleep(3600)
-
-    loop.run_until_complete(periodic())
-
-# Запуск уведомлений в фоне
-threading.Thread(target=run_notifications, daemon=True).start()
+            except Exception as e:
+                print(f"[NOTIFY ERROR] {e}")
+        await asyncio.sleep(3600)  # каждый час
 
 
