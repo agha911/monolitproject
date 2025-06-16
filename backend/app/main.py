@@ -234,7 +234,7 @@ def run_notifications():
         while True:
             now = datetime.utcnow() + timedelta(hours=4)  # UTC+4
             if 10 <= now.hour < 22:
-                await notify_max_energy_users(bot)
+                await notify_max_energy_users()
             await asyncio.sleep(3600)
 
     loop.run_until_complete(periodic())
