@@ -35,5 +35,7 @@
   "refill_energy": "Restore Energy",
   "shop_restored": "Energy fully restored!",
   "shop_error": "Not enough coins or limit reached",
-  "error": "Something went wrong"
+  "error": "Something went wrong",
+  "refill_energy": "Refill energy",
+  "refill_success": "Energy successfully refilled!"
 }
