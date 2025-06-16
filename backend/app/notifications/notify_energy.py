@@ -39,5 +39,4 @@ async def notify_max_energy_users():
         await session.commit()
         print(f"[DONE] Отправлено {count} уведомлений")
 
-if __name__ == "__main__":
-    asyncio.run(notify_max_energy_users())
+
