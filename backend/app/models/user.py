@@ -24,6 +24,9 @@ class User(Base):
     invited_by = Column(Integer, ForeignKey("users.id"), nullable=True)
     invites_count = Column(Integer, default=0)
     inviter = relationship("User", remote_side=[id], backref="invited_users")
+    energy_notified = Column(Boolean, default=False)
+    energy_refill_count = Column(Integer, default=0)
+    last_energy_refill = Column(DateTime, nullable=True)
     
     
 
