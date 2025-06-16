@@ -20,7 +20,7 @@ import time
 from telebot.apihelper import ApiTelegramException
 from app.notifications.notify_energy import notify_max_energy_users
 import asyncio
-
+from telebot import types
 
 ENERGY_RECOVERY_INTERVAL_MINUTES = 1
 MAX_ENERGY = 100
@@ -58,10 +58,10 @@ def get_user_info_from_bot_api(user_id):
     return {}
 
 @bot.message_handler(commands=["start"])
-def handle_start(message: types.Message):
+async def handle_start(message: types.Message):
     parts = message.text.split()
     if len(parts) > 1 and parts[1].isdigit():
-        inviter_telegram_id = int(parts[1])  # 🔄 используем inviter_telegram_id сразу
+        inviter_telegram_id = int(parts[1])
         user_telegram_id = message.from_user.id
         referral_cache[user_telegram_id] = inviter_telegram_id
         print(f"[REF-CACHE] {user_telegram_id} invited by {inviter_telegram_id}")
@@ -227,13 +227,17 @@ app.include_router(invites.router)
 
 
 def run_notifications():
-    async def loop():
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+
+    async def periodic():
         while True:
             now = datetime.utcnow() + timedelta(hours=4)  # UTC+4
             if 10 <= now.hour < 22:
                 await notify_max_energy_users(bot)
-            await asyncio.sleep(3600)  # проверка каждый час
-    asyncio.run(loop())
+            await asyncio.sleep(3600)
+
+    loop.run_until_complete(periodic())
 
 # Запуск уведомлений в фоне
 threading.Thread(target=run_notifications, daemon=True).start()
