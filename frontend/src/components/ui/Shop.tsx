@@ -40,7 +40,7 @@ const Shop: React.FC = () => {
     setMessage('');
 
     try {
-      const res = await fetch(`${API_BASE_URL}/api/shop/refill_energy`, {
+      const res = await fetch(`${API_BASE_URL}/api/shop/buy_energy_refill`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ user_id: telegramUserId }),
