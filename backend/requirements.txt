@@ -7,6 +7,7 @@ python-dotenv==1.0.1
 requests==2.31.0
 cachetools
 pyTelegramBotAPI
+aiohttp
 
 # Остальные (по желанию, если не конфликтуют)
 annotated-types==0.7.0
