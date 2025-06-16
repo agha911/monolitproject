@@ -13,7 +13,7 @@ from sqlalchemy.future import select
 from app.models.user import User
 from app.utils import parse_telegram_user_id
 from app.core.referral_cache import referral_cache
-from telebot import TeleBot, types
+from app.bot_instance import bot
 import threading
 from app.config import TELEGRAM_BOT_TOKEN
 import time
