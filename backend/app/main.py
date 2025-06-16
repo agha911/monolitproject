@@ -19,6 +19,7 @@ from app.config import TELEGRAM_BOT_TOKEN
 import time
 from telebot.apihelper import ApiTelegramException
 from app.notifications.notify_energy import notify_max_energy_users
+import asyncio
 
 
 ENERGY_RECOVERY_INTERVAL_MINUTES = 1
@@ -225,20 +226,16 @@ app.include_router(shop.router)
 app.include_router(invites.router)
 
 
-def run_bot():
-    try:
-        print("[BOT] Polling started...")
-        time.sleep(3)  # небольшой отложенный старт
-        bot.infinity_polling(skip_pending=True, allowed_updates=[])
-    except ApiTelegramException as e:
-        if e.result.status_code == 409:
-            print("[BOT] Polling already active elsewhere. Skipping polling start.")
-        else:
-            print(f"[BOT ERROR] {e}")
-    except Exception as e:
-        print(f"[BOT UNEXPECTED ERROR] {e}")
+def run_notifications():
+    async def loop():
+        while True:
+            now = datetime.utcnow() + timedelta(hours=4)  # UTC+4
+            if 10 <= now.hour < 22:
+                await notify_max_energy_users(bot)
+            await asyncio.sleep(3600)  # проверка каждый час
+    asyncio.run(loop())
 
-# Стартуем бота в отдельном потоке
-threading.Thread(target=run_bot, daemon=True).start()
+# Запуск уведомлений в фоне
+threading.Thread(target=run_notifications, daemon=True).start()
 
 
