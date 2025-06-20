@@ -21,7 +21,7 @@ from telebot.apihelper import ApiTelegramException
 from app.notifications.notify_energy import notify_max_energy_users
 import asyncio
 from telebot import types
-from app.tasks.reset_instagram import reset_instagram_task
+from app.notifications.reset_energy_notified import reset_energy_flags
 
 ENERGY_RECOVERY_INTERVAL_MINUTES = 1
 MAX_ENERGY = 100
@@ -239,7 +239,7 @@ app.include_router(invites.router)
 async def reset_loop():
     while True:
         try:
-            await reset_instagram_task()
+            await reset_energy_flags()
         except Exception as e:
             print(f"[RESET ERROR] {e}")
         await asyncio.sleep(24 * 60 * 60)
