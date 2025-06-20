@@ -66,6 +66,16 @@ async def handle_start(message: types.Message):
         referral_cache[user_telegram_id] = inviter_telegram_id
         print(f"[REF-CACHE] {user_telegram_id} invited by {inviter_telegram_id}")
 
+    # Приветственное сообщение
+    await bot.send_message(
+        chat_id=message.chat.id,
+        text=(
+            "👋 Salam! Gappick-ə xoş gəlmisən!\n\n"
+            "Oyuna başlamaq üçün aşağıdakı düyməni kliklə"
+        )
+    )
+
+
 
 @app.post("/api/user/register")
 async def register_user(
