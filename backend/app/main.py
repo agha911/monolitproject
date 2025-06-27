@@ -22,6 +22,7 @@ from app.notifications.notify_energy import notify_max_energy_users
 import asyncio
 from telebot import types
 from app.notifications.reset_energy_notified import reset_energy_flags
+from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo
 
 ENERGY_RECOVERY_INTERVAL_MINUTES = 1
 MAX_ENERGY = 100
@@ -60,20 +61,33 @@ def get_user_info_from_bot_api(user_id):
 
 @bot.message_handler(commands=["start"])
 async def handle_start(message: types.Message):
+    if message.from_user.is_bot:
+        return  # Игнорируем ботов
+
+    user_telegram_id = message.from_user.id
+
+    # Обработка реферальной ссылки
     parts = message.text.split()
     if len(parts) > 1 and parts[1].isdigit():
         inviter_telegram_id = int(parts[1])
-        user_telegram_id = message.from_user.id
         referral_cache[user_telegram_id] = inviter_telegram_id
         print(f"[REF-CACHE] {user_telegram_id} invited by {inviter_telegram_id}")
 
-    # Приветственное сообщение
+    # Получаем user info через Bot API (не обязательно, но для логирования полезно)
+    info = get_user_info_from_bot_api(user_telegram_id)
+    print(f"[USER INFO] {info}")
+
+    # Кнопка запуска WebApp
+    markup = InlineKeyboardMarkup()
+    markup.add(InlineKeyboardButton("🚀 Başla", web_app=WebAppInfo(url="https://monolitproject-5g7v.vercel.app/")))
+
     await bot.send_message(
         chat_id=message.chat.id,
         text=(
             "👋 Salam! Gappick-ə xoş gəlmisən!\n\n"
-            "Oyuna başlamaq üçün aşağıdakı düyməni kliklə"
-        )
+            "Oyuna başlamaq üçün aşağıdakı düyməni kliklə."
+        ),
+        reply_markup=markup
     )
 
 
