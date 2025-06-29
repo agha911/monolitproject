@@ -41,13 +41,13 @@ const Clicker: React.FC = () => {
         await fetch(registerUrl, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ init_data: WebApp.initDataUnsafe }),
+          body: JSON.stringify({ init_data: WebApp.initData }),
         });
 
         const res = await fetch(`${API_BASE_URL}/api/game/progress`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ init_data: WebApp.initDataUnsafe }),
+          body: JSON.stringify({ init_data: WebApp.initData }),
         });
 
         const data = await res.json();
