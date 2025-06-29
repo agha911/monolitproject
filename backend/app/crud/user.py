@@ -61,7 +61,7 @@ async def get_leaderboard(session: AsyncSession, limit: int = 50):
     )
     return result.scalars().all()
 
-async def buy_max_energy(session: AsyncSession, user: User, cost: int = 50, amount: int = 100):
+async def buy_max_energy(session: AsyncSession, user: User, cost: int = 500, amount: int = 100):
     if user.total_xp < cost:
         return False
     user.total_xp -= cost
