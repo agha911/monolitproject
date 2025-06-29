@@ -66,7 +66,7 @@ const Shop: React.FC = () => {
       {/* Увеличение максимальной энергии */}
       <div className="bg-[#0e1a2b] border border-[#00f0ff40] p-4 rounded-xl shadow-[0_0_10px_#00f0ff30] text-center space-y-2 max-w-md mx-auto mb-6">
         <h3 className="text-lg font-semibold text-[#7ee9ff]">🔋 {t('energy_upgrade')}</h3>
-        <p className="text-sm text-[#a0f6ff]">50 $GAP</p>
+        <p className="text-sm text-[#a0f6ff]">500 $GAP</p>
 
         <button
           onClick={handleBuyEnergyUpgrade}
