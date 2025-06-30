@@ -15,32 +15,45 @@ const Friends: React.FC = () => {
   const [invitesCount, setInvitesCount] = useState(0);
   const [totalUsers, setTotalUsers] = useState(0);
 
+  const fetchData = async () => {
+    try {
+      const [leaderboardRes, invitesRes, usersRes] = await Promise.all([
+        fetch(`${API_BASE_URL}/api/game/leaderboard`),
+        fetch(`${API_BASE_URL}/api/user/invites?init_data=${encodeURIComponent(WebApp.initData)}`),
+        fetch(`${API_BASE_URL}/api/user/count`)
+      ]);
+
+      const leaderboardData = await leaderboardRes.json();
+      const invitesData = await invitesRes.json();
+      const usersData = await usersRes.json();
+
+      setLeaderboard(leaderboardData);
+      setInvitesCount(invitesData.count || 0);
+      setTotalUsers(usersData.count || 0);
+    } catch (error) {
+      console.error('Ошибка загрузки данных:', error);
+    }
+  };
+
   useEffect(() => {
-    const fetchData = async () => {
-      try {
-        const [leaderboardRes, invitesRes, usersRes] = await Promise.all([
-          fetch(`${API_BASE_URL}/api/game/leaderboard`),
-          fetch(`${API_BASE_URL}/api/user/invites?init_data=${encodeURIComponent(WebApp.initData)}`),
-          fetch(`${API_BASE_URL}/api/user/count`)
-        ]);
-
-        const leaderboardData = await leaderboardRes.json();
-        const invitesData = await invitesRes.json();
-        const usersData = await usersRes.json();
-
-        setLeaderboard(leaderboardData);
-        setInvitesCount(invitesData.count || 0);
-        setTotalUsers(usersData.count || 0);
-      } catch (error) {
-        console.error('Ошибка загрузки данных:', error);
-      }
-    };
-
     fetchData();
   }, []);
 
+  useEffect(() => {
+    const onFocus = () => {
+      if (document.visibilityState === 'visible') {
+        fetchData();
+      }
+    };
+
+    document.addEventListener('visibilitychange', onFocus);
+    return () => document.removeEventListener('visibilitychange', onFocus);
+  }, []);
+
   const handleInvite = () => {
-    const link = `https://t.me/monolit_42_bot?start=${WebApp.initDataUnsafe.user?.id}`;
+    const inviterId = WebApp.initDataUnsafe?.user?.id;
+    if (!inviterId) return;
+    const link = `https://t.me/monolit_42_bot?start=${inviterId}`;
     const message = encodeURIComponent("Qaqa, Sumqayıta gedirəm, 20 $GAPiyin olmaz?");
     window.open(`https://t.me/share/url?url=${link}&text=${message}`, '_blank');
   };
@@ -54,9 +67,15 @@ const Friends: React.FC = () => {
         <p className="text-base mb-4">💰 {t('reward')}: {invitesCount * 200} $GAP</p>
         <button
           onClick={handleInvite}
-          className="bg-[#00f0ff] text-[#131f2f] font-bold py-2 px-6 rounded hover:bg-[#7ee9ff]"
+          className="bg-[#00f0ff] text-[#131f2f] font-bold py-2 px-6 rounded hover:bg-[#7ee9ff] mb-2"
         >
           {t('invite_friends')}
+        </button>
+        <button
+          onClick={fetchData}
+          className="text-xs text-[#7ee9ff] underline mt-2"
+        >
+          {t('refresh')}
         </button>
       </div>
 
@@ -77,17 +96,15 @@ const Friends: React.FC = () => {
             {leaderboard.map((user, index) => (
               <tr
                 key={user.id}
-                className={`text-center ${
-                  index === 0
-                    ? 'bg-[#001d2b] font-bold text-[#00f0ff]'
-                    : 'text-[#a0f6ff] hover:bg-[#0f273c]'
-                }`}
+                className={\`text-center \${index === 0
+                  ? 'bg-[#001d2b] font-bold text-[#00f0ff]'
+                  : 'text-[#a0f6ff] hover:bg-[#0f273c]'}\`}
               >
                 <td className="px-4 py-2 border border-[#00f0ff10]">{index + 1}</td>
                 <td className="px-4 py-2 border border-[#00f0ff10]">
                   {user.username
-                    ? (user.username.startsWith('@') ? user.username : `@${user.username}`)
-                    : `user_${user.id}`}
+                    ? (user.username.startsWith('@') ? user.username : \`@\${user.username}\`)
+                    : \`user_\${user.id}\`}
                 </td>
                 <td className="px-4 py-2 border border-[#00f0ff10]">{user.total_xp}</td>
               </tr>
@@ -98,6 +115,4 @@ const Friends: React.FC = () => {
     </div>
   );
 };
-
-export default Friends;
 
