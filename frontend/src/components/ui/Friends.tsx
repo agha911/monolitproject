@@ -1,4 +1,3 @@
-а нет, у нас и счетчик приглашенных и награда выдается только при регистрации, а это значит, что информация на фронте не обновляется.
 import React, { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import WebApp from '@twa-dev/sdk';
