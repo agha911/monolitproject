@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Depends, HTTPException, Body 
+from fastapi import FastAPI, Depends, HTTPException, Body
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text, func
@@ -12,6 +12,7 @@ from app.routers import task, shop, invites
 from sqlalchemy.future import select
 from app.models.user import User
 from app.utils import parse_telegram_user_id
+from app.core.referral_cache import referral_cache
 from app.bot_instance import bot
 import threading
 from app.config import TELEGRAM_BOT_TOKEN
@@ -30,6 +31,8 @@ DAILY_REWARDS = [100, 200, 300, 400, 500, 600, 700]
 
 app = FastAPI()
 print("[APP] Using DATABASE_URL:", os.getenv("DATABASE_URL"))
+
+
 
 app.add_middleware(
     CORSMiddleware,
@@ -58,36 +61,21 @@ def get_user_info_from_bot_api(user_id):
 
 @bot.message_handler(commands=["start"])
 async def handle_start(message: types.Message):
-    user_telegram_id = message.from_user.id
-    parts = message.text.split()
-    inviter_telegram_id = None
+    if message.from_user.is_bot:
+        return  # Игнорируем ботов
 
+    user_telegram_id = message.from_user.id
+
+    # Обработка реферальной ссылки
+    parts = message.text.split()
     if len(parts) > 1 and parts[1].isdigit():
         inviter_telegram_id = int(parts[1])
-        print(f"[REF-LINK] {user_telegram_id} был приглашен {inviter_telegram_id}")
+        referral_cache[user_telegram_id] = inviter_telegram_id
+        print(f"[REF-CACHE] {user_telegram_id} invited by {inviter_telegram_id}")
 
-    from app.database import async_session_maker
-    async with async_session_maker() as session:
-        result = await session.execute(select(User).where(User.telegram_id == user_telegram_id))
-        user = result.scalar_one_or_none()
-
-        if not user:
-            inviter = None
-            if inviter_telegram_id:
-                inviter_result = await session.execute(
-                    select(User).where(User.telegram_id == inviter_telegram_id)
-                )
-                inviter = inviter_result.scalar_one_or_none()
-
-            user = User(
-                telegram_id=user_telegram_id,
-                invited_by=inviter.id if inviter else None,
-            )
-            session.add(user)
-            await session.commit()
-            print(f"[NEW USER] Зарегистрирован {user_telegram_id}, invited_by={inviter_telegram_id}")
-        else:
-            print(f"[USER EXISTS] {user_telegram_id} уже есть в БД")
+    # Получаем user info через Bot API (не обязательно, но для логирования полезно)
+    info = get_user_info_from_bot_api(user_telegram_id)
+    print(f"[USER INFO] {info}")
 
     # Кнопка запуска WebApp
     markup = InlineKeyboardMarkup()
@@ -103,6 +91,7 @@ async def handle_start(message: types.Message):
     )
 
 
+
 @app.post("/api/user/register")
 async def register_user(
     data: dict = Body(...),
@@ -113,43 +102,47 @@ async def register_user(
         raise HTTPException(status_code=400, detail="init_data is required")
 
     telegram_id = parse_telegram_user_id(init_data)
-    info = get_user_info_from_bot_api(telegram_id)
 
     result = await session.execute(select(User).where(User.telegram_id == telegram_id))
     user = result.scalar_one_or_none()
 
-    if not user:
-        user = User(
-            telegram_id=telegram_id,
-            username=info.get("username"),
-            first_name=info.get("first_name"),
-            last_name=info.get("last_name"),
-        )
-        session.add(user)
-        await session.commit()
-        print(f"[REGISTER] Создан новый пользователь {telegram_id} без /start")
+    info = get_user_info_from_bot_api(telegram_id)
 
-    elif user.username:
+    # Получаем inviter_id из кэша, если есть
+    inviter_id = referral_cache.get(telegram_id)
+    inviter = None
+
+    if user:
+        if inviter_id and user.invited_by is None:
+            inviter_result = await session.execute(select(User).where(User.telegram_id == inviter_id))
+            inviter = inviter_result.scalar_one_or_none()
+            if inviter:
+                user.invited_by = inviter.id
+                inviter.invites_count += 1
+                inviter.total_xp += 200
+                session.add_all([user, inviter])
+                await session.commit()
         return {"status": "already_registered"}
 
-    else:
-        user.username = info.get("username")
-        user.first_name = info.get("first_name")
-        user.last_name = info.get("last_name")
-
-    if user.invited_by:
-        inviter_result = await session.execute(select(User).where(User.id == user.invited_by))
+    if inviter_id:
+        inviter_result = await session.execute(select(User).where(User.telegram_id == inviter_id))
         inviter = inviter_result.scalar_one_or_none()
         if inviter:
             inviter.invites_count += 1
             inviter.total_xp += 200
             session.add(inviter)
 
-    session.add(user)
+    new_user = User(
+        telegram_id=telegram_id,
+        invited_by=inviter.id if inviter else None,
+        username=info.get("username"),
+        first_name=info.get("first_name"),
+        last_name=info.get("last_name"),
+    )
+    session.add(new_user)
     await session.commit()
 
     return {"status": "ok"}
-
 
 
 
@@ -279,5 +272,6 @@ async def notify_loop():
             except Exception as e:
                 print(f"[NOTIFY ERROR] {e}")
         await asyncio.sleep(3600)  # каждый час
+
 
 
