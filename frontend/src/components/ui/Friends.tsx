@@ -96,15 +96,17 @@ const Friends: React.FC = () => {
             {leaderboard.map((user, index) => (
               <tr
                 key={user.id}
-                className={\`text-center \${index === 0
-                  ? 'bg-[#001d2b] font-bold text-[#00f0ff]'
-                  : 'text-[#a0f6ff] hover:bg-[#0f273c]'}\`}
+                className={`text-center ${
+                  index === 0
+                    ? 'bg-[#001d2b] font-bold text-[#00f0ff]'
+                    : 'text-[#a0f6ff] hover:bg-[#0f273c]'
+                }`}
               >
                 <td className="px-4 py-2 border border-[#00f0ff10]">{index + 1}</td>
                 <td className="px-4 py-2 border border-[#00f0ff10]">
                   {user.username
-                    ? (user.username.startsWith('@') ? user.username : \`@\${user.username}\`)
-                    : \`user_\${user.id}\`}
+                    ? (user.username.startsWith('@') ? user.username : `@${user.username}`)
+                    : `user_${user.id}`}
                 </td>
                 <td className="px-4 py-2 border border-[#00f0ff10]">{user.total_xp}</td>
               </tr>
@@ -115,4 +117,7 @@ const Friends: React.FC = () => {
     </div>
   );
 };
+
+export default Friends;
+
 
