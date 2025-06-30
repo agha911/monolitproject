@@ -58,9 +58,6 @@ def get_user_info_from_bot_api(user_id):
 
 @bot.message_handler(commands=["start"])
 async def handle_start(message: types.Message):
-    if message.from_user.is_bot:
-        return  # Игнорируем ботов
-
     user_telegram_id = message.from_user.id
     parts = message.text.split()
     inviter_telegram_id = None
