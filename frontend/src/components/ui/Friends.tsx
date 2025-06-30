@@ -1,3 +1,4 @@
+а нет, у нас и счетчик приглашенных и награда выдается только при регистрации, а это значит, что информация на фронте не обновляется.
 import React, { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import WebApp from '@twa-dev/sdk';
@@ -15,45 +16,32 @@ const Friends: React.FC = () => {
   const [invitesCount, setInvitesCount] = useState(0);
   const [totalUsers, setTotalUsers] = useState(0);
 
-  const fetchData = async () => {
-    try {
-      const [leaderboardRes, invitesRes, usersRes] = await Promise.all([
-        fetch(`${API_BASE_URL}/api/game/leaderboard`),
-        fetch(`${API_BASE_URL}/api/user/invites?init_data=${encodeURIComponent(WebApp.initData)}`),
-        fetch(`${API_BASE_URL}/api/user/count`)
-      ]);
-
-      const leaderboardData = await leaderboardRes.json();
-      const invitesData = await invitesRes.json();
-      const usersData = await usersRes.json();
-
-      setLeaderboard(leaderboardData);
-      setInvitesCount(invitesData.count || 0);
-      setTotalUsers(usersData.count || 0);
-    } catch (error) {
-      console.error('Ошибка загрузки данных:', error);
-    }
-  };
-
   useEffect(() => {
-    fetchData();
-  }, []);
+    const fetchData = async () => {
+      try {
+        const [leaderboardRes, invitesRes, usersRes] = await Promise.all([
+          fetch(`${API_BASE_URL}/api/game/leaderboard`),
+          fetch(`${API_BASE_URL}/api/user/invites?init_data=${encodeURIComponent(WebApp.initData)}`),
+          fetch(`${API_BASE_URL}/api/user/count`)
+        ]);
 
-  useEffect(() => {
-    const onFocus = () => {
-      if (document.visibilityState === 'visible') {
-        fetchData();
+        const leaderboardData = await leaderboardRes.json();
+        const invitesData = await invitesRes.json();
+        const usersData = await usersRes.json();
+
+        setLeaderboard(leaderboardData);
+        setInvitesCount(invitesData.count || 0);
+        setTotalUsers(usersData.count || 0);
+      } catch (error) {
+        console.error('Ошибка загрузки данных:', error);
       }
     };
 
-    document.addEventListener('visibilitychange', onFocus);
-    return () => document.removeEventListener('visibilitychange', onFocus);
+    fetchData();
   }, []);
 
   const handleInvite = () => {
-    const inviterId = WebApp.initDataUnsafe?.user?.id;
-    if (!inviterId) return;
-    const link = `https://t.me/monolit_42_bot?start=${inviterId}`;
+    const link = `https://t.me/monolit_42_bot?start=${WebApp.initDataUnsafe.user?.id}`;
     const message = encodeURIComponent("Qaqa, Sumqayıta gedirəm, 20 $GAPiyin olmaz?");
     window.open(`https://t.me/share/url?url=${link}&text=${message}`, '_blank');
   };
@@ -67,15 +55,9 @@ const Friends: React.FC = () => {
         <p className="text-base mb-4">💰 {t('reward')}: {invitesCount * 200} $GAP</p>
         <button
           onClick={handleInvite}
-          className="bg-[#00f0ff] text-[#131f2f] font-bold py-2 px-6 rounded hover:bg-[#7ee9ff] mb-2"
+          className="bg-[#00f0ff] text-[#131f2f] font-bold py-2 px-6 rounded hover:bg-[#7ee9ff]"
         >
           {t('invite_friends')}
-        </button>
-        <button
-          onClick={fetchData}
-          className="text-xs text-[#7ee9ff] underline mt-2"
-        >
-          {t('refresh')}
         </button>
       </div>
 
