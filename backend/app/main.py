@@ -116,20 +116,29 @@ async def register_user(
         raise HTTPException(status_code=400, detail="init_data is required")
 
     telegram_id = parse_telegram_user_id(init_data)
+    info = get_user_info_from_bot_api(telegram_id)
 
     result = await session.execute(select(User).where(User.telegram_id == telegram_id))
     user = result.scalar_one_or_none()
 
     if not user:
-        raise HTTPException(status_code=404, detail="User not found in DB. Must click /start first.")
+        user = User(
+            telegram_id=telegram_id,
+            username=info.get("username"),
+            first_name=info.get("first_name"),
+            last_name=info.get("last_name"),
+        )
+        session.add(user)
+        await session.commit()
+        print(f"[REGISTER] Создан новый пользователь {telegram_id} без /start")
 
-    if user.username:
+    elif user.username:
         return {"status": "already_registered"}
 
-    info = get_user_info_from_bot_api(telegram_id)
-    user.username = info.get("username")
-    user.first_name = info.get("first_name")
-    user.last_name = info.get("last_name")
+    else:
+        user.username = info.get("username")
+        user.first_name = info.get("first_name")
+        user.last_name = info.get("last_name")
 
     if user.invited_by:
         inviter_result = await session.execute(select(User).where(User.id == user.invited_by))
@@ -143,6 +152,7 @@ async def register_user(
     await session.commit()
 
     return {"status": "ok"}
+
 
 
 
