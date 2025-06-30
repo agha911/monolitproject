@@ -92,6 +92,7 @@ async def handle_start(message: types.Message):
         else:
             print(f"[USER EXISTS] {user_telegram_id} уже есть в БД")
 
+    # Кнопка запуска WebApp
     markup = InlineKeyboardMarkup()
     markup.add(InlineKeyboardButton("🚀 Başla", web_app=WebAppInfo(url="https://monolitproject-5g7v.vercel.app/")))
 
@@ -103,6 +104,7 @@ async def handle_start(message: types.Message):
         ),
         reply_markup=markup
     )
+
 
 @app.post("/api/user/register")
 async def register_user(
