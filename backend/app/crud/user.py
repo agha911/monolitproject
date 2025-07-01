@@ -7,6 +7,11 @@ from app.models.user import User
 from sqlalchemy.orm.attributes import flag_modified
 from sqlalchemy import BigInteger
 
+MAX_ENERGY_CAP = 1200
+ENERGY_INCREMENT = 100
+ENERGY_UPGRADE_COST = 1000
+
+
 async def get_user(session: AsyncSession, telegram_id: int):
     result = await session.execute(select(User).where(User.telegram_id == telegram_id))
     return result.scalar_one_or_none()
@@ -61,13 +66,22 @@ async def get_leaderboard(session: AsyncSession, limit: int = 50):
     )
     return result.scalars().all()
 
-async def buy_max_energy(session: AsyncSession, user: User, cost: int = 500, amount: int = 100):
-    if user.total_xp < cost:
-        return False
-    user.total_xp -= cost
-    user.max_energy += amount
+async def buy_max_energy(session: AsyncSession, user: User) -> bool:
+    if user.max_energy >= MAX_ENERGY_CAP:
+        return False  # ❌ Уже достигнут максимум
+
+    if user.total_xp < ENERGY_UPGRADE_COST:
+        return False  # ❌ Недостаточно XP
+
+    user.total_xp -= ENERGY_UPGRADE_COST
+    user.max_energy += ENERGY_INCREMENT
+
+    # Не забываем обновить текущую энергию тоже, если нужно
+    if user.energy < user.max_energy:
+        user.energy = user.max_energy
+
+    session.add(user)
     await session.commit()
-    await session.refresh(user)
     return True
 
 async def complete_task(session: AsyncSession, user: User, task_id: str, reward: int = 50):
