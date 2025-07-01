@@ -102,7 +102,7 @@ async def register_user(
     if not init_data:
         raise HTTPException(status_code=400, detail="init_data is required")
 
-    telegram_id = parse_telegram_user_id(init_data)
+    telegram_id = int(parse_telegram_user_id(init_data))
 
     result = await session.execute(select(User).where(User.telegram_id == telegram_id))
     user = result.scalar_one_or_none()
