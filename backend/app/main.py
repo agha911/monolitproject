@@ -65,17 +65,17 @@ async def handle_start(message: types.Message):
     if message.from_user.is_bot:
         return  # Игнорируем ботов
 
-    user_telegram_id = message.from_user.id
+    user_telegram_id = str(message.from_user.id)  # Сохраняем как строку
 
     # Обработка реферальной ссылки
     parts = message.text.split()
     if len(parts) > 1 and parts[1].isdigit():
-        inviter_telegram_id = int(parts[1])
+        inviter_telegram_id = str(int(parts[1]))  # Тоже строка
         referral_cache[user_telegram_id] = inviter_telegram_id
         print(f"[REF-CACHE] {user_telegram_id} invited by {inviter_telegram_id}")
 
     # Получаем user info через Bot API (не обязательно, но для логирования полезно)
-    info = get_user_info_from_bot_api(user_telegram_id)
+    info = get_user_info_from_bot_api(int(user_telegram_id))
     print(f"[USER INFO] {info}")
 
     # Кнопка запуска WebApp
@@ -93,6 +93,7 @@ async def handle_start(message: types.Message):
 
 
 
+
 @app.post("/api/user/register")
 async def register_user(
     data: dict = Body(...),
@@ -103,6 +104,7 @@ async def register_user(
         raise HTTPException(status_code=400, detail="init_data is required")
 
     telegram_id = int(parse_telegram_user_id(init_data))
+    telegram_id_str = str(telegram_id)
 
     result = await session.execute(select(User).where(User.telegram_id == telegram_id))
     user = result.scalar_one_or_none()
@@ -110,11 +112,12 @@ async def register_user(
     info = get_user_info_from_bot_api(telegram_id)
 
     # Получаем inviter_id из кэша, если есть
-    inviter_id = referral_cache.get(telegram_id)
+    inviter_id_str = referral_cache.get(telegram_id_str)
     inviter = None
 
     if user:
-        if inviter_id and user.invited_by is None:
+        if inviter_id_str and user.invited_by is None:
+            inviter_id = int(inviter_id_str)
             inviter_result = await session.execute(select(User).where(User.telegram_id == inviter_id))
             inviter = inviter_result.scalar_one_or_none()
             if inviter:
@@ -125,7 +128,8 @@ async def register_user(
                 await session.commit()
         return {"status": "already_registered"}
 
-    if inviter_id:
+    if inviter_id_str:
+        inviter_id = int(inviter_id_str)
         inviter_result = await session.execute(select(User).where(User.telegram_id == inviter_id))
         inviter = inviter_result.scalar_one_or_none()
         if inviter:
@@ -144,6 +148,7 @@ async def register_user(
     await session.commit()
 
     return {"status": "ok"}
+
 
 
 
