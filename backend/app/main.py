@@ -261,9 +261,9 @@ async def reset_loop():
             print(f"[RESET ERROR] {e}")
         await asyncio.sleep(24 * 60 * 60)
 
-def run_bot_polling():
+async def run_bot_polling():
     print("[BOT] Starting polling...")
-    bot.infinity_polling(skip_pending=True)
+    await bot.infinity_polling()
 
 @app.on_event("startup")
 async def start_background_tasks():
@@ -271,10 +271,7 @@ async def start_background_tasks():
     asyncio.create_task(notify_loop())
     asyncio.create_task(reset_loop())
 
-    # запуск polling бота через executor
-    loop = asyncio.get_running_loop()
-    executor = concurrent.futures.ThreadPoolExecutor()
-    loop.run_in_executor(executor, run_bot_polling)
+    asyncio.create_task(run_bot_polling())
 
 async def notify_loop():
     while True:
