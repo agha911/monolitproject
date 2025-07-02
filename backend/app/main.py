@@ -60,11 +60,8 @@ def get_user_info_from_bot_api(user_id):
         print(f"[GETCHAT ERROR] {e}")
     return {}
 
-@bot.message_handler(commands=["start"])
+@bot.message_handler(func=lambda m: True, content_types=["text", "web_app_data", "any"])
 async def handle_start(message: types.Message):
-    if message.from_user.is_bot:
-        return  # Игнорируем ботов
-
     user_telegram_id = str(message.from_user.id)  # Сохраняем как строку
 
     # Обработка реферальной ссылки
