@@ -263,7 +263,7 @@ async def reset_loop():
 
 def run_bot_polling():
     print("[BOT] Starting polling...")
-    bot.infinity_polling()
+    bot.infinity_polling(skip_pending=True)
 
 @app.on_event("startup")
 async def start_background_tasks():
