@@ -60,7 +60,7 @@ def get_user_info_from_bot_api(user_id):
         print(f"[GETCHAT ERROR] {e}")
     return {}
 
-@bot.message_handler(func=lambda m: True, content_types=["text", "web_app_data", "any"])
+@bot.message_handler(commands=["start"])
 async def handle_start(message: types.Message):
     user_telegram_id = str(message.from_user.id)  # Сохраняем как строку
 
