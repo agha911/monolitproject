@@ -131,7 +131,7 @@ async def register_user(
         inviter = inviter_result.scalar_one_or_none()
         if inviter:
             inviter.invites_count += 1
-            inviter.total_xp += 200
+            inviter.total_xp += 1500
             session.add(inviter)
 
     new_user = User(
