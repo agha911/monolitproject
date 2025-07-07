@@ -7,9 +7,9 @@ from app.models.user import User
 from sqlalchemy.orm.attributes import flag_modified
 from sqlalchemy import BigInteger
 
-MAX_ENERGY_CAP = 1200
+MAX_ENERGY_CAP = 30000
 ENERGY_INCREMENT = 100
-ENERGY_UPGRADE_COST = 1000
+ENERGY_UPGRADE_COST = 500
 
 
 async def get_user(session: AsyncSession, telegram_id: int):
