@@ -123,9 +123,9 @@ const Clicker: React.FC = () => {
     setEnergy(newEnergy);
     setTotalXp(newTotalXp);
 
-    setClickId((prev) => prev + 1);
+    const newId = Date.now() + Math.random();
     const newText: FloatingText = {
-      id: clickId,
+      id: newId,
       value: gain,
       x,
       y,
