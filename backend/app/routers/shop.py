@@ -1,11 +1,11 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel
+from datetime import datetime
 
 from app.database import get_async_session
 from app.models.user import User
 from app.crud.user import get_user, buy_max_energy
-from datetime import datetime, timedelta
 
 router = APIRouter(prefix="/api/shop")
 
@@ -26,9 +26,7 @@ async def buy_max_energy_endpoint(payload: UserIdPayload, session: AsyncSession 
     return {"status": "success", "new_max_energy": user.max_energy}
 
 
-# ✅ Новый эндпоинт — восстановление энергии
-from datetime import datetime, timedelta
-
+# ✅ Восполнение энергии
 @router.post("/buy_energy_refill")
 async def buy_energy_refill_endpoint(payload: UserIdPayload, session: AsyncSession = Depends(get_async_session)):
     user = await get_user(session, payload.user_id)
@@ -39,14 +37,12 @@ async def buy_energy_refill_endpoint(payload: UserIdPayload, session: AsyncSessi
     refill_limit = 2
 
     # Сброс счётчика, если день сменился
-    if user.last_energy_refill:
-        if user.last_energy_refill.date() != now.date():
-            user.energy_refill_count = 0
+    if user.last_energy_refill and user.last_energy_refill.date() != now.date():
+        user.energy_refill_count = 0
 
     if user.energy_refill_count >= refill_limit:
         raise HTTPException(status_code=400, detail="Refill limit reached for today")
 
-    # Проверка на достаточное количество монет
     if user.total_xp < 500:
         raise HTTPException(status_code=400, detail="Not enough GAP")
 
@@ -63,4 +59,29 @@ async def buy_energy_refill_endpoint(payload: UserIdPayload, session: AsyncSessi
         "energy": user.energy,
         "refill_count": user.energy_refill_count
     }
+
+
+# ✅ Новый эндпоинт — покупка бустера на клик
+@router.post("/buy_click_boost")
+async def buy_click_boost_endpoint(payload: UserIdPayload, session: AsyncSession = Depends(get_async_session)):
+    user = await get_user(session, payload.user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    current_level = user.click_boost_level or 0
+    if current_level >= 4:
+        raise HTTPException(status_code=400, detail="Max boost level reached")
+
+    price = 5000 * (2 ** current_level)
+    if user.total_xp < price:
+        raise HTTPException(status_code=400, detail="Not enough GAP")
+
+    user.total_xp -= price
+    user.click_boost_level = current_level + 1
+
+    session.add(user)
+    await session.commit()
+
+    return {"status": "success", "new_boost_level": user.click_boost_level}
+
 
