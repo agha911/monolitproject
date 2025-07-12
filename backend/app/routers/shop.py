@@ -11,11 +11,11 @@ router = APIRouter(prefix="/api/shop")
 
 # 🔧 Модель запроса
 class UserIdPayload(BaseModel):
-    user_id: int
+    telegram_id: int
 
 @router.post("/buy_max_energy")
 async def buy_max_energy_endpoint(payload: UserIdPayload, session: AsyncSession = Depends(get_async_session)):
-    user = await get_user(session, payload.user_id)
+    user = await get_user(session, payload.telegram_id)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
