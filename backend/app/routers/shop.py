@@ -29,7 +29,7 @@ async def buy_max_energy_endpoint(payload: UserIdPayload, session: AsyncSession 
 # ✅ Восполнение энергии
 @router.post("/buy_energy_refill")
 async def buy_energy_refill_endpoint(payload: UserIdPayload, session: AsyncSession = Depends(get_async_session)):
-    user = await get_user(session, payload.user_id)
+    user = await get_user(session, payload.telegram_id)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
@@ -87,6 +87,7 @@ async def buy_click_boost_endpoint(payload: UserIdPayload, session: AsyncSession
     await session.commit()
 
     return {"status": "success", "new_boost_level": user.click_boost_level}
+
 
 
 
