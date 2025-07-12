@@ -25,7 +25,7 @@ const Clicker: React.FC = () => {
   const [timeToNextEnergy, setTimeToNextEnergy] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [floatingTexts, setFloatingTexts] = useState<FloatingText[]>([]);
-  const [clickId, setClickId] = useState(0);
+  const [clickBoost, setClickBoost] = useState(1); // Новый множитель за клик
 
   useEffect(() => {
     WebApp.ready();
@@ -114,7 +114,7 @@ const Clicker: React.FC = () => {
   const handleMultiClick = (x: number, y: number) => {
     if (!telegramUser || loading || energy <= 0) return;
 
-    const gain = 1;
+    const gain = clickBoost;
     const newTotalXp = totalXp + gain;
     const newEnergy = energy - 1;
     const newScore = score + gain;
@@ -132,7 +132,7 @@ const Clicker: React.FC = () => {
     };
     setFloatingTexts((prev) => [...prev, newText]);
     setTimeout(() => {
-      setFloatingTexts((prev) => prev.filter((t) => t.id !== newText.id));
+      setFloatingTexts((prev) => prev.filter((t) => t.id !== newId));
     }, 1000);
 
     fetch(`${API_BASE_URL}/api/game/click`, {
@@ -157,6 +157,8 @@ const Clicker: React.FC = () => {
   return (
     <div className="w-full min-h-screen bg-[#131f2f] text-center flex flex-col items-center justify-start pt-8 px-4 text-[#00f0ff]">
       <h2 className="text-2xl font-bold mb-2 drop-shadow-md">$GAP: {totalXp}</h2>
+
+      <div className="text-sm text-[#7ee9ff] mb-2">x{clickBoost} boost</div>
 
       <div className="my-4 w-full max-w-md">
         <label className="block mb-1 text-sm text-[#7ee9ff]">{t('energy')}: {energy} / {maxEnergy}</label>
