@@ -36,7 +36,6 @@ async def buy_energy_refill_endpoint(payload: UserIdPayload, session: AsyncSessi
     now = datetime.utcnow()
     refill_limit = 2
 
-    # Сброс счётчика, если день сменился
     if user.last_energy_refill and user.last_energy_refill.date() != now.date():
         user.energy_refill_count = 0
 
@@ -68,7 +67,12 @@ async def buy_click_boost_endpoint(payload: UserIdPayload, session: AsyncSession
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
-    current_level = user.click_boost_level or 0
+    # 🛡️ Гарантируем инициализацию
+    if user.click_boost_level is None:
+        user.click_boost_level = 0
+
+    current_level = user.click_boost_level
+
     if current_level >= 4:
         raise HTTPException(status_code=400, detail="Max boost level reached")
 
@@ -83,5 +87,6 @@ async def buy_click_boost_endpoint(payload: UserIdPayload, session: AsyncSession
     await session.commit()
 
     return {"status": "success", "new_boost_level": user.click_boost_level}
+
 
 
