@@ -49,7 +49,7 @@ const Shop: React.FC = () => {
       const res = await fetch(`${API_BASE_URL}/api/shop/buy_click_boost`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ user_id: telegramUserId }),
+        body: JSON.stringify({ telegram_id: telegramUserId }),
       });
 
       const data = await res.json();
@@ -74,7 +74,7 @@ const Shop: React.FC = () => {
       const res = await fetch(`${API_BASE_URL}/api/shop/buy_max_energy`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ user_id: telegramUserId }),
+        body: JSON.stringify({ telegram_id: telegramUserId }),
       });
 
       const data = await res.json();
@@ -98,7 +98,7 @@ const Shop: React.FC = () => {
       const res = await fetch(`${API_BASE_URL}/api/shop/buy_energy_refill`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ user_id: telegramUserId }),
+        body: JSON.stringify({ telegram_id: telegramUserId }),
       });
 
       const data = await res.json();
