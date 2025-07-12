@@ -27,6 +27,8 @@ class User(Base):
     energy_notified = Column(Boolean, default=False)
     energy_refill_count = Column(Integer, default=0)
     last_energy_refill = Column(DateTime, nullable=True)
+    click_boost_level = Column(Integer, default=0)
+    
     
     
 
