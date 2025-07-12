@@ -62,6 +62,7 @@ const Clicker: React.FC = () => {
         setTotalXp(data.total_xp ?? 0);
         setLastEnergyUpdate(data.lastEnergyUpdate ? new Date(data.lastEnergyUpdate) : null);
         setMaxEnergy(data.max_energy ?? 100);
+        setClickBoost((data.click_boost_level ?? 0) + 1);
         setLoading(false);
       } catch (error) {
         console.error('Ошибка инициализации пользователя:', error);
