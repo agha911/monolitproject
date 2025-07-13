@@ -38,41 +38,46 @@ const Clicker: React.FC = () => {
     }
   }, []);
 
+  const fetchProgress = async () => {
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/game/progress`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ init_data: WebApp.initData }),
+      });
+
+      const data = await res.json();
+      setEnergy(data.energy);
+      setTotalXp(data.total_xp ?? 0);
+      setLastEnergyUpdate(data.lastEnergyUpdate ? new Date(data.lastEnergyUpdate) : null);
+      setMaxEnergy(data.max_energy ?? 100);
+      setClickBoost((data.click_boost_level ?? 0) + 1);
+      setLoading(false);
+    } catch (err) {
+      console.error('Ошибка получения прогресса:', err);
+    }
+  };
+
   useEffect(() => {
-    if (!telegramUser) return;
-
-    const initializeUser = async () => {
-      try {
-        const registerUrl = `${API_BASE_URL}/api/user/register`;
-        await fetch(registerUrl, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ init_data: WebApp.initData }),
-        });
-
-        const res = await fetch(`${API_BASE_URL}/api/game/progress`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ init_data: WebApp.initData }),
-        });
-
-        const data = await res.json();
-        setEnergy(data.energy);
-        setTotalXp(data.total_xp ?? 0);
-        setLastEnergyUpdate(data.lastEnergyUpdate ? new Date(data.lastEnergyUpdate) : null);
-        setMaxEnergy(data.max_energy ?? 100);
-        setClickBoost((data.click_boost_level ?? 0) + 1);
-        setLoading(false);
-      } catch (err) {
-        console.error('Ошибка инициализации пользователя:', err);
-      }
-    };
-
-    initializeUser();
+    if (telegramUser) fetchProgress();
   }, [telegramUser]);
 
   useEffect(() => {
+    const tickEnergy = async () => {
+      if (!lastEnergyUpdate || energy >= maxEnergy) return;
+
+      const now = new Date();
+      const minutesPassed = Math.floor((now.getTime() - lastEnergyUpdate.getTime()) / 60000);
+      const energyToRestore = Math.floor(minutesPassed);
+
+      if (energyToRestore > 0) {
+        await fetchProgress(); // сервер сам обновит энергию по lastEnergyUpdate
+      }
+    };
+
     const interval = setInterval(() => {
+      tickEnergy();
+
       if (!lastEnergyUpdate || energy >= maxEnergy) {
         setTimeToNextEnergy(null);
         return;
@@ -168,6 +173,7 @@ const Clicker: React.FC = () => {
 };
 
 export default Clicker;
+
 
 
 
