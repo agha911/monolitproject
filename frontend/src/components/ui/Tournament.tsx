@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import API_BASE_URL from './config';
+import API_BASE_URL from '../config';
 import WebApp from '@twa-dev/sdk';
 import { useTranslation } from 'react-i18next';
 
