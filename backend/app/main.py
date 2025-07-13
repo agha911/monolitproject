@@ -156,15 +156,19 @@ async def get_progress(data: dict = Body(...), session: AsyncSession = Depends(g
 
     if last_update:
         minutes_passed = int((now - last_update).total_seconds() // 60)
-        energy_to_restore = minutes_passed // ENERGY_RECOVERY_INTERVAL_MINUTES
+        energy_to_restore = minutes_passed // ENERGY_REOVERY_INTERVAL_MINUTES
 
+        new_energy = user.energy
         if energy_to_restore > 0 and user.energy < max_energy:
             new_energy = min(max_energy, user.energy + energy_to_restore)
-            await crud_user.update_energy_and_time(session, telegram_id, new_energy, now)
-            user.energy = new_energy
-            user.lastEnergyUpdate = now
+
+        # Всегда обновляем время (даже если энергия не изменилась)
+        await crud_user.update_energy_and_time(session, telegram_id, new_energy, now)
+        user.energy = new_energy
+        user.lastEnergyUpdate = now
     else:
         await crud_user.update_energy_and_time(session, telegram_id, user.energy, now)
+        user.lastEnergyUpdate = now
 
     return {
         "energy": user.energy,
@@ -173,6 +177,7 @@ async def get_progress(data: dict = Body(...), session: AsyncSession = Depends(g
         "lastEnergyUpdate": user.lastEnergyUpdate.isoformat() if user.lastEnergyUpdate else None,
         "click_boost_level": user.click_boost_level or 0,
     }
+
 
 @app.post("/api/game/save_progress")
 async def save_progress(data: dict = Body(...), session: AsyncSession = Depends(get_async_session)):
