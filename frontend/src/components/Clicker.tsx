@@ -40,6 +40,13 @@ const Clicker: React.FC = () => {
 
   const fetchProgress = async () => {
     try {
+      // 🔁 Регистрация пользователя — ВАЖНО
+      await fetch(`${API_BASE_URL}/api/user/register`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ init_data: WebApp.initData }),
+      });
+
       const res = await fetch(`${API_BASE_URL}/api/game/progress`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -62,29 +69,7 @@ const Clicker: React.FC = () => {
     if (telegramUser) fetchProgress();
   }, [telegramUser]);
 
-  // ⛽ Автообновление энергии каждые 10 сек
-  useEffect(() => {
-    const interval = setInterval(async () => {
-      if (!telegramUser || energy >= maxEnergy) return;
-
-      try {
-        const res = await fetch(`${API_BASE_URL}/api/game/progress`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ init_data: WebApp.initData }),
-        });
-        const data = await res.json();
-        setEnergy(data.energy);
-        setLastEnergyUpdate(data.lastEnergyUpdate ? new Date(data.lastEnergyUpdate) : null);
-        setMaxEnergy(data.max_energy ?? 100);
-      } catch (err) {
-        console.error('Ошибка при автообновлении энергии:', err);
-      }
-    }, 10000);
-
-    return () => clearInterval(interval);
-  }, [telegramUser, energy, maxEnergy]);
-
+  // ⏳ Обратный отсчёт до восстановления энергии
   useEffect(() => {
     const interval = setInterval(() => {
       if (!lastEnergyUpdate || energy >= maxEnergy) {
@@ -102,6 +87,8 @@ const Clicker: React.FC = () => {
 
     return () => clearInterval(interval);
   }, [lastEnergyUpdate, energy, maxEnergy]);
+
+  // 👆 Автообновление энергии убрано (оно ломало логику восстановления)
 
   const handleMultiClick = (x: number, y: number) => {
     if (!telegramUser || loading || energy <= 0) return;
@@ -182,6 +169,7 @@ const Clicker: React.FC = () => {
 };
 
 export default Clicker;
+
 
 
 
