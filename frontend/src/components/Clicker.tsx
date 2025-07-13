@@ -62,16 +62,7 @@ const Clicker: React.FC = () => {
     if (telegramUser) fetchProgress();
   }, [telegramUser]);
 
-  // 🔁 Периодически обновляем энергию с сервера
-  useEffect(() => {
-    const interval = setInterval(() => {
-      if (telegramUser && energy < maxEnergy) {
-        fetchProgress();
-      }
-    }, 10000);
 
-    return () => clearInterval(interval);
-  }, [telegramUser, energy, maxEnergy]);
 
   // ⏱️ Таймер до следующей энергии
   useEffect(() => {
