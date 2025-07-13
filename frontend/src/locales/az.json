@@ -47,5 +47,8 @@
   "tournament_my_rank": "Sənin yerin: {{rank}}",
   "tournament_my_score": "Dəvət edilənlər: {{score}}",
   "tournament_no_data": "Hələ iştirakçı yoxdur. Birinci sən ol!",
-  "tab_tournament": "Turnir"
+  "tab_tournament": "Turnir",
+  "top_invites_this_week": "Bu həftə ən çox dəvət edənlər",
+  "your_place": "Sənin yerin",
+  "invites": "dəvət"
 }
