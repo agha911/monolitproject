@@ -185,6 +185,7 @@ async def get_progress(data: dict = Body(...), session: AsyncSession = Depends(g
         "total_xp": user.total_xp,
         "max_energy": user.max_energy,
         "lastEnergyUpdate": user.lastEnergyUpdate.isoformat() if user.lastEnergyUpdate else None,
+        "click_boost_level": user.click_boost_level or 0,
     }
 
 @app.post("/api/game/save_progress")
