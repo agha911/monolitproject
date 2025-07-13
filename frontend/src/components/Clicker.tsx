@@ -45,7 +45,6 @@ const Clicker: React.FC = () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ init_data: WebApp.initData }),
       });
-
       const data = await res.json();
       setEnergy(data.energy);
       setTotalXp(data.total_xp ?? 0);
@@ -78,14 +77,6 @@ const Clicker: React.FC = () => {
 
     return () => clearInterval(interval);
   }, [lastEnergyUpdate, energy, maxEnergy]);
-
-  useEffect(() => {
-    const interval = setInterval(() => {
-      if (telegramUser && energy < maxEnergy) fetchProgress();
-    }, 10000);
-
-    return () => clearInterval(interval);
-  }, [telegramUser, energy, maxEnergy]);
 
   const handleMultiClick = (x: number, y: number) => {
     if (!telegramUser || loading || energy <= 0) return;
@@ -167,6 +158,7 @@ const Clicker: React.FC = () => {
 };
 
 export default Clicker;
+
 
 
 
