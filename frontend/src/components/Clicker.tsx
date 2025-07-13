@@ -92,7 +92,7 @@ const Clicker: React.FC = () => {
       } catch (err) {
         console.error('Ошибка при автообновлении энергии:', err);
       }
-    }, 10000);
+    }, 60000);
 
     return () => clearInterval(interval);
   }, [telegramUser, energy, maxEnergy]);
