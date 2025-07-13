@@ -38,27 +38,37 @@ const Clicker: React.FC = () => {
     }
   }, []);
 
-  const fetchProgress = async () => {
-    try {
-      const res = await fetch(`${API_BASE_URL}/api/game/progress`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ init_data: WebApp.initData }),
-      });
-      const data = await res.json();
-      setEnergy(data.energy);
-      setTotalXp(data.total_xp ?? 0);
-      setLastEnergyUpdate(data.lastEnergyUpdate ? new Date(data.lastEnergyUpdate) : null);
-      setMaxEnergy(data.max_energy ?? 100);
-      setClickBoost((data.click_boost_level ?? 0) + 1);
-      setLoading(false);
-    } catch (err) {
-      console.error('Ошибка получения прогресса:', err);
-    }
-  };
-
   useEffect(() => {
-    if (telegramUser) fetchProgress();
+    if (!telegramUser) return;
+
+    const initializeUser = async () => {
+      try {
+        const registerUrl = `${API_BASE_URL}/api/user/register`;
+        await fetch(registerUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ init_data: WebApp.initData }),
+        });
+
+        const res = await fetch(`${API_BASE_URL}/api/game/progress`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ init_data: WebApp.initData }),
+        });
+
+        const data = await res.json();
+        setEnergy(data.energy);
+        setTotalXp(data.total_xp ?? 0);
+        setLastEnergyUpdate(data.lastEnergyUpdate ? new Date(data.lastEnergyUpdate) : null);
+        setMaxEnergy(data.max_energy ?? 100);
+        setClickBoost((data.click_boost_level ?? 0) + 1);
+        setLoading(false);
+      } catch (err) {
+        console.error('Ошибка инициализации пользователя:', err);
+      }
+    };
+
+    initializeUser();
   }, [telegramUser]);
 
   useEffect(() => {
@@ -67,6 +77,7 @@ const Clicker: React.FC = () => {
         setTimeToNextEnergy(null);
         return;
       }
+
       const now = new Date();
       const msPassed = now.getTime() - lastEnergyUpdate.getTime();
       const msToNext = ENERGY_RESTORE_INTERVAL_MS - (msPassed % ENERGY_RESTORE_INTERVAL_MS);
@@ -119,7 +130,6 @@ const Clicker: React.FC = () => {
   return (
     <div className="w-full min-h-screen bg-[#131f2f] text-center flex flex-col items-center justify-start pt-8 px-4 text-[#00f0ff]">
       <h2 className="text-2xl font-bold mb-2 drop-shadow-md">$GAP: {totalXp}</h2>
-
       <div className="text-sm text-[#7ee9ff] mb-2">x{clickBoost} boost</div>
 
       <div className="my-4 w-full max-w-md">
@@ -158,6 +168,7 @@ const Clicker: React.FC = () => {
 };
 
 export default Clicker;
+
 
 
 
