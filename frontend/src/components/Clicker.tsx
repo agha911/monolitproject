@@ -83,7 +83,7 @@ const Clicker: React.FC = () => {
 
     const gain = clickBoost;
     const newTotalXp = totalXp + gain;
-    const newEnergy = energy - 1;
+    const newEnergy = energy - gain;
     const newScore = score + gain;
 
     setScore(newScore);
