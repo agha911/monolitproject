@@ -6,6 +6,13 @@ import API_BASE_URL from './config';
 
 const ENERGY_RESTORE_INTERVAL_MS = 1 * 60 * 1000;
 
+interface FloatingText {
+  id: number;
+  value: number;
+  x: number;
+  y: number;
+}
+
 const Clicker: React.FC = () => {
   const { t } = useTranslation();
 
@@ -20,6 +27,7 @@ const Clicker: React.FC = () => {
   const [timeToNextEnergy, setTimeToNextEnergy] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [clickBoost, setClickBoost] = useState(1);
+  const [floatingTexts, setFloatingTexts] = useState<FloatingText[]>([]);
 
   useEffect(() => {
     WebApp.ready();
@@ -37,9 +45,7 @@ const Clicker: React.FC = () => {
 
     const initializeUser = async () => {
       try {
-        const registerUrl = `${API_BASE_URL}/api/user/register`;
-
-        await fetch(registerUrl, {
+        await fetch(`${API_BASE_URL}/api/user/register`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ init_data: WebApp.initData }),
@@ -109,19 +115,24 @@ const Clicker: React.FC = () => {
     return () => clearInterval(interval);
   }, [lastEnergyUpdate, energy, maxEnergy]);
 
-  const handleClick = () => {
+  const handleMultiClick = (x: number, y: number) => {
     if (!telegramUser || loading || energy <= 0) return;
 
     const gain = clickBoost;
     const newXp = xp + gain;
     const newTotalXp = totalXp + gain;
     const newEnergy = energy - gain;
-    const newScore = score + gain;
 
-    setScore(newScore);
     setXp(newXp);
-    setEnergy(newEnergy);
     setTotalXp(newTotalXp);
+    setEnergy(newEnergy);
+
+    const newId = Date.now() + Math.random();
+    const newText: FloatingText = { id: newId, value: gain, x, y };
+    setFloatingTexts((prev) => [...prev, newText]);
+    setTimeout(() => {
+      setFloatingTexts((prev) => prev.filter((t) => t.id !== newId));
+    }, 1000);
 
     fetch(`${API_BASE_URL}/api/game/click`, {
       method: 'POST',
@@ -172,14 +183,24 @@ const Clicker: React.FC = () => {
 
       <div className="relative w-96 h-96 mt-6">
         <div className="absolute inset-0 flex items-center justify-center">
-          <MainButton onClick={handleClick} energy={energy} />
+          <MainButton energy={energy} onMultiClick={handleMultiClick} />
         </div>
+        {floatingTexts.map((text) => (
+          <div
+            key={text.id}
+            className="absolute text-lg font-bold text-yellow-300 animate-float"
+            style={{ left: `${text.x}%`, top: `${text.y}%` }}
+          >
+            +{text.value}
+          </div>
+        ))}
       </div>
     </div>
   );
 };
 
 export default Clicker;
+
 
 
 
