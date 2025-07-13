@@ -1,11 +1,9 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from sqlalchemy import update
 from typing import Optional
 from datetime import datetime
 from app.models.user import User
 from sqlalchemy.orm.attributes import flag_modified
-from sqlalchemy import BigInteger
 
 MAX_ENERGY_CAP = 30000
 ENERGY_INCREMENT = 100
@@ -40,7 +38,6 @@ async def update_progress(
     session: AsyncSession,
     telegram_id: int,
     xp: int,
-    level: int,
     energy: int,
     total_xp: int
 ):
@@ -50,15 +47,10 @@ async def update_progress(
     user = result.scalar_one_or_none()
     if user:
         user.xp = xp
-        user.level = level
         user.energy = energy
         user.total_xp = total_xp
         await session.commit()
-        await session.refresh(user)  # Обновляем из БД, если нужно вернуть актуальные данные
-
-
-
-
+        await session.refresh(user)
 
 async def update_energy_and_time(
     session: AsyncSession,
@@ -84,15 +76,14 @@ async def get_leaderboard(session: AsyncSession, limit: int = 50):
 
 async def buy_max_energy(session: AsyncSession, user: User) -> bool:
     if user.max_energy >= MAX_ENERGY_CAP:
-        return False  # ❌ Уже достигнут максимум
+        return False
 
     if user.total_xp < ENERGY_UPGRADE_COST:
-        return False  # ❌ Недостаточно XP
+        return False
 
     user.total_xp -= ENERGY_UPGRADE_COST
     user.max_energy += ENERGY_INCREMENT
 
-    # Не забываем обновить текущую энергию тоже, если нужно
     if user.energy < user.max_energy:
         user.energy = user.max_energy
 
@@ -117,3 +108,4 @@ async def daily_checkin(session: AsyncSession, user: User, now: datetime, reward
     await session.commit()
     await session.refresh(user)
     return user
+
