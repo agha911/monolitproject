@@ -188,18 +188,31 @@ const Clicker: React.FC = () => {
         {floatingTexts.map((text) => (
           <div
             key={text.id}
-            className="absolute text-lg font-bold text-yellow-300 animate-float"
-            style={{ left: `${text.x}%`, top: `${text.y}%` }}
+            className="absolute text-lg font-bold text-yellow-300 animate-fade-up"
+            style={{
+              left: `${text.x}%`,
+              top: `${text.y}%`,
+              transform: 'translate(-50%, -50%)',
+              pointerEvents: 'none',
+              animation: 'floatUp 1s ease-out forwards',
+            }}
           >
             +{text.value}
           </div>
         ))}
+        <style>{`
+          @keyframes floatUp {
+            0% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+            100% { opacity: 0; transform: translate(-50%, -100%) scale(1.2); }
+          }
+        `}</style>
       </div>
     </div>
   );
 };
 
 export default Clicker;
+
 
 
 
