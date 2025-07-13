@@ -14,23 +14,23 @@ const Shop: React.FC = () => {
   const telegramUser = WebApp.initDataUnsafe?.user;
   const telegramUserId = telegramUser?.id;
 
-  useEffect(() => {
-    const fetchUserData = async () => {
-      try {
-        const res = await fetch(`${API_BASE_URL}/api/game/progress`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ init_data: WebApp.initData }),
-        });
-        const data = await res.json();
-        setClickBoostLevel(data.click_boost_level ?? 0);
-        setEnergyRefillCount(data.energy_refill_count ?? 0);
-        setTotalXp(data.total_xp ?? 0);
-      } catch (err) {
-        console.error('Ошибка при загрузке данных пользователя:', err);
-      }
-    };
+  const fetchUserData = async () => {
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/game/progress`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ init_data: WebApp.initData }),
+      });
+      const data = await res.json();
+      setClickBoostLevel(data.click_boost_level ?? 0);
+      setEnergyRefillCount(data.energy_refill_count ?? 0);
+      setTotalXp(data.total_xp ?? 0);
+    } catch (err) {
+      console.error('Ошибка при загрузке данных пользователя:', err);
+    }
+  };
 
+  useEffect(() => {
     fetchUserData();
   }, []);
 
@@ -54,8 +54,8 @@ const Shop: React.FC = () => {
 
       const data = await res.json();
       if (data.status === 'success') {
-        setClickBoostLevel(clickBoostLevel + 1);
-        setMessage(t('shop_success_boost', { value: `x${clickBoostLevel + 2}` }));
+        await fetchUserData(); // 🔁 синхронизация с бэком
+        setMessage(t('shop_success_boost', { value: `x${clickBoostLevel + 1}` }));
       } else {
         setMessage(`${t('shop_error')}: ${data.message}`);
       }
@@ -103,7 +103,7 @@ const Shop: React.FC = () => {
 
       const data = await res.json();
       if (data.status === 'success') {
-        setEnergyRefillCount(energyRefillCount + 1);
+        await fetchUserData(); // 🔁 синхронизация
         setMessage(t('refill_success'));
       } else {
         setMessage(`${t('shop_error')}: ${data.message}`);
@@ -171,6 +171,7 @@ const Shop: React.FC = () => {
 };
 
 export default Shop;
+
 
 
 
