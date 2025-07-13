@@ -177,9 +177,10 @@ async def get_progress(data: dict = Body(...), session: AsyncSession = Depends(g
             user.energy = new_energy
             user.lastEnergyUpdate = now
     else:
-        # Устанавливаем только точку отсчёта восстановления
-        user.lastEnergyUpdate = now
-        await session.commit()
+        # Только если энергия не на максимуме — ставим точку восстановления
+        if user.energy < max_energy:
+            user.lastEnergyUpdate = now
+            await session.commit()
 
     return {
         "xp": user.xp,
@@ -190,6 +191,7 @@ async def get_progress(data: dict = Body(...), session: AsyncSession = Depends(g
         "lastEnergyUpdate": user.lastEnergyUpdate.isoformat() if user.lastEnergyUpdate else None,
         "click_boost_level": user.click_boost_level or 0,
     }
+
 
 
 @app.post("/api/game/save_progress")
