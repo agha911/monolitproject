@@ -28,6 +28,7 @@ class User(Base):
     energy_refill_count = Column(Integer, default=0)
     last_energy_refill = Column(DateTime, nullable=True)
     click_boost_level = Column(Integer, default=0)
+    invited_at = Column(DateTime, nullable=True)
     
     
     
