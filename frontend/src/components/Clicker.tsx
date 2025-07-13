@@ -25,7 +25,7 @@ const Clicker: React.FC = () => {
   const [timeToNextEnergy, setTimeToNextEnergy] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [floatingTexts, setFloatingTexts] = useState<FloatingText[]>([]);
-  const [clickBoost, setClickBoost] = useState(1);
+  const [clickId, setClickId] = useState(0);
 
   useEffect(() => {
     WebApp.ready();
@@ -38,46 +38,63 @@ const Clicker: React.FC = () => {
     }
   }, []);
 
-  const fetchProgress = async () => {
-    try {
-      const res = await fetch(`${API_BASE_URL}/api/game/progress`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ init_data: WebApp.initData }),
-      });
-
-      const data = await res.json();
-      setEnergy(data.energy);
-      setTotalXp(data.total_xp ?? 0);
-      setLastEnergyUpdate(data.lastEnergyUpdate ? new Date(data.lastEnergyUpdate) : null);
-      setMaxEnergy(data.max_energy ?? 100);
-      setClickBoost((data.click_boost_level ?? 0) + 1);
-      setLoading(false);
-    } catch (err) {
-      console.error('Ошибка получения прогресса:', err);
-    }
-  };
-
   useEffect(() => {
-    if (telegramUser) fetchProgress();
-  }, [telegramUser]);
+    if (!telegramUser) return;
 
-  useEffect(() => {
-    const tickEnergy = async () => {
-      if (!lastEnergyUpdate || energy >= maxEnergy) return;
+    const initializeUser = async () => {
+      try {
+        const registerUrl = `${API_BASE_URL}/api/user/register`;
 
-      const now = new Date();
-      const minutesPassed = Math.floor((now.getTime() - lastEnergyUpdate.getTime()) / 60000);
-      const energyToRestore = Math.floor(minutesPassed);
+        await fetch(registerUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ init_data: WebApp.initData }),
+        });
 
-      if (energyToRestore > 0) {
-        await fetchProgress(); // сервер сам обновит энергию по lastEnergyUpdate
+        const res = await fetch(`${API_BASE_URL}/api/game/progress`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ init_data: WebApp.initData }),
+        });
+
+        const data = await res.json();
+        setEnergy(data.energy);
+        setTotalXp(data.total_xp ?? 0);
+        setLastEnergyUpdate(data.lastEnergyUpdate ? new Date(data.lastEnergyUpdate) : null);
+        setMaxEnergy(data.max_energy ?? 100);
+        setLoading(false);
+      } catch (error) {
+        console.error('Ошибка инициализации пользователя:', error);
       }
     };
 
-    const interval = setInterval(() => {
-      tickEnergy();
+    initializeUser();
+  }, [telegramUser]);
 
+  useEffect(() => {
+    const interval = setInterval(async () => {
+      if (!telegramUser || energy >= maxEnergy) return;
+
+      try {
+        const res = await fetch(`${API_BASE_URL}/api/game/progress`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ init_data: WebApp.initData }),
+        });
+        const data = await res.json();
+        setEnergy(data.energy);
+        setLastEnergyUpdate(data.lastEnergyUpdate ? new Date(data.lastEnergyUpdate) : null);
+        setMaxEnergy(data.max_energy ?? 100);
+      } catch (err) {
+        console.error('Ошибка при автообновлении энергии:', err);
+      }
+    }, 10000);
+
+    return () => clearInterval(interval);
+  }, [telegramUser, energy, maxEnergy]);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
       if (!lastEnergyUpdate || energy >= maxEnergy) {
         setTimeToNextEnergy(null);
         return;
@@ -97,9 +114,9 @@ const Clicker: React.FC = () => {
   const handleMultiClick = (x: number, y: number) => {
     if (!telegramUser || loading || energy <= 0) return;
 
-    const gain = clickBoost;
+    const gain = 1;
     const newTotalXp = totalXp + gain;
-    const newEnergy = energy - gain;
+    const newEnergy = energy - 1;
     const newScore = score + gain;
 
     setScore(newScore);
@@ -107,10 +124,15 @@ const Clicker: React.FC = () => {
     setTotalXp(newTotalXp);
 
     const newId = Date.now() + Math.random();
-    const newText: FloatingText = { id: newId, value: gain, x, y };
+    const newText: FloatingText = {
+      id: newId,
+      value: gain,
+      x,
+      y,
+    };
     setFloatingTexts((prev) => [...prev, newText]);
     setTimeout(() => {
-      setFloatingTexts((prev) => prev.filter((t) => t.id !== newId));
+      setFloatingTexts((prev) => prev.filter((t) => t.id !== newText.id));
     }, 1000);
 
     fetch(`${API_BASE_URL}/api/game/click`, {
@@ -135,17 +157,11 @@ const Clicker: React.FC = () => {
   return (
     <div className="w-full min-h-screen bg-[#131f2f] text-center flex flex-col items-center justify-start pt-8 px-4 text-[#00f0ff]">
       <h2 className="text-2xl font-bold mb-2 drop-shadow-md">$GAP: {totalXp}</h2>
-      <div className="text-sm text-[#7ee9ff] mb-2">x{clickBoost} boost</div>
 
       <div className="my-4 w-full max-w-md">
-        <label className="block mb-1 text-sm text-[#7ee9ff]">
-          {t('energy')}: {energy} / {maxEnergy}
-        </label>
+        <label className="block mb-1 text-sm text-[#7ee9ff]">{t('energy')}: {energy} / {maxEnergy}</label>
         <div className="w-full h-4 bg-[#0d273d] rounded overflow-hidden shadow-inner">
-          <div
-            className="h-full bg-gradient-to-r from-[#7af9ff] to-[#00f0ff] transition-all"
-            style={{ width: `${energyProgress}%` }}
-          />
+          <div className="h-full bg-gradient-to-r from-[#7af9ff] to-[#00f0ff] transition-all" style={{ width: `${energyProgress}%` }} />
         </div>
         {energy < maxEnergy && timeToNextEnergy && (
           <p className="text-xs mt-1 text-[#89dfff]">
@@ -173,6 +189,21 @@ const Clicker: React.FC = () => {
 };
 
 export default Clicker;
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
