@@ -25,7 +25,7 @@ const Clicker: React.FC = () => {
   const [timeToNextEnergy, setTimeToNextEnergy] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [floatingTexts, setFloatingTexts] = useState<FloatingText[]>([]);
-  const [clickBoost, setClickBoost] = useState(1); // Новый множитель за клик
+  const [clickBoost, setClickBoost] = useState(1);
 
   useEffect(() => {
     WebApp.ready();
@@ -111,6 +111,32 @@ const Clicker: React.FC = () => {
 
     return () => clearInterval(interval);
   }, [lastEnergyUpdate, energy, maxEnergy]);
+
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible' && telegramUser) {
+        fetch(`${API_BASE_URL}/api/game/progress`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ init_data: WebApp.initData }),
+        })
+          .then(res => res.json())
+          .then(data => {
+            setClickBoost((data.click_boost_level ?? 0) + 1);
+            setEnergy(data.energy);
+            setMaxEnergy(data.max_energy ?? 100);
+            setTotalXp(data.total_xp ?? 0);
+            setLastEnergyUpdate(data.lastEnergyUpdate ? new Date(data.lastEnergyUpdate) : null);
+          })
+          .catch(err => console.error('Ошибка при обновлении данных при возврате:', err));
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [telegramUser]);
 
   const handleMultiClick = (x: number, y: number) => {
     if (!telegramUser || loading || energy <= 0) return;
