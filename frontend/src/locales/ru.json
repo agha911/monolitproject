@@ -37,5 +37,15 @@
   "shop_error": "Недостаточно монет или лимит достигнут",
   "error": "Произошла ошибка",
   "refill_energy": "Восполнить энергию",
-  "refill_success": "Энергия успешно восполнена!"
+  "refill_success": "Энергия успешно восполнена!",
+  "boost_click": "Бустер клика",
+  "level": "Уровень",
+  "buy": "Купить",
+  "shop_max_level": "Достигнут максимальный уровень бустера",
+  "shop_success_boost": "Бустер улучшен до {{value}}",
+  "title_tournament": "🏆 Еженедельный турнир",
+  "tournament_my_rank": "Ваше место: {{rank}}",
+  "tournament_my_score": "Приглашено: {{score}}",
+  "tournament_no_data": "Участников пока нет. Приглашай друзей первым!",
+  "tab_tournament": "Турнир"
 }
