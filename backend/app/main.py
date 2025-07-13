@@ -158,8 +158,13 @@ async def get_progress(data: dict = Body(...), session: AsyncSession = Depends(g
     user = await crud_user.get_user(session, telegram_id)
     if not user:
         return {
-            "xp": 0, "level": 1, "energy": 100, "total_xp": 0,
-            "max_energy": 100, "lastEnergyUpdate": None,
+            "xp": 0,
+            "level": 1,
+            "energy": 100,
+            "total_xp": 0,
+            "max_energy": 100,
+            "lastEnergyUpdate": None,
+            "click_boost_level": 0,
         }
 
     now = datetime.utcnow()
@@ -185,7 +190,9 @@ async def get_progress(data: dict = Body(...), session: AsyncSession = Depends(g
         "total_xp": user.total_xp,
         "max_energy": user.max_energy,
         "lastEnergyUpdate": user.lastEnergyUpdate.isoformat() if user.lastEnergyUpdate else None,
+        "click_boost_level": user.click_boost_level or 0,  # 👈 Добавлено
     }
+
 
 @app.post("/api/game/save_progress")
 async def save_progress(data: dict = Body(...), session: AsyncSession = Depends(get_async_session)):
