@@ -62,9 +62,29 @@ const Clicker: React.FC = () => {
     if (telegramUser) fetchProgress();
   }, [telegramUser]);
 
+  // ⛽ Автообновление энергии каждые 10 сек
+  useEffect(() => {
+    const interval = setInterval(async () => {
+      if (!telegramUser || energy >= maxEnergy) return;
 
+      try {
+        const res = await fetch(`${API_BASE_URL}/api/game/progress`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ init_data: WebApp.initData }),
+        });
+        const data = await res.json();
+        setEnergy(data.energy);
+        setLastEnergyUpdate(data.lastEnergyUpdate ? new Date(data.lastEnergyUpdate) : null);
+        setMaxEnergy(data.max_energy ?? 100);
+      } catch (err) {
+        console.error('Ошибка при автообновлении энергии:', err);
+      }
+    }, 10000);
 
-  // ⏱️ Таймер до следующей энергии
+    return () => clearInterval(interval);
+  }, [telegramUser, energy, maxEnergy]);
+
   useEffect(() => {
     const interval = setInterval(() => {
       if (!lastEnergyUpdate || energy >= maxEnergy) {
