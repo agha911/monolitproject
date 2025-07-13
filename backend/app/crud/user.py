@@ -36,29 +36,45 @@ async def create_user(
     await session.refresh(user)
     return user
 
-async def update_progress(session: AsyncSession, telegram_id: int, xp: int, level: int, energy: int, total_xp: int):
-    await session.execute(
-        update(User)
-        .where(User.telegram_id == telegram_id)
-        .values(
-            xp=xp,
-            level=level,
-            energy=energy,
-            total_xp=total_xp
-        )
+async def update_progress(
+    session: AsyncSession,
+    telegram_id: int,
+    xp: int,
+    level: int,
+    energy: int,
+    total_xp: int
+):
+    result = await session.execute(
+        select(User).where(User.telegram_id == telegram_id)
     )
-    await session.commit()
+    user = result.scalar_one_or_none()
+    if user:
+        user.xp = xp
+        user.level = level
+        user.energy = energy
+        user.total_xp = total_xp
+        await session.commit()
+        await session.refresh(user)  # Обновляем из БД, если нужно вернуть актуальные данные
 
 
 
 
-async def update_energy_and_time(session: AsyncSession, telegram_id: int, energy: int, time: datetime):
-    await session.execute(
-        update(User)
-        .where(User.telegram_id == telegram_id)
-        .values(energy=energy, lastEnergyUpdate=time)
+
+async def update_energy_and_time(
+    session: AsyncSession,
+    telegram_id: int,
+    energy: int,
+    time: datetime
+):
+    result = await session.execute(
+        select(User).where(User.telegram_id == telegram_id)
     )
-    await session.commit()
+    user = result.scalar_one_or_none()
+    if user:
+        user.energy = energy
+        user.lastEnergyUpdate = time
+        await session.commit()
+        await session.refresh(user)
 
 async def get_leaderboard(session: AsyncSession, limit: int = 50):
     result = await session.execute(
