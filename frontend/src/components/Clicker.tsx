@@ -17,7 +17,6 @@ const Clicker: React.FC = () => {
   const { t } = useTranslation();
 
   const [telegramUser, setTelegramUser] = useState<WebAppUser | null>(null);
-  const [score, setScore] = useState(0);
   const [totalXp, setTotalXp] = useState(0);
   const [energy, setEnergy] = useState(100);
   const [maxEnergy, setMaxEnergy] = useState(100);
@@ -38,38 +37,38 @@ const Clicker: React.FC = () => {
     }
   }, []);
 
-  const fetchProgress = async () => {
-    try {
-      // 🔁 Регистрация пользователя — ВАЖНО
-      await fetch(`${API_BASE_URL}/api/user/register`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ init_data: WebApp.initData }),
-      });
-
-      const res = await fetch(`${API_BASE_URL}/api/game/progress`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ init_data: WebApp.initData }),
-      });
-
-      const data = await res.json();
-      setEnergy(data.energy);
-      setTotalXp(data.total_xp ?? 0);
-      setLastEnergyUpdate(data.lastEnergyUpdate ? new Date(data.lastEnergyUpdate) : null);
-      setMaxEnergy(data.max_energy ?? 100);
-      setClickBoost((data.click_boost_level ?? 0) + 1);
-      setLoading(false);
-    } catch (err) {
-      console.error('Ошибка получения прогресса:', err);
-    }
-  };
-
   useEffect(() => {
-    if (telegramUser) fetchProgress();
+    if (!telegramUser) return;
+
+    const initializeUser = async () => {
+      try {
+        await fetch(`${API_BASE_URL}/api/user/register`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ init_data: WebApp.initData }),
+        });
+
+        const res = await fetch(`${API_BASE_URL}/api/game/progress`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ init_data: WebApp.initData }),
+        });
+
+        const data = await res.json();
+        setEnergy(data.energy);
+        setTotalXp(data.total_xp ?? 0);
+        setLastEnergyUpdate(data.lastEnergyUpdate ? new Date(data.lastEnergyUpdate) : null);
+        setMaxEnergy(data.max_energy ?? 100);
+        setClickBoost((data.click_boost_level ?? 0) + 1);
+        setLoading(false);
+      } catch (error) {
+        console.error('Ошибка инициализации пользователя:', error);
+      }
+    };
+
+    initializeUser();
   }, [telegramUser]);
 
-  // ⏳ Обратный отсчёт до восстановления энергии
   useEffect(() => {
     const interval = setInterval(() => {
       if (!lastEnergyUpdate || energy >= maxEnergy) {
@@ -88,7 +87,30 @@ const Clicker: React.FC = () => {
     return () => clearInterval(interval);
   }, [lastEnergyUpdate, energy, maxEnergy]);
 
-  // 👆 Автообновление энергии убрано (оно ломало логику восстановления)
+  useEffect(() => {
+    const interval = setInterval(async () => {
+      if (!telegramUser || energy >= maxEnergy) return;
+
+      try {
+        const res = await fetch(`${API_BASE_URL}/api/game/progress`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ init_data: WebApp.initData }),
+        });
+
+        const data = await res.json();
+        setEnergy(data.energy);
+        setLastEnergyUpdate(data.lastEnergyUpdate ? new Date(data.lastEnergyUpdate) : null);
+        setMaxEnergy(data.max_energy ?? 100);
+        setClickBoost((data.click_boost_level ?? 0) + 1);
+        setTotalXp(data.total_xp ?? 0);
+      } catch (err) {
+        console.error('Ошибка при автообновлении энергии:', err);
+      }
+    }, 10000); // можно уменьшить интервал, если нужно быстрее отображать +1
+
+    return () => clearInterval(interval);
+  }, [telegramUser, energy, maxEnergy]);
 
   const handleMultiClick = (x: number, y: number) => {
     if (!telegramUser || loading || energy <= 0) return;
@@ -96,9 +118,7 @@ const Clicker: React.FC = () => {
     const gain = clickBoost;
     const newTotalXp = totalXp + gain;
     const newEnergy = energy - gain;
-    const newScore = score + gain;
 
-    setScore(newScore);
     setEnergy(newEnergy);
     setTotalXp(newTotalXp);
 
@@ -169,6 +189,7 @@ const Clicker: React.FC = () => {
 };
 
 export default Clicker;
+
 
 
 
