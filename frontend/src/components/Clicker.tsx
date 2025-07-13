@@ -38,61 +38,29 @@ const Clicker: React.FC = () => {
     }
   }, []);
 
+  const fetchProgress = async () => {
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/game/progress`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ init_data: WebApp.initData }),
+      });
+
+      const data = await res.json();
+      setEnergy(data.energy);
+      setTotalXp(data.total_xp ?? 0);
+      setLastEnergyUpdate(data.lastEnergyUpdate ? new Date(data.lastEnergyUpdate) : null);
+      setMaxEnergy(data.max_energy ?? 100);
+      setClickBoost((data.click_boost_level ?? 0) + 1);
+      setLoading(false);
+    } catch (err) {
+      console.error('Ошибка получения прогресса:', err);
+    }
+  };
+
   useEffect(() => {
-    if (!telegramUser) return;
-
-    const initializeUser = async () => {
-      try {
-        const registerUrl = `${API_BASE_URL}/api/user/register`;
-
-        await fetch(registerUrl, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ init_data: WebApp.initData }),
-        });
-
-        const res = await fetch(`${API_BASE_URL}/api/game/progress`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ init_data: WebApp.initData }),
-        });
-
-        const data = await res.json();
-        setEnergy(data.energy);
-        setTotalXp(data.total_xp ?? 0);
-        setLastEnergyUpdate(data.lastEnergyUpdate ? new Date(data.lastEnergyUpdate) : null);
-        setMaxEnergy(data.max_energy ?? 100);
-        setClickBoost((data.click_boost_level ?? 0) + 1);
-        setLoading(false);
-      } catch (error) {
-        console.error('Ошибка инициализации пользователя:', error);
-      }
-    };
-
-    initializeUser();
+    if (telegramUser) fetchProgress();
   }, [telegramUser]);
-
-  useEffect(() => {
-    const interval = setInterval(async () => {
-      if (!telegramUser || energy >= maxEnergy) return;
-
-      try {
-        const res = await fetch(`${API_BASE_URL}/api/game/progress`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ init_data: WebApp.initData }),
-        });
-        const data = await res.json();
-        setEnergy(data.energy);
-        setLastEnergyUpdate(data.lastEnergyUpdate ? new Date(data.lastEnergyUpdate) : null);
-        setMaxEnergy(data.max_energy ?? 100);
-      } catch (err) {
-        console.error('Ошибка при автообновлении энергии:', err);
-      }
-    }, 10000);
-
-    return () => clearInterval(interval);
-  }, [telegramUser, energy, maxEnergy]);
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -100,7 +68,6 @@ const Clicker: React.FC = () => {
         setTimeToNextEnergy(null);
         return;
       }
-
       const now = new Date();
       const msPassed = now.getTime() - lastEnergyUpdate.getTime();
       const msToNext = ENERGY_RESTORE_INTERVAL_MS - (msPassed % ENERGY_RESTORE_INTERVAL_MS);
@@ -113,29 +80,19 @@ const Clicker: React.FC = () => {
   }, [lastEnergyUpdate, energy, maxEnergy]);
 
   useEffect(() => {
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === 'visible' && telegramUser) {
-        fetch(`${API_BASE_URL}/api/game/progress`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ init_data: WebApp.initData }),
-        })
-          .then(res => res.json())
-          .then(data => {
-            setClickBoost((data.click_boost_level ?? 0) + 1);
-            setEnergy(data.energy);
-            setMaxEnergy(data.max_energy ?? 100);
-            setTotalXp(data.total_xp ?? 0);
-            setLastEnergyUpdate(data.lastEnergyUpdate ? new Date(data.lastEnergyUpdate) : null);
-          })
-          .catch(err => console.error('Ошибка при обновлении данных при возврате:', err));
-      }
-    };
+    const interval = setInterval(() => {
+      if (telegramUser && energy < maxEnergy) fetchProgress();
+    }, 10000);
 
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-    return () => {
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    return () => clearInterval(interval);
+  }, [telegramUser, energy, maxEnergy]);
+
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible' && telegramUser) fetchProgress();
     };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
   }, [telegramUser]);
 
   const handleMultiClick = (x: number, y: number) => {
@@ -151,12 +108,7 @@ const Clicker: React.FC = () => {
     setTotalXp(newTotalXp);
 
     const newId = Date.now() + Math.random();
-    const newText: FloatingText = {
-      id: newId,
-      value: gain,
-      x,
-      y,
-    };
+    const newText: FloatingText = { id: newId, value: gain, x, y };
     setFloatingTexts((prev) => [...prev, newText]);
     setTimeout(() => {
       setFloatingTexts((prev) => prev.filter((t) => t.id !== newId));
@@ -188,9 +140,14 @@ const Clicker: React.FC = () => {
       <div className="text-sm text-[#7ee9ff] mb-2">x{clickBoost} boost</div>
 
       <div className="my-4 w-full max-w-md">
-        <label className="block mb-1 text-sm text-[#7ee9ff]">{t('energy')}: {energy} / {maxEnergy}</label>
+        <label className="block mb-1 text-sm text-[#7ee9ff]">
+          {t('energy')}: {energy} / {maxEnergy}
+        </label>
         <div className="w-full h-4 bg-[#0d273d] rounded overflow-hidden shadow-inner">
-          <div className="h-full bg-gradient-to-r from-[#7af9ff] to-[#00f0ff] transition-all" style={{ width: `${energyProgress}%` }} />
+          <div
+            className="h-full bg-gradient-to-r from-[#7af9ff] to-[#00f0ff] transition-all"
+            style={{ width: `${energyProgress}%` }}
+          />
         </div>
         {energy < maxEnergy && timeToNextEnergy && (
           <p className="text-xs mt-1 text-[#89dfff]">
@@ -218,6 +175,7 @@ const Clicker: React.FC = () => {
 };
 
 export default Clicker;
+
 
 
 
