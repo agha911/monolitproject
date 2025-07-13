@@ -18,16 +18,14 @@ const Clicker: React.FC = () => {
 
   const [telegramUser, setTelegramUser] = useState<WebAppUser | null>(null);
   const [score, setScore] = useState(0);
-  const [xp, setXp] = useState(0);
   const [totalXp, setTotalXp] = useState(0);
-  const [level, setLevel] = useState(1);
   const [energy, setEnergy] = useState(100);
   const [maxEnergy, setMaxEnergy] = useState(100);
   const [lastEnergyUpdate, setLastEnergyUpdate] = useState<Date | null>(null);
   const [timeToNextEnergy, setTimeToNextEnergy] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [clickBoost, setClickBoost] = useState(1);
   const [floatingTexts, setFloatingTexts] = useState<FloatingText[]>([]);
+  const [clickBoost, setClickBoost] = useState(1);
 
   useEffect(() => {
     WebApp.ready();
@@ -45,7 +43,8 @@ const Clicker: React.FC = () => {
 
     const initializeUser = async () => {
       try {
-        await fetch(`${API_BASE_URL}/api/user/register`, {
+        const registerUrl = `${API_BASE_URL}/api/user/register`;
+        await fetch(registerUrl, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ init_data: WebApp.initData }),
@@ -58,10 +57,8 @@ const Clicker: React.FC = () => {
         });
 
         const data = await res.json();
-        setXp(data.xp);
-        setLevel(data.level);
         setEnergy(data.energy);
-        setTotalXp(data.total_xp ?? data.xp);
+        setTotalXp(data.total_xp ?? 0);
         setLastEnergyUpdate(data.lastEnergyUpdate ? new Date(data.lastEnergyUpdate) : null);
         setMaxEnergy(data.max_energy ?? 100);
         setClickBoost((data.click_boost_level ?? 0) + 1);
@@ -115,23 +112,23 @@ const Clicker: React.FC = () => {
     return () => clearInterval(interval);
   }, [lastEnergyUpdate, energy, maxEnergy]);
 
-  const handleMultiClick = (x: number, y: number) => {
+  const handleClick = (x: number, y: number) => {
     if (!telegramUser || loading || energy <= 0) return;
 
     const gain = clickBoost;
-    const newXp = xp + gain;
     const newTotalXp = totalXp + gain;
     const newEnergy = energy - gain;
+    const newScore = score + gain;
 
-    setXp(newXp);
-    setTotalXp(newTotalXp);
+    setScore(newScore);
     setEnergy(newEnergy);
+    setTotalXp(newTotalXp);
 
-    const newId = Date.now() + Math.random();
-    const newText: FloatingText = { id: newId, value: gain, x, y };
+    const id = Date.now() + Math.random();
+    const newText: FloatingText = { id, value: gain, x, y };
     setFloatingTexts((prev) => [...prev, newText]);
     setTimeout(() => {
-      setFloatingTexts((prev) => prev.filter((t) => t.id !== newId));
+      setFloatingTexts((prev) => prev.filter((t) => t.id !== id));
     }, 1000);
 
     fetch(`${API_BASE_URL}/api/game/click`, {
@@ -145,34 +142,26 @@ const Clicker: React.FC = () => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         init_data: WebApp.initData,
-        xp: newXp,
-        level: level,
         energy: newEnergy,
         total_xp: newTotalXp,
       }),
     });
   };
 
-  const xpNeeded = level * 100;
-  const xpProgress = Math.min((xp / xpNeeded) * 100, 100);
   const energyProgress = Math.min((energy / maxEnergy) * 100, 100);
 
   return (
-    <div className="w-full min-h-screen bg-[#131f2f] text-center flex flex-col items-center justify-start pt-8 px-4 text-[#00f0ff]">
+    <div className="w-full min-h-screen bg-[#131f2f] text-center flex flex-col items-center justify-start pt-8 px-4 text-[#00f0ff] relative">
       <h2 className="text-2xl font-bold mb-2 drop-shadow-md">$GAP: {totalXp}</h2>
       <div className="text-sm text-[#7ee9ff] mb-2">x{clickBoost} boost</div>
 
       <div className="my-4 w-full max-w-md">
-        <label className="block mb-1 text-sm text-[#7ee9ff]">{t('xp')}: {xp} / {xpNeeded}</label>
-        <div className="w-full h-4 bg-[#0d273d] rounded overflow-hidden shadow-inner">
-          <div className="h-full bg-gradient-to-r from-[#00f0ff] to-[#00c2ff] transition-all" style={{ width: `${xpProgress}%` }} />
-        </div>
-      </div>
-
-      <div className="my-4 w-full max-w-md">
         <label className="block mb-1 text-sm text-[#7ee9ff]">{t('energy')}: {energy} / {maxEnergy}</label>
         <div className="w-full h-4 bg-[#0d273d] rounded overflow-hidden shadow-inner">
-          <div className="h-full bg-gradient-to-r from-[#7af9ff] to-[#00f0ff] transition-all" style={{ width: `${energyProgress}%` }} />
+          <div
+            className="h-full bg-gradient-to-r from-[#7af9ff] to-[#00f0ff] transition-all"
+            style={{ width: `${energyProgress}%` }}
+          />
         </div>
         {energy < maxEnergy && timeToNextEnergy && (
           <p className="text-xs mt-1 text-[#89dfff]">
@@ -183,30 +172,33 @@ const Clicker: React.FC = () => {
 
       <div className="relative w-96 h-96 mt-6">
         <div className="absolute inset-0 flex items-center justify-center">
-          <MainButton energy={energy} onMultiClick={handleMultiClick} />
+          <MainButton energy={energy} onClick={handleClick} />
         </div>
         {floatingTexts.map((text) => (
           <div
             key={text.id}
-            className="absolute text-lg font-bold text-yellow-300 animate-fade-up"
+            className="absolute text-lg font-bold text-yellow-300 animate-float"
             style={{
               left: `${text.x}%`,
               top: `${text.y}%`,
-              transform: 'translate(-50%, -50%)',
               pointerEvents: 'none',
-              animation: 'floatUp 1s ease-out forwards',
+              animation: 'floatUpFade 1s ease-out',
             }}
           >
             +{text.value}
           </div>
         ))}
-        <style>{`
-          @keyframes floatUp {
-            0% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
-            100% { opacity: 0; transform: translate(-50%, -100%) scale(1.2); }
-          }
-        `}</style>
       </div>
+
+      {/* Анимация */}
+      <style>
+        {`
+          @keyframes floatUpFade {
+            0% { transform: translateY(0px); opacity: 1; }
+            100% { transform: translateY(-30px); opacity: 0; }
+          }
+        `}
+      </style>
     </div>
   );
 };
