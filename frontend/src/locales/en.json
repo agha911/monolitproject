@@ -47,5 +47,8 @@
   "tournament_my_rank": "Your rank: {{rank}}",
   "tournament_my_score": "Invited: {{score}}",
   "tournament_no_data": "No participants yet. Be the first to invite!",
-  "tab_tournament": "Tournament"
+  "tab_tournament": "Tournament",
+  "top_invites_this_week": "Top 10 inviters this week",
+  "your_place": "Your rank",
+  "invites": "invites"
 }
