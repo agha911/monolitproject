@@ -45,9 +45,7 @@ const Clicker: React.FC = () => {
 
     const initializeUser = async () => {
       try {
-        const registerUrl = `${API_BASE_URL}/api/user/register`;
-
-        await fetch(registerUrl, {
+        await fetch(`${API_BASE_URL}/api/user/register`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ init_data: WebApp.initDataUnsafe }),
@@ -76,8 +74,6 @@ const Clicker: React.FC = () => {
     initializeUser();
   }, [telegramUser]);
 
-
-
   useEffect(() => {
     const interval = setInterval(async () => {
       if (!telegramUser || energy >= maxEnergy) return;
@@ -86,13 +82,13 @@ const Clicker: React.FC = () => {
         const res = await fetch(`${API_BASE_URL}/api/game/progress`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ init_data: WebApp.initData }),
+          body: JSON.stringify({ init_data: WebApp.initDataUnsafe }),
         });
+
         const data = await res.json();
         setEnergy(data.energy);
         setLastEnergyUpdate(data.lastEnergyUpdate ? new Date(data.lastEnergyUpdate) : null);
         setMaxEnergy(data.max_energy ?? 100);
-        setClickBoost((data.click_boost_level ?? 0) + 1);
       } catch (err) {
         console.error('Ошибка при автообновлении энергии:', err);
       }
@@ -139,14 +135,14 @@ const Clicker: React.FC = () => {
     fetch(`${API_BASE_URL}/api/game/click`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ init_data: WebApp.initData }),
+      body: JSON.stringify({ init_data: WebApp.initDataUnsafe }),
     });
 
     fetch(`${API_BASE_URL}/api/game/save_progress`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        init_data: WebApp.initData,
+        init_data: WebApp.initDataUnsafe,
         energy: newEnergy,
         total_xp: newTotalXp,
       }),
@@ -196,6 +192,7 @@ const Clicker: React.FC = () => {
 };
 
 export default Clicker;
+
 
 
 
