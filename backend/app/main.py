@@ -29,11 +29,8 @@ ENERGY_RECOVERY_INTERVAL_MINUTES = 1
 MAX_ENERGY = 100
 DAILY_REWARDS = [100, 200, 300, 400, 500, 600, 700]
 
-
 app = FastAPI()
 print("[APP] Using DATABASE_URL:", os.getenv("DATABASE_URL"))
-
-
 
 app.add_middleware(
     CORSMiddleware,
@@ -62,34 +59,27 @@ def get_user_info_from_bot_api(user_id):
 
 @bot.message_handler(commands=["start"])
 async def handle_start(message: types.Message):
-    user_telegram_id = str(message.from_user.id)  # Сохраняем как строку
-
-    # Обработка реферальной ссылки
+    user_telegram_id = str(message.from_user.id)
     parts = message.text.split()
     if len(parts) > 1 and parts[1].isdigit():
-        inviter_telegram_id = str(int(parts[1]))  # Тоже строка
+        inviter_telegram_id = str(int(parts[1]))
         referral_cache[user_telegram_id] = inviter_telegram_id
         print(f"[REF-CACHE] {user_telegram_id} invited by {inviter_telegram_id}")
 
-    # Получаем user info через Bot API (не обязательно, но для логирования полезно)
     info = get_user_info_from_bot_api(int(user_telegram_id))
     print(f"[USER INFO] {info}")
 
-    # Кнопка запуска WebApp
     markup = InlineKeyboardMarkup()
     markup.add(InlineKeyboardButton("🚀 Başla", web_app=WebAppInfo(url="https://monolitproject-5g7v.vercel.app/")))
 
     await bot.send_message(
         chat_id=message.chat.id,
         text=(
-            "👋 Salam! Gappick-ə xoş gəlmisən!\n\n"
+            "👋 Salam! Gappick-ə xoş gəlmiəsən!\n\n"
             "Oyuna başlamaq üçün aşağıdakı düyməni kliklə."
         ),
         reply_markup=markup
     )
-
-
-
 
 @app.post("/api/user/register")
 async def register_user(
@@ -118,7 +108,7 @@ async def register_user(
             inviter = inviter_result.scalar_one_or_none()
             if inviter:
                 user.invited_by = inviter.id
-                user.invited_at = datetime.utcnow() + timedelta(hours=4)  # ⏱ UTC+4
+                user.invited_at = datetime.utcnow() + timedelta(hours=4)
                 inviter.invites_count += 1
                 inviter.total_xp += 1500
                 session.add_all([user, inviter])
@@ -137,7 +127,7 @@ async def register_user(
     new_user = User(
         telegram_id=telegram_id,
         invited_by=inviter.id if inviter else None,
-        invited_at=datetime.utcnow() + timedelta(hours=4) if inviter else None,  # ✅ устанавливаем только при наличии инвайтера
+        invited_at=datetime.utcnow() + timedelta(hours=4) if inviter else None,
         username=info.get("username"),
         first_name=info.get("first_name"),
         last_name=info.get("last_name"),
@@ -147,12 +137,6 @@ async def register_user(
 
     return {"status": "ok"}
 
-
-
-
-
-
-
 @app.post("/api/game/progress")
 async def get_progress(data: dict = Body(...), session: AsyncSession = Depends(get_async_session)):
     telegram_id = parse_telegram_user_id(data["init_data"])
@@ -160,7 +144,6 @@ async def get_progress(data: dict = Body(...), session: AsyncSession = Depends(g
     if not user:
         return {
             "xp": 0,
-            "level": 1,
             "energy": 100,
             "total_xp": 0,
             "max_energy": 100,
@@ -186,14 +169,12 @@ async def get_progress(data: dict = Body(...), session: AsyncSession = Depends(g
 
     return {
         "xp": user.xp,
-        "level": user.level,
         "energy": user.energy,
         "total_xp": user.total_xp,
         "max_energy": user.max_energy,
         "lastEnergyUpdate": user.lastEnergyUpdate.isoformat() if user.lastEnergyUpdate else None,
-        "click_boost_level": user.click_boost_level or 0,  # 👈 Добавлено
+        "click_boost_level": user.click_boost_level or 0,
     }
-
 
 @app.post("/api/game/save_progress")
 async def save_progress(data: dict = Body(...), session: AsyncSession = Depends(get_async_session)):
@@ -203,11 +184,10 @@ async def save_progress(data: dict = Body(...), session: AsyncSession = Depends(
             session=session,
             telegram_id=telegram_id,
             xp=data["xp"],
-            level=data["level"],
             energy=data["energy"],
             total_xp=data.get("total_xp", 0),
         )
-        print(f"[SAVED] {telegram_id} → XP: {data['xp']}, LVL: {data['level']}, ENERGY: {data['energy']}")
+        print(f"[SAVED] {telegram_id} → XP: {data['xp']}, ENERGY: {data['energy']}")
         return {"status": "saved"}
     except Exception as e:
         return {"status": "error", "message": str(e)}
@@ -218,13 +198,13 @@ async def click(data: dict = Body(...), session: AsyncSession = Depends(get_asyn
         telegram_id = parse_telegram_user_id(data["init_data"])
         user = await crud_user.get_user(session, telegram_id)
         if user:
+            click_value = user.click_boost_level + 1
             await crud_user.update_progress(
                 session=session,
                 telegram_id=telegram_id,
                 xp=user.xp,
-                level=user.level,
                 energy=user.energy,
-                total_xp=user.total_xp + 1
+                total_xp=user.total_xp + click_value
             )
         return {"status": "clicked"}
     except Exception as e:
