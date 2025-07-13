@@ -4,6 +4,7 @@ import MainScreen from './components/ui/MainScreen';
 import './index.css';
 import './i18n';
 import WebApp from '@twa-dev/sdk';
+import Tournament from './components/ui/Tournament'; // 👈 новый импорт (если понадобится напрямую)
 
 // Безопасная инициализация Telegram WebApp
 if (typeof WebApp !== 'undefined' && WebApp.initDataUnsafe?.user) {
