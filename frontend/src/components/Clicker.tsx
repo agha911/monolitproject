@@ -19,6 +19,7 @@ const Clicker: React.FC = () => {
   const [lastEnergyUpdate, setLastEnergyUpdate] = useState<Date | null>(null);
   const [timeToNextEnergy, setTimeToNextEnergy] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [clickBoost, setClickBoost] = useState(1);
 
   useEffect(() => {
     WebApp.ready();
@@ -57,6 +58,7 @@ const Clicker: React.FC = () => {
         setTotalXp(data.total_xp ?? data.xp);
         setLastEnergyUpdate(data.lastEnergyUpdate ? new Date(data.lastEnergyUpdate) : null);
         setMaxEnergy(data.max_energy ?? 100);
+        setClickBoost((data.click_boost_level ?? 0) + 1);
         setLoading(false);
       } catch (error) {
         console.error('Ошибка инициализации пользователя:', error);
@@ -65,8 +67,6 @@ const Clicker: React.FC = () => {
 
     initializeUser();
   }, [telegramUser]);
-
-
 
   useEffect(() => {
     const interval = setInterval(async () => {
@@ -82,6 +82,7 @@ const Clicker: React.FC = () => {
         setEnergy(data.energy);
         setLastEnergyUpdate(data.lastEnergyUpdate ? new Date(data.lastEnergyUpdate) : null);
         setMaxEnergy(data.max_energy ?? 100);
+        setClickBoost((data.click_boost_level ?? 0) + 1);
       } catch (err) {
         console.error('Ошибка при автообновлении энергии:', err);
       }
@@ -109,26 +110,17 @@ const Clicker: React.FC = () => {
   }, [lastEnergyUpdate, energy, maxEnergy]);
 
   const handleClick = () => {
-    if (!telegramUser || loading || energy <= 0 || level >= 100) return;
+    if (!telegramUser || loading || energy <= 0) return;
 
-    const gain = 1;
+    const gain = clickBoost;
     const newXp = xp + gain;
     const newTotalXp = totalXp + gain;
-    const newEnergy = energy - 1;
+    const newEnergy = energy - gain;
     const newScore = score + gain;
-    let newLevel = level;
-    let adjustedXp = newXp;
-
-    const xpNeeded = level * 100;
-    if (newXp >= xpNeeded && level < 100) {
-      newLevel = level + 1;
-      adjustedXp = newXp - xpNeeded;
-    }
 
     setScore(newScore);
-    setXp(adjustedXp);
+    setXp(newXp);
     setEnergy(newEnergy);
-    setLevel(newLevel);
     setTotalXp(newTotalXp);
 
     fetch(`${API_BASE_URL}/api/game/click`, {
@@ -142,8 +134,8 @@ const Clicker: React.FC = () => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         init_data: WebApp.initData,
-        xp: adjustedXp,
-        level: newLevel,
+        xp: newXp,
+        level: level,
         energy: newEnergy,
         total_xp: newTotalXp,
       }),
@@ -157,7 +149,7 @@ const Clicker: React.FC = () => {
   return (
     <div className="w-full min-h-screen bg-[#131f2f] text-center flex flex-col items-center justify-start pt-8 px-4 text-[#00f0ff]">
       <h2 className="text-2xl font-bold mb-2 drop-shadow-md">$GAP: {totalXp}</h2>
-      <h3 className="text-lg font-medium mb-4">{t('level')}: {level} / 100</h3>
+      <div className="text-sm text-[#7ee9ff] mb-2">x{clickBoost} boost</div>
 
       <div className="my-4 w-full max-w-md">
         <label className="block mb-1 text-sm text-[#7ee9ff]">{t('xp')}: {xp} / {xpNeeded}</label>
@@ -188,6 +180,7 @@ const Clicker: React.FC = () => {
 };
 
 export default Clicker;
+
 
 
 
