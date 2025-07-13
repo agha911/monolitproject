@@ -4,19 +4,21 @@ import Tasks from './Tasks';
 import Friends from './Friends';
 import NavigationTabs from './NavigationTabs';
 import Shop from './Shop';
-import LanguageSwitcher from './LanguageSwitcher'; // ✅ импорт переключателя
+import Tournament from './Tournament'; // ✅ импорт турнира
+import LanguageSwitcher from './LanguageSwitcher';
 
 const MainScreen: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'home' | 'tasks' | 'friends' | 'shop'>('home');
+  const [activeTab, setActiveTab] = useState<'home' | 'tasks' | 'friends' | 'shop' | 'tournament'>('home');
 
   return (
     <div className="pb-20 relative">
-      <LanguageSwitcher /> {/* ✅ компонент переключателя языков */}
+      <LanguageSwitcher />
 
       {activeTab === 'home' && <Clicker />}
       {activeTab === 'tasks' && <Tasks />}
       {activeTab === 'friends' && <Friends />}
       {activeTab === 'shop' && <Shop />}
+      {activeTab === 'tournament' && <Tournament />} {/* ✅ новый экран */}
 
       <NavigationTabs activeTab={activeTab} setActiveTab={setActiveTab} />
     </div>
@@ -24,3 +26,4 @@ const MainScreen: React.FC = () => {
 };
 
 export default MainScreen;
+
