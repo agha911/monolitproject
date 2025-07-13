@@ -143,7 +143,6 @@ async def get_progress(data: dict = Body(...), session: AsyncSession = Depends(g
     user = await crud_user.get_user(session, telegram_id)
     if not user:
         return {
-            "xp": 0,
             "energy": 100,
             "total_xp": 0,
             "max_energy": 100,
@@ -168,7 +167,6 @@ async def get_progress(data: dict = Body(...), session: AsyncSession = Depends(g
         await crud_user.update_energy_and_time(session, telegram_id, user.energy, now)
 
     return {
-        "xp": user.xp,
         "energy": user.energy,
         "total_xp": user.total_xp,
         "max_energy": user.max_energy,
@@ -183,11 +181,10 @@ async def save_progress(data: dict = Body(...), session: AsyncSession = Depends(
         await crud_user.update_progress(
             session=session,
             telegram_id=telegram_id,
-            xp=data["xp"],
             energy=data["energy"],
             total_xp=data.get("total_xp", 0),
         )
-        print(f"[SAVED] {telegram_id} → XP: {data['xp']}, ENERGY: {data['energy']}")
+        print(f"[SAVED] {telegram_id} → ENERGY: {data['energy']}")
         return {"status": "saved"}
     except Exception as e:
         return {"status": "error", "message": str(e)}
@@ -198,18 +195,16 @@ async def click(data: dict = Body(...), session: AsyncSession = Depends(get_asyn
         telegram_id = parse_telegram_user_id(data["init_data"])
         user = await crud_user.get_user(session, telegram_id)
         if user:
-            click_value = (user.click_boost_level or 0) + 1  # 🔐 защита от None
+            click_value = (user.click_boost_level or 0) + 1
             await crud_user.update_progress(
                 session=session,
                 telegram_id=telegram_id,
                 energy=user.energy,
-                total_xp=user.total_xp + click_value,
-                xp=user.xp  # Можно оставить 0, если больше не нужен
+                total_xp=user.total_xp + click_value
             )
         return {"status": "clicked"}
     except Exception as e:
         return {"status": "error", "message": str(e)}
-
 
 @app.get("/api/game/leaderboard")
 async def leaderboard(session: AsyncSession = Depends(get_async_session)):
@@ -222,7 +217,6 @@ async def leaderboard(session: AsyncSession = Depends(get_async_session)):
         } for u in users
     ]
 
-
 @app.post("/api/tournament/leaderboard")
 async def get_tournament_leaderboard(
     data: dict = Body(...),
@@ -230,20 +224,14 @@ async def get_tournament_leaderboard(
 ):
     telegram_id = parse_telegram_user_id(data["init_data"])
 
-    # Время по UTC+4 → переводим в UTC
     now_utc = datetime.utcnow()
     utc_offset = timedelta(hours=4)
-
-    # Текущий понедельник 00:00 (UTC)
     start_of_week = (now_utc + utc_offset).replace(hour=0, minute=0, second=0, microsecond=0)
     start_of_week -= timedelta(days=start_of_week.weekday())
     start_utc = start_of_week - utc_offset
-
-    # Суббота 23:59:59 (UTC)
     end_of_week = start_of_week + timedelta(days=5, hours=23, minutes=59, seconds=59)
     end_utc = end_of_week - utc_offset
 
-    # Подсчёт приглашений для всех пользователей за текущую неделю
     stmt = (
         select(
             User.invited_by,
@@ -261,7 +249,6 @@ async def get_tournament_leaderboard(
     results = await session.execute(stmt)
     rows = results.fetchall()
 
-    # Формируем рейтинг
     leaderboard = []
     my_rank = None
     my_score = 0
@@ -270,7 +257,6 @@ async def get_tournament_leaderboard(
         user_id = row.invited_by
         score = row.weekly_invites
 
-        # Получаем info об этом пользователе
         user_result = await session.execute(select(User).where(User.id == user_id))
         user = user_result.scalar_one_or_none()
 
@@ -295,7 +281,6 @@ async def get_tournament_leaderboard(
     top_10 = leaderboard[:10]
 
     if my_rank is None:
-        # Посчитать отдельно, если пользователь не в ТОП-10
         for idx, row in enumerate(rows):
             if row.invited_by == telegram_id:
                 my_rank = idx + 1
@@ -307,7 +292,6 @@ async def get_tournament_leaderboard(
         "my_rank": my_rank,
         "my_score": my_score,
     }
-
 
 @app.get("/")
 def root():
@@ -323,7 +307,6 @@ async def count_users(session: AsyncSession = Depends(get_async_session)):
     result = await session.execute(select(func.count(User.id)))
     count = result.scalar()
     return {"count": count}
-
 
 app.include_router(task.router)
 app.include_router(shop.router)
@@ -343,10 +326,8 @@ async def run_bot_polling():
 
 @app.on_event("startup")
 async def start_background_tasks():
-    # async-задачи FastAPI
     asyncio.create_task(notify_loop())
     asyncio.create_task(reset_loop())
-
     asyncio.create_task(run_bot_polling())
 
 async def notify_loop():
@@ -357,7 +338,8 @@ async def notify_loop():
                 await notify_max_energy_users()
             except Exception as e:
                 print(f"[NOTIFY ERROR] {e}")
-        await asyncio.sleep(3600)  # каждый час
+        await asyncio.sleep(3600)
+
 
 
 
