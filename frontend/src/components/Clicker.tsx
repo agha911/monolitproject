@@ -87,14 +87,6 @@ const Clicker: React.FC = () => {
     return () => clearInterval(interval);
   }, [telegramUser, energy, maxEnergy]);
 
-  useEffect(() => {
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === 'visible' && telegramUser) fetchProgress();
-    };
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
-  }, [telegramUser]);
-
   const handleMultiClick = (x: number, y: number) => {
     if (!telegramUser || loading || energy <= 0) return;
 
@@ -175,6 +167,7 @@ const Clicker: React.FC = () => {
 };
 
 export default Clicker;
+
 
 
 
