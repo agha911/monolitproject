@@ -37,7 +37,6 @@ async def create_user(
 async def update_progress(
     session: AsyncSession,
     telegram_id: int,
-    xp: int,
     energy: int,
     total_xp: int
 ):
@@ -46,7 +45,6 @@ async def update_progress(
     )
     user = result.scalar_one_or_none()
     if user:
-        user.xp = xp
         user.energy = energy
         user.total_xp = total_xp
         await session.commit()
@@ -108,4 +106,5 @@ async def daily_checkin(session: AsyncSession, user: User, now: datetime, reward
     await session.commit()
     await session.refresh(user)
     return user
+
 
