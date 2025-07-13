@@ -181,9 +181,7 @@ async def get_progress(data: dict = Body(...), session: AsyncSession = Depends(g
             user.energy = new_energy
             user.lastEnergyUpdate = now
     else:
-        # Если нет времени последнего обновления, просто записываем текущую точку отсчёта
-        user.lastEnergyUpdate = now
-        await session.commit()
+        await crud_user.update_energy_and_time(session, telegram_id, user.energy, now)
 
     return {
         "xp": user.xp,
