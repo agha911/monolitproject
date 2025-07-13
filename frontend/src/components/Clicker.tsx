@@ -17,15 +17,14 @@ const Clicker: React.FC = () => {
   const { t } = useTranslation();
 
   const [telegramUser, setTelegramUser] = useState<WebAppUser | null>(null);
-  const [score, setScore] = useState(0);
   const [totalXp, setTotalXp] = useState(0);
   const [energy, setEnergy] = useState(100);
   const [maxEnergy, setMaxEnergy] = useState(100);
   const [lastEnergyUpdate, setLastEnergyUpdate] = useState<Date | null>(null);
   const [timeToNextEnergy, setTimeToNextEnergy] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [floatingTexts, setFloatingTexts] = useState<FloatingText[]>([]);
   const [clickBoost, setClickBoost] = useState(1);
+  const [floatingTexts, setFloatingTexts] = useState<FloatingText[]>([]);
 
   useEffect(() => {
     WebApp.ready();
@@ -34,7 +33,6 @@ const Clicker: React.FC = () => {
       setTelegramUser(user);
     } else {
       alert('Ошибка: не удалось получить данные Telegram-пользователя.');
-      console.warn('initDataUnsafe.user = ', WebApp.initDataUnsafe);
     }
   }, []);
 
@@ -43,8 +41,7 @@ const Clicker: React.FC = () => {
 
     const initializeUser = async () => {
       try {
-        const registerUrl = `${API_BASE_URL}/api/user/register`;
-        await fetch(registerUrl, {
+        await fetch(`${API_BASE_URL}/api/user/register`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ init_data: WebApp.initData }),
@@ -81,6 +78,7 @@ const Clicker: React.FC = () => {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ init_data: WebApp.initData }),
         });
+
         const data = await res.json();
         setEnergy(data.energy);
         setLastEnergyUpdate(data.lastEnergyUpdate ? new Date(data.lastEnergyUpdate) : null);
@@ -112,21 +110,18 @@ const Clicker: React.FC = () => {
     return () => clearInterval(interval);
   }, [lastEnergyUpdate, energy, maxEnergy]);
 
-  const handleClick = (x: number, y: number) => {
+  const handleMultiClick = (x: number, y: number) => {
     if (!telegramUser || loading || energy <= 0) return;
 
     const gain = clickBoost;
     const newTotalXp = totalXp + gain;
     const newEnergy = energy - gain;
-    const newScore = score + gain;
 
-    setScore(newScore);
-    setEnergy(newEnergy);
     setTotalXp(newTotalXp);
+    setEnergy(newEnergy);
 
     const id = Date.now() + Math.random();
-    const newText: FloatingText = { id, value: gain, x, y };
-    setFloatingTexts((prev) => [...prev, newText]);
+    setFloatingTexts((prev) => [...prev, { id, value: gain, x, y }]);
     setTimeout(() => {
       setFloatingTexts((prev) => prev.filter((t) => t.id !== id));
     }, 1000);
@@ -142,8 +137,8 @@ const Clicker: React.FC = () => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         init_data: WebApp.initData,
-        energy: newEnergy,
         total_xp: newTotalXp,
+        energy: newEnergy,
       }),
     });
   };
@@ -151,7 +146,7 @@ const Clicker: React.FC = () => {
   const energyProgress = Math.min((energy / maxEnergy) * 100, 100);
 
   return (
-    <div className="w-full min-h-screen bg-[#131f2f] text-center flex flex-col items-center justify-start pt-8 px-4 text-[#00f0ff] relative">
+    <div className="w-full min-h-screen bg-[#131f2f] text-center flex flex-col items-center justify-start pt-8 px-4 text-[#00f0ff]">
       <h2 className="text-2xl font-bold mb-2 drop-shadow-md">$GAP: {totalXp}</h2>
       <div className="text-sm text-[#7ee9ff] mb-2">x{clickBoost} boost</div>
 
@@ -172,15 +167,17 @@ const Clicker: React.FC = () => {
 
       <div className="relative w-96 h-96 mt-6">
         <div className="absolute inset-0 flex items-center justify-center">
-          <MainButton energy={energy} onClick={handleClick} />
+          <MainButton energy={energy} onMultiClick={handleMultiClick} />
         </div>
+
         {floatingTexts.map((text) => (
           <div
             key={text.id}
-            className="absolute text-lg font-bold text-yellow-300 animate-float"
+            className="absolute text-lg font-bold text-yellow-300"
             style={{
               left: `${text.x}%`,
               top: `${text.y}%`,
+              transform: 'translate(-50%, -50%)',
               pointerEvents: 'none',
               animation: 'floatUpFade 1s ease-out',
             }}
@@ -188,22 +185,20 @@ const Clicker: React.FC = () => {
             +{text.value}
           </div>
         ))}
-      </div>
 
-      {/* Анимация */}
-      <style>
-        {`
+        <style>{`
           @keyframes floatUpFade {
-            0% { transform: translateY(0px); opacity: 1; }
-            100% { transform: translateY(-30px); opacity: 0; }
+            0% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+            100% { opacity: 0; transform: translate(-50%, -100%) scale(1.2); }
           }
-        `}
-      </style>
+        `}</style>
+      </div>
     </div>
   );
 };
 
 export default Clicker;
+
 
 
 
