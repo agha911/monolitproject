@@ -211,13 +211,14 @@ async def click(data: dict = Body(...), session: AsyncSession = Depends(get_asyn
         telegram_id = parse_telegram_user_id(data["init_data"])
         user = await crud_user.get_user(session, telegram_id)
         if user:
+            boost = (user.click_boost_level or 0) + 1  # ← множитель
             await crud_user.update_progress(
                 session=session,
                 telegram_id=telegram_id,
                 xp=user.xp,
                 level=user.level,
                 energy=user.energy,
-                total_xp=user.total_xp + 1
+                total_xp=user.total_xp + boost  # ← прибавляем буст
             )
         return {"status": "clicked"}
     except Exception as e:
