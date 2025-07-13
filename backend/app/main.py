@@ -108,7 +108,6 @@ async def register_user(
 
     info = get_user_info_from_bot_api(telegram_id)
 
-    # Получаем inviter_id из кэша, если есть
     inviter_id_str = referral_cache.get(telegram_id_str)
     inviter = None
 
@@ -119,8 +118,9 @@ async def register_user(
             inviter = inviter_result.scalar_one_or_none()
             if inviter:
                 user.invited_by = inviter.id
+                user.invited_at = datetime.utcnow() + timedelta(hours=4)  # ⏱ UTC+4
                 inviter.invites_count += 1
-                inviter.total_xp += 200
+                inviter.total_xp += 1500
                 session.add_all([user, inviter])
                 await session.commit()
         return {"status": "already_registered"}
@@ -137,6 +137,7 @@ async def register_user(
     new_user = User(
         telegram_id=telegram_id,
         invited_by=inviter.id if inviter else None,
+        invited_at=datetime.utcnow() + timedelta(hours=4) if inviter else None,  # ✅ устанавливаем только при наличии инвайтера
         username=info.get("username"),
         first_name=info.get("first_name"),
         last_name=info.get("last_name"),
@@ -239,6 +240,93 @@ async def leaderboard(session: AsyncSession = Depends(get_async_session)):
             "total_xp": u.total_xp
         } for u in users
     ]
+
+
+@app.get("/api/tournament/leaderboard")
+async def get_tournament_leaderboard(
+    data: dict = Body(...),
+    session: AsyncSession = Depends(get_async_session),
+):
+    telegram_id = parse_telegram_user_id(data["init_data"])
+
+    # Время по UTC+4 → переводим в UTC
+    now_utc = datetime.utcnow()
+    utc_offset = timedelta(hours=4)
+
+    # Текущий понедельник 00:00 (UTC)
+    start_of_week = (now_utc + utc_offset).replace(hour=0, minute=0, second=0, microsecond=0)
+    start_of_week -= timedelta(days=start_of_week.weekday())
+    start_utc = start_of_week - utc_offset
+
+    # Суббота 23:59:59 (UTC)
+    end_of_week = start_of_week + timedelta(days=5, hours=23, minutes=59, seconds=59)
+    end_utc = end_of_week - utc_offset
+
+    # Подсчёт приглашений для всех пользователей за текущую неделю
+    stmt = (
+        select(
+            User.invited_by,
+            func.count(User.id).label("weekly_invites")
+        )
+        .where(
+            User.invited_at >= start_utc,
+            User.invited_at <= end_utc,
+            User.invited_by.isnot(None)
+        )
+        .group_by(User.invited_by)
+        .order_by(func.count(User.id).desc())
+    )
+
+    results = await session.execute(stmt)
+    rows = results.fetchall()
+
+    # Формируем рейтинг
+    leaderboard = []
+    my_rank = None
+    my_score = 0
+
+    for idx, row in enumerate(rows):
+        user_id = row.invited_by
+        score = row.weekly_invites
+
+        # Получаем info об этом пользователе
+        user_result = await session.execute(select(User).where(User.id == user_id))
+        user = user_result.scalar_one_or_none()
+
+        if not user:
+            continue
+
+        entry = {
+            "rank": idx + 1,
+            "telegram_id": user.telegram_id,
+            "username": user.username,
+            "first_name": user.first_name,
+            "last_name": user.last_name,
+            "score": score,
+        }
+
+        leaderboard.append(entry)
+
+        if user.telegram_id == telegram_id:
+            my_rank = idx + 1
+            my_score = score
+
+    top_10 = leaderboard[:10]
+
+    if my_rank is None:
+        # Посчитать отдельно, если пользователь не в ТОП-10
+        for idx, row in enumerate(rows):
+            if row.invited_by == telegram_id:
+                my_rank = idx + 1
+                my_score = row.weekly_invites
+                break
+
+    return {
+        "top_10": top_10,
+        "my_rank": my_rank,
+        "my_score": my_score,
+    }
+
 
 @app.get("/")
 def root():
