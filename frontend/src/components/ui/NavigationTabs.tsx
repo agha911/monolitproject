@@ -2,8 +2,8 @@ import React from 'react';
 import { useTranslation } from 'react-i18next';
 
 interface Props {
-  activeTab: 'home' | 'tasks' | 'friends' | 'shop';
-  setActiveTab: (tab: 'home' | 'tasks' | 'friends' | 'shop') => void;
+  activeTab: 'home' | 'tasks' | 'friends' | 'shop' | 'tournament';
+  setActiveTab: (tab: 'home' | 'tasks' | 'friends' | 'shop' | 'tournament') => void;
 }
 
 const NavigationTabs: React.FC<Props> = ({ activeTab, setActiveTab }) => {
@@ -38,6 +38,13 @@ const NavigationTabs: React.FC<Props> = ({ activeTab, setActiveTab }) => {
       >
         🛒
         <span className="text-xs">{t('tab_shop')}</span>
+      </button>
+      <button
+        onClick={() => setActiveTab('tournament')}
+        className={`flex flex-col items-center ${activeTab === 'tournament' ? 'font-bold text-[#7af9ff]' : ''}`}
+      >
+        🏆
+        <span className="text-xs">{t('tab_tournament')}</span>
       </button>
     </div>
   );
