@@ -242,7 +242,7 @@ async def leaderboard(session: AsyncSession = Depends(get_async_session)):
     ]
 
 
-@app.get("/api/tournament/leaderboard")
+@app.post("/api/tournament/leaderboard")
 async def get_tournament_leaderboard(
     data: dict = Body(...),
     session: AsyncSession = Depends(get_async_session),
