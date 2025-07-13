@@ -158,13 +158,8 @@ async def get_progress(data: dict = Body(...), session: AsyncSession = Depends(g
     user = await crud_user.get_user(session, telegram_id)
     if not user:
         return {
-            "xp": 0,
-            "level": 1,
-            "energy": 100,
-            "total_xp": 0,
-            "max_energy": 100,
-            "lastEnergyUpdate": None,
-            "click_boost_level": 0,
+            "xp": 0, "level": 1, "energy": 100, "total_xp": 0,
+            "max_energy": 100, "lastEnergyUpdate": None,
         }
 
     now = datetime.utcnow()
@@ -190,11 +185,7 @@ async def get_progress(data: dict = Body(...), session: AsyncSession = Depends(g
         "total_xp": user.total_xp,
         "max_energy": user.max_energy,
         "lastEnergyUpdate": user.lastEnergyUpdate.isoformat() if user.lastEnergyUpdate else None,
-        "click_boost_level": user.click_boost_level or 0,
     }
-
-
-
 
 @app.post("/api/game/save_progress")
 async def save_progress(data: dict = Body(...), session: AsyncSession = Depends(get_async_session)):
@@ -219,14 +210,13 @@ async def click(data: dict = Body(...), session: AsyncSession = Depends(get_asyn
         telegram_id = parse_telegram_user_id(data["init_data"])
         user = await crud_user.get_user(session, telegram_id)
         if user:
-            boost = (user.click_boost_level or 0) + 1  # ← множитель
             await crud_user.update_progress(
                 session=session,
                 telegram_id=telegram_id,
                 xp=user.xp,
                 level=user.level,
                 energy=user.energy,
-                total_xp=user.total_xp + boost  # ← прибавляем буст
+                total_xp=user.total_xp + 1
             )
         return {"status": "clicked"}
     except Exception as e:
@@ -292,6 +282,8 @@ async def notify_loop():
             except Exception as e:
                 print(f"[NOTIFY ERROR] {e}")
         await asyncio.sleep(3600)  # каждый час
+
+
 
 
 
