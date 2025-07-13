@@ -6,26 +6,19 @@ import API_BASE_URL from './config';
 
 const ENERGY_RESTORE_INTERVAL_MS = 1 * 60 * 1000;
 
-interface FloatingText {
-  id: number;
-  value: number;
-  x: number;
-  y: number;
-}
-
 const Clicker: React.FC = () => {
   const { t } = useTranslation();
 
   const [telegramUser, setTelegramUser] = useState<WebAppUser | null>(null);
   const [score, setScore] = useState(0);
+  const [xp, setXp] = useState(0);
   const [totalXp, setTotalXp] = useState(0);
+  const [level, setLevel] = useState(1);
   const [energy, setEnergy] = useState(100);
   const [maxEnergy, setMaxEnergy] = useState(100);
   const [lastEnergyUpdate, setLastEnergyUpdate] = useState<Date | null>(null);
   const [timeToNextEnergy, setTimeToNextEnergy] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [floatingTexts, setFloatingTexts] = useState<FloatingText[]>([]);
-  const [clickId, setClickId] = useState(0);
 
   useEffect(() => {
     WebApp.ready();
@@ -58,8 +51,10 @@ const Clicker: React.FC = () => {
         });
 
         const data = await res.json();
+        setXp(data.xp);
+        setLevel(data.level);
         setEnergy(data.energy);
-        setTotalXp(data.total_xp ?? 0);
+        setTotalXp(data.total_xp ?? data.xp);
         setLastEnergyUpdate(data.lastEnergyUpdate ? new Date(data.lastEnergyUpdate) : null);
         setMaxEnergy(data.max_energy ?? 100);
         setLoading(false);
@@ -70,6 +65,8 @@ const Clicker: React.FC = () => {
 
     initializeUser();
   }, [telegramUser]);
+
+
 
   useEffect(() => {
     const interval = setInterval(async () => {
@@ -111,29 +108,28 @@ const Clicker: React.FC = () => {
     return () => clearInterval(interval);
   }, [lastEnergyUpdate, energy, maxEnergy]);
 
-  const handleMultiClick = (x: number, y: number) => {
-    if (!telegramUser || loading || energy <= 0) return;
+  const handleClick = () => {
+    if (!telegramUser || loading || energy <= 0 || level >= 100) return;
 
     const gain = 1;
+    const newXp = xp + gain;
     const newTotalXp = totalXp + gain;
     const newEnergy = energy - 1;
     const newScore = score + gain;
+    let newLevel = level;
+    let adjustedXp = newXp;
+
+    const xpNeeded = level * 100;
+    if (newXp >= xpNeeded && level < 100) {
+      newLevel = level + 1;
+      adjustedXp = newXp - xpNeeded;
+    }
 
     setScore(newScore);
+    setXp(adjustedXp);
     setEnergy(newEnergy);
+    setLevel(newLevel);
     setTotalXp(newTotalXp);
-
-    const newId = Date.now() + Math.random();
-    const newText: FloatingText = {
-      id: newId,
-      value: gain,
-      x,
-      y,
-    };
-    setFloatingTexts((prev) => [...prev, newText]);
-    setTimeout(() => {
-      setFloatingTexts((prev) => prev.filter((t) => t.id !== newText.id));
-    }, 1000);
 
     fetch(`${API_BASE_URL}/api/game/click`, {
       method: 'POST',
@@ -146,17 +142,29 @@ const Clicker: React.FC = () => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         init_data: WebApp.initData,
+        xp: adjustedXp,
+        level: newLevel,
         energy: newEnergy,
         total_xp: newTotalXp,
       }),
     });
   };
 
+  const xpNeeded = level * 100;
+  const xpProgress = Math.min((xp / xpNeeded) * 100, 100);
   const energyProgress = Math.min((energy / maxEnergy) * 100, 100);
 
   return (
     <div className="w-full min-h-screen bg-[#131f2f] text-center flex flex-col items-center justify-start pt-8 px-4 text-[#00f0ff]">
       <h2 className="text-2xl font-bold mb-2 drop-shadow-md">$GAP: {totalXp}</h2>
+      <h3 className="text-lg font-medium mb-4">{t('level')}: {level} / 100</h3>
+
+      <div className="my-4 w-full max-w-md">
+        <label className="block mb-1 text-sm text-[#7ee9ff]">{t('xp')}: {xp} / {xpNeeded}</label>
+        <div className="w-full h-4 bg-[#0d273d] rounded overflow-hidden shadow-inner">
+          <div className="h-full bg-gradient-to-r from-[#00f0ff] to-[#00c2ff] transition-all" style={{ width: `${xpProgress}%` }} />
+        </div>
+      </div>
 
       <div className="my-4 w-full max-w-md">
         <label className="block mb-1 text-sm text-[#7ee9ff]">{t('energy')}: {energy} / {maxEnergy}</label>
@@ -172,23 +180,29 @@ const Clicker: React.FC = () => {
 
       <div className="relative w-96 h-96 mt-6">
         <div className="absolute inset-0 flex items-center justify-center">
-          <MainButton energy={energy} onMultiClick={handleMultiClick} />
+          <MainButton onClick={handleClick} energy={energy} />
         </div>
-        {floatingTexts.map((text) => (
-          <div
-            key={text.id}
-            className="absolute text-lg font-bold text-yellow-300 animate-float"
-            style={{ left: `${text.x}%`, top: `${text.y}%` }}
-          >
-            +{text.value}
-          </div>
-        ))}
       </div>
     </div>
   );
 };
 
 export default Clicker;
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
