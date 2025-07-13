@@ -158,8 +158,12 @@ async def get_progress(data: dict = Body(...), session: AsyncSession = Depends(g
     user = await crud_user.get_user(session, telegram_id)
     if not user:
         return {
-            "xp": 0, "level": 1, "energy": 100, "total_xp": 0,
-            "max_energy": 100, "lastEnergyUpdate": None,
+            "xp": 0,
+            "level": 1,
+            "energy": 100,
+            "total_xp": 0,
+            "max_energy": 100,
+            "lastEnergyUpdate": None,
             "click_boost_level": 0,
         }
 
@@ -177,10 +181,9 @@ async def get_progress(data: dict = Body(...), session: AsyncSession = Depends(g
             user.energy = new_energy
             user.lastEnergyUpdate = now
     else:
-        # Только если энергия не на максимуме — ставим точку восстановления
-        if user.energy < max_energy:
-            user.lastEnergyUpdate = now
-            await session.commit()
+        # Если нет времени последнего обновления, просто записываем текущую точку отсчёта
+        user.lastEnergyUpdate = now
+        await session.commit()
 
     return {
         "xp": user.xp,
@@ -191,6 +194,7 @@ async def get_progress(data: dict = Body(...), session: AsyncSession = Depends(g
         "lastEnergyUpdate": user.lastEnergyUpdate.isoformat() if user.lastEnergyUpdate else None,
         "click_boost_level": user.click_boost_level or 0,
     }
+
 
 
 
