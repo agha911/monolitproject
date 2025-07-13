@@ -47,5 +47,8 @@
   "tournament_my_rank": "Ваше место: {{rank}}",
   "tournament_my_score": "Приглашено: {{score}}",
   "tournament_no_data": "Участников пока нет. Приглашай друзей первым!",
-  "tab_tournament": "Турнир"
+  "tab_tournament": "Турнир",
+  "top_invites_this_week": "Топ-10 по приглашениям на этой неделе",
+  "your_place": "Ваше место",
+  "invites": "приглашений"
 }
