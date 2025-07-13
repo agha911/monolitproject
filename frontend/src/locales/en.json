@@ -37,5 +37,15 @@
   "shop_error": "Not enough coins or limit reached",
   "error": "Something went wrong",
   "refill_energy": "Refill energy",
-  "refill_success": "Energy successfully refilled!"
+  "refill_success": "Energy successfully refilled!",
+  "boost_click": "Click Booster",
+  "level": "Level",
+  "buy": "Buy",
+  "shop_max_level": "Maximum boost level reached",
+  "shop_success_boost": "Boost upgraded to {{value}}",
+  "title_tournament": "🏆 Weekly Tournament",
+  "tournament_my_rank": "Your rank: {{rank}}",
+  "tournament_my_score": "Invited: {{score}}",
+  "tournament_no_data": "No participants yet. Be the first to invite!",
+  "tab_tournament": "Tournament"
 }
