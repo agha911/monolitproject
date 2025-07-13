@@ -48,13 +48,13 @@ const Clicker: React.FC = () => {
         await fetch(`${API_BASE_URL}/api/user/register`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ init_data: WebApp.initDataUnsafe }),
+          body: JSON.stringify({ init_data: WebApp.initData }),
         });
 
         const res = await fetch(`${API_BASE_URL}/api/game/progress`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ init_data: WebApp.initDataUnsafe }),
+          body: JSON.stringify({ init_data: WebApp.initData }),
         });
 
         const data = await res.json();
@@ -74,29 +74,32 @@ const Clicker: React.FC = () => {
     initializeUser();
   }, [telegramUser]);
 
+  // ✅ ЕДИНСТВЕННЫЙ источник автообновления энергии (каждую минуту)
   useEffect(() => {
-    const interval = setInterval(async () => {
-      if (!telegramUser || energy >= maxEnergy) return;
+    if (!telegramUser) return;
 
+    const interval = setInterval(async () => {
       try {
         const res = await fetch(`${API_BASE_URL}/api/game/progress`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ init_data: WebApp.initDataUnsafe }),
+          body: JSON.stringify({ init_data: WebApp.initData }),
         });
 
         const data = await res.json();
         setEnergy(data.energy);
         setLastEnergyUpdate(data.lastEnergyUpdate ? new Date(data.lastEnergyUpdate) : null);
         setMaxEnergy(data.max_energy ?? 100);
+        setClickBoost((data.click_boost_level ?? 0) + 1);
       } catch (err) {
         console.error('Ошибка при автообновлении энергии:', err);
       }
     }, 60000);
 
     return () => clearInterval(interval);
-  }, [telegramUser, energy, maxEnergy]);
+  }, [telegramUser]); // 👈 важно — только один раз
 
+  // ⏱ Отображение отсчета до следующей энергии
   useEffect(() => {
     const interval = setInterval(() => {
       if (!lastEnergyUpdate || energy >= maxEnergy) {
@@ -135,14 +138,14 @@ const Clicker: React.FC = () => {
     fetch(`${API_BASE_URL}/api/game/click`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ init_data: WebApp.initDataUnsafe }),
+      body: JSON.stringify({ init_data: WebApp.initData }),
     });
 
     fetch(`${API_BASE_URL}/api/game/save_progress`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        init_data: WebApp.initDataUnsafe,
+        init_data: WebApp.initData,
         energy: newEnergy,
         total_xp: newTotalXp,
       }),
@@ -192,6 +195,7 @@ const Clicker: React.FC = () => {
 };
 
 export default Clicker;
+
 
 
 
