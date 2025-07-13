@@ -156,13 +156,11 @@ async def get_progress(data: dict = Body(...), session: AsyncSession = Depends(g
 
     if last_update:
         minutes_passed = int((now - last_update).total_seconds() // 60)
-        energy_to_restore = minutes_passed // ENERGY_REOVERY_INTERVAL_MINUTES
+        energy_to_restore = minutes_passed // ENERGY_RECOVERY_INTERVAL_MINUTES
 
-        new_energy = user.energy
-        if energy_to_restore > 0 and user.energy < max_energy:
-            new_energy = min(max_energy, user.energy + energy_to_restore)
+        new_energy = min(max_energy, user.energy + energy_to_restore) if energy_to_restore > 0 and user.energy < max_energy else user.energy
 
-        # Всегда обновляем время (даже если энергия не изменилась)
+        # ✅ всегда обновляем lastEnergyUpdate (даже если энергия не изменилась)
         await crud_user.update_energy_and_time(session, telegram_id, new_energy, now)
         user.energy = new_energy
         user.lastEnergyUpdate = now
