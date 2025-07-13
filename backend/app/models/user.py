@@ -12,7 +12,6 @@ class User(Base):
     first_name = Column(String)
     last_name = Column(String)
     score = Column(Integer, default=0)
-    xp = Column(Integer, default=0)
     total_xp = Column(Integer, default=0)
     energy = Column(Integer, default=100)
     max_energy = Column(Integer, default=100)
