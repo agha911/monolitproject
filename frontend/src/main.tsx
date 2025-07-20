@@ -2,7 +2,7 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import MainScreen from './components/ui/MainScreen';
-import Tasks from './components/Tasks';
+import Tasks from './components/ui/Tasks';
 import './index.css';
 import './i18n';
 import WebApp from '@twa-dev/sdk';
