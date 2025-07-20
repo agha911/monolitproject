@@ -12,6 +12,10 @@ const Tasks: React.FC = () => {
   const [message, setMessage] = useState('');
   const [openedInstagram, setOpenedInstagram] = useState(false);
 
+  const [joined, setJoined] = useState(false);
+  const [groupMessage, setGroupMessage] = useState('');
+  const [openedGroup, setOpenedGroup] = useState(false);
+
   const [streak, setStreak] = useState<number | null>(null);
   const [reward, setReward] = useState<number | null>(null);
   const [checkedIn, setCheckedIn] = useState(false);
@@ -22,9 +26,14 @@ const Tasks: React.FC = () => {
     setOpenedInstagram(true);
   };
 
-  const handleComplete = async () => {
+  const handleGroupClick = () => {
+    window.open('https://t.me/+h-VjXbnz0BI2OGI6', '_blank');
+    setOpenedGroup(true);
+  };
+
+  const handleComplete = async (task_id: string, setter: any, msgSetter: any) => {
     if (!telegramUserId) {
-      setMessage('Ошибка: пользователь не определён');
+      msgSetter('Ошибка: пользователь не определён');
       return;
     }
 
@@ -34,22 +43,22 @@ const Tasks: React.FC = () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           user_id: telegramUserId,
-          task_id: 'follow_instagram',
+          task_id: task_id,
         }),
       });
 
       const data = await res.json();
       if (data.status === 'success') {
-        setCompleted(true);
-        setMessage(t('reward_received', { amount: data.reward }));
+        setter(true);
+        msgSetter(t('reward_received', { amount: data.reward }));
       } else if (data.status === 'already_completed') {
-        setMessage(t('already_done'));
-        setCompleted(true);
+        setter(true);
+        msgSetter(t('already_done'));
       } else {
-        setMessage(t('error'));
+        msgSetter(t('error'));
       }
     } catch (error) {
-      setMessage(t('error'));
+      msgSetter(t('error'));
     }
   };
 
@@ -103,7 +112,7 @@ const Tasks: React.FC = () => {
         >
           @gap_pick
         </a>
-        <p className="text-sm text-[#a0f6ff]">{t('reward_received', { amount: 1000 })}</p>
+        <p className="text-sm text-[#a0f6ff]">{t('reward_received', { amount: 150000 })}</p>
 
         {!openedInstagram ? (
           <button
@@ -114,7 +123,7 @@ const Tasks: React.FC = () => {
           </button>
         ) : (
           <button
-            onClick={handleComplete}
+            onClick={() => handleComplete('follow_instagram', setCompleted, setMessage)}
             disabled={completed}
             className="bg-[#00f0ff] text-[#0e1a2b] font-semibold px-4 py-2 rounded hover:scale-105 transition-all disabled:opacity-40"
           >
@@ -123,6 +132,39 @@ const Tasks: React.FC = () => {
         )}
 
         {message && <p className="text-sm mt-2 text-[#a0f6ff]">{message}</p>}
+      </div>
+
+      {/* Вступление в группу */}
+      <div className="bg-[#0e1a2b] border border-[#00f0ff40] p-4 rounded-xl shadow-[0_0_10px_#00f0ff20] space-y-2 text-center">
+        <h3 className="text-lg font-semibold text-[#7ee9ff]">{t('join_community')}</h3>
+        <a
+          href="https://t.me/+h-VjXbnz0BI2OGI6"
+          target="_blank"
+          rel="noreferrer"
+          className="text-[#00f0ff] underline"
+        >
+          Telegram Qrupu
+        </a>
+        <p className="text-sm text-[#a0f6ff]">{t('reward_received', { amount: 150000 })}</p>
+
+        {!openedGroup ? (
+          <button
+            onClick={handleGroupClick}
+            className="bg-[#00f0ff] text-[#0e1a2b] font-semibold px-4 py-2 rounded hover:scale-105 transition-all"
+          >
+            {t('go_to_group')}
+          </button>
+        ) : (
+          <button
+            onClick={() => handleComplete('join_group', setJoined, setGroupMessage)}
+            disabled={joined}
+            className="bg-[#00f0ff] text-[#0e1a2b] font-semibold px-4 py-2 rounded hover:scale-105 transition-all disabled:opacity-40"
+          >
+            {joined ? t('already_done') : t('i_joined')}
+          </button>
+        )}
+
+        {groupMessage && <p className="text-sm mt-2 text-[#a0f6ff]">{groupMessage}</p>}
       </div>
 
       {/* Ежедневный чек-ин */}
@@ -160,6 +202,7 @@ const Tasks: React.FC = () => {
 };
 
 export default Tasks;
+
 
 
 
