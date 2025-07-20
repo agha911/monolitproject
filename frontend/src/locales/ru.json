@@ -50,5 +50,9 @@
   "tab_tournament": "Турнир",
   "top_invites_this_week": "Топ-10 по приглашениям на этой неделе",
   "your_place": "Ваше место",
-  "invites": "приглашений"
+  "invites": "приглашений",
+  "join_community": "Присоединиться к нашему Telegram-чату",
+  "go_to_group": "Перейти в группу",
+  "i_joined": "Я вступил(а)",
+  "already_done": "Уже выполнено"
 }
