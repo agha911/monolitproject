@@ -108,3 +108,11 @@ async def daily_checkin(session: AsyncSession, user: User, now: datetime, reward
     return user
 
 
+async def mark_joined_group(session: AsyncSession, user: User, reward: int = 50):
+    if user.joined_group:
+        return False
+    user.joined_group = True
+    user.total_xp += reward
+    await session.commit()
+    await session.refresh(user)
+    return True
