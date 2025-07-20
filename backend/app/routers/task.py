@@ -16,13 +16,16 @@ class UserIdPayload(BaseModel):
 class TaskPayload(UserIdPayload):
     task_id: str
 
+class GroupJoinPayload(BaseModel):
+    user_id: int
+
 @router.post("/complete")
 async def complete_task_endpoint(payload: TaskPayload, session: AsyncSession = Depends(get_async_session)):
     user = await get_user(session, payload.user_id)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
-    reward = 1000  # можно сделать динамически потом
+    reward = 150000  # можно сделать динамически потом
     success = await complete_task(session, user, payload.task_id, reward)
 
     if not success:
@@ -76,3 +79,20 @@ async def daily_checkin_endpoint(payload: UserIdPayload, session: AsyncSession =
         "day": updated_user.daily_streak
     }
 
+
+@router.post("/join_group")
+async def join_group_endpoint(payload: GroupJoinPayload, session: AsyncSession = Depends(get_async_session)):
+    user = await get_user(session, payload.user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    reward = 150000  # Можно менять при необходимости
+    success = await mark_joined_group(session, user, reward)
+
+    if not success:
+        return {"status": "already_joined"}
+
+    return {
+        "status": "success",
+        "reward": reward
+    }
