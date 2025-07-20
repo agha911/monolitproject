@@ -1,6 +1,8 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
+import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import MainScreen from './components/ui/MainScreen';
+import Tasks from './components/Tasks';
 import './index.css';
 import './i18n';
 import WebApp from '@twa-dev/sdk';
@@ -15,7 +17,12 @@ if (typeof WebApp !== 'undefined' && WebApp.initDataUnsafe?.user) {
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
-    <MainScreen />
+    <BrowserRouter>
+      <Routes>
+        <Route path="/" element={<MainScreen />} />
+        <Route path="/tasks" element={<Tasks />} />
+      </Routes>
+    </BrowserRouter>
   </React.StrictMode>
 );
 
