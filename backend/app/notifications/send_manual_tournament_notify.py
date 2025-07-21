@@ -30,6 +30,7 @@ markup.add(
     )
 )
 
+INSTAGRAM_TASK_ID = "follow_instagram"
 
 async def send_group_task_announcement():
     async with async_session_maker() as session:
@@ -39,10 +40,8 @@ async def send_group_task_announcement():
     success, failed = 0, 0
     for user in users:
         try:
-            if not user.followed_instagram:
-                text = TEXT_WITH_INSTAGRAM
-            else:
-                text = TEXT_ONLY_GROUP
+            has_completed_instagram = INSTAGRAM_TASK_ID in (user.completed_tasks or [])
+            text = TEXT_ONLY_GROUP if has_completed_instagram else TEXT_WITH_INSTAGRAM
 
             await bot.send_message(
                 chat_id=user.telegram_id,
@@ -60,5 +59,6 @@ async def send_group_task_announcement():
 
 if __name__ == "__main__":
     asyncio.run(send_group_task_announcement())
+
 
 
