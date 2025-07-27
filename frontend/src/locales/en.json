@@ -60,6 +60,9 @@
   "task_completed": "✅ Completed!",
   "keep_going": "Keep going, you're close!",
   "share_message_text": "I’ve completed today’s task! Join Gappick and show what you can do too!",
-  "available": "Available"
+  "available": "Available",
+  "claim_reward": "Claim reward",
+  "already_claimed": "Already claimed",
+  "reward_received_short": "+{{amount}} coins"
 
 }
