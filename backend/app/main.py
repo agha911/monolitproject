@@ -150,7 +150,8 @@ async def get_progress(data: dict = Body(...), session: AsyncSession = Depends(g
             "lastEnergyUpdate": None,
             "click_boost_level": 0,
             "energy_refill_count": 0,
-            "energy_refills_left": ENERGY_REFILL_DAILY_LIMIT
+            "energy_refills_left": ENERGY_REFILL_DAILY_LIMIT,
+            "daily_reward_claimed": False
         }
 
     now = datetime.utcnow()
@@ -168,8 +169,7 @@ async def get_progress(data: dict = Body(...), session: AsyncSession = Depends(g
             new_last_update = last_update + timedelta(minutes=updated_minutes)
         else:
             new_energy = user.energy
-            # ⚠️ Важно: обновляем `lastEnergyUpdate` даже если энергия не изменилась
-            new_last_update = now
+            new_last_update = now  # обновляем даже если энергия не изменилась
     else:
         new_energy = user.energy
         new_last_update = now
@@ -178,7 +178,6 @@ async def get_progress(data: dict = Body(...), session: AsyncSession = Depends(g
     user.energy = new_energy
     user.lastEnergyUpdate = new_last_update
 
-    # 🗓 Обновим счётчик восполнений, если день сменился
     if user.last_energy_refill and user.last_energy_refill.date() != now.date():
         user.energy_refill_count = 0
         session.add(user)
@@ -193,8 +192,10 @@ async def get_progress(data: dict = Body(...), session: AsyncSession = Depends(g
         "lastEnergyUpdate": user.lastEnergyUpdate.isoformat() if user.lastEnergyUpdate else None,
         "click_boost_level": user.click_boost_level or 0,
         "energy_refill_count": user.energy_refill_count or 0,
-        "energy_refills_left": energy_refills_left
+        "energy_refills_left": energy_refills_left,
+        "daily_reward_claimed": user.daily_reward_claimed or False
     }
+
 
 
 @app.post("/api/game/save_progress")
@@ -259,12 +260,15 @@ async def claim_daily_reward(data: dict = Body(...), session: AsyncSession = Dep
         if not user.daily_completed:
             return {"status": "not_completed"}
 
+        if user.daily_reward_claimed:
+            return {"status": "already_claimed"}
+
         # 🎁 Выдаём фиксированную награду
         reward = 50000
         user.total_xp += reward
 
-        # 🧹 Сбрасываем флаг — больше награду не получить
-        user.daily_completed = False
+        # 🔒 Отмечаем, что награда уже получена
+        user.daily_reward_claimed = True
 
         session.add(user)
         await session.commit()
@@ -278,6 +282,7 @@ async def claim_daily_reward(data: dict = Body(...), session: AsyncSession = Dep
 
     except Exception as e:
         return {"status": "error", "message": str(e)}
+
 
 
 
