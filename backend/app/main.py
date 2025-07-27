@@ -202,6 +202,8 @@ async def save_progress(data: dict = Body(...), session: AsyncSession = Depends(
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
+from math import ceil
+
 @app.post("/api/game/click")
 async def click(data: dict = Body(...), session: AsyncSession = Depends(get_async_session)):
     try:
@@ -220,7 +222,6 @@ async def click(data: dict = Body(...), session: AsyncSession = Depends(get_asyn
             )
 
             # 📌 Обновляем прогресс по ежедневной задаче
-            # Если задача уже завершена — ничего не делаем
             if not user.daily_completed:
                 user.daily_progress += click_value
 
@@ -228,12 +229,26 @@ async def click(data: dict = Body(...), session: AsyncSession = Depends(get_asyn
                     user.daily_progress = user.daily_target
                     user.daily_completed = True
 
+                    # 🎁 Динамическая награда
+                    reward = 50000
+                    user.total_xp += reward
+
+                    await session.commit()
+                    await session.refresh(user)
+
+                    return {
+                        "status": "clicked",
+                        "task_completed": True,
+                        "reward": reward
+                    }
+
                 await session.commit()
                 await session.refresh(user)
 
-        return {"status": "clicked"}
+        return {"status": "clicked", "task_completed": False}
     except Exception as e:
         return {"status": "error", "message": str(e)}
+
 
 
 @app.get("/api/game/leaderboard")
