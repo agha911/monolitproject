@@ -75,7 +75,7 @@ async def handle_start(message: types.Message):
     await bot.send_message(
         chat_id=message.chat.id,
         text=(
-            "👋 Salam! Gappick-ə xoş gəlmiəsən!\n\n"
+            "👋 Salam! Gappick-ə xoş gəlmisən!\n\n"
             "Oyuna başlamaq üçün aşağıdakı düyməni kliklə."
         ),
         reply_markup=markup
