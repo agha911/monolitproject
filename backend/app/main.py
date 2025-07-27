@@ -207,17 +207,34 @@ async def click(data: dict = Body(...), session: AsyncSession = Depends(get_asyn
     try:
         telegram_id = parse_telegram_user_id(data["init_data"])
         user = await crud_user.get_user(session, telegram_id)
+
         if user:
             click_value = (user.click_boost_level or 0) + 1
+
+            # 📈 Обновляем XP и энергию
             await crud_user.update_progress(
                 session=session,
                 telegram_id=telegram_id,
                 energy=user.energy,
                 total_xp=user.total_xp + click_value
             )
+
+            # 📌 Обновляем прогресс по ежедневной задаче
+            # Если задача уже завершена — ничего не делаем
+            if not user.daily_completed:
+                user.daily_progress += click_value
+
+                if user.daily_progress >= user.daily_target:
+                    user.daily_progress = user.daily_target
+                    user.daily_completed = True
+
+                await session.commit()
+                await session.refresh(user)
+
         return {"status": "clicked"}
     except Exception as e:
         return {"status": "error", "message": str(e)}
+
 
 @app.get("/api/game/leaderboard")
 async def leaderboard(session: AsyncSession = Depends(get_async_session)):
