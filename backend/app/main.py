@@ -223,7 +223,6 @@ async def click(data: dict = Body(...), session: AsyncSession = Depends(get_asyn
         if user:
             click_value = (user.click_boost_level or 0) + 1
 
-            # 📈 Обновляем XP и энергию
             await crud_user.update_progress(
                 session=session,
                 telegram_id=telegram_id,
@@ -231,7 +230,6 @@ async def click(data: dict = Body(...), session: AsyncSession = Depends(get_asyn
                 total_xp=user.total_xp + click_value
             )
 
-            # 📌 Обновляем прогресс по ежедневной задаче
             if not user.daily_completed:
                 user.daily_progress += click_value
 
@@ -239,23 +237,44 @@ async def click(data: dict = Body(...), session: AsyncSession = Depends(get_asyn
                     user.daily_progress = user.daily_target
                     user.daily_completed = True
 
-                    # 🎁 Динамическая награда
-                    reward = 50000
-                    user.total_xp += reward
-
-                    await session.commit()
-                    await session.refresh(user)
-
-                    return {
-                        "status": "clicked",
-                        "task_completed": True,
-                        "reward": reward
-                    }
-
                 await session.commit()
                 await session.refresh(user)
 
-        return {"status": "clicked", "task_completed": False}
+        return {"status": "clicked", "task_completed": user.daily_completed}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+@app.post("/api/daily/claim_reward")
+async def claim_daily_reward(data: dict = Body(...), session: AsyncSession = Depends(get_async_session)):
+    try:
+        telegram_id = parse_telegram_user_id(data["init_data"])
+        user = await crud_user.get_user(session, telegram_id)
+
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        if not user.daily_completed:
+            return {"status": "not_completed"}
+
+        # Если награда уже получена (например, daily_reward_claimed = True), то не давать
+        if user.daily_reward_claimed:
+            return {"status": "already_claimed"}
+
+        reward = 50000
+        user.total_xp += reward
+        user.daily_reward_claimed = True
+
+        session.add(user)
+        await session.commit()
+        await session.refresh(user)
+
+        return {
+            "status": "reward_claimed",
+            "reward": reward,
+            "total_xp": user.total_xp
+        }
+
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
