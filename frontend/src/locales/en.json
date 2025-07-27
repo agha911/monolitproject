@@ -58,5 +58,7 @@
   "daily_task_clicker": "Daily Clicker Task",
   "daily_task_goal": "Goal",
   "task_completed": "✅ Completed!",
-  "keep_going": "Keep going, you're close!"
+  "keep_going": "Keep going, you're close!",
+  "share_message_text": "I’ve completed today’s task! Join Gappick and show what you can do too!"
+
 }
