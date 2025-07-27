@@ -223,6 +223,7 @@ async def click(data: dict = Body(...), session: AsyncSession = Depends(get_asyn
         if user:
             click_value = (user.click_boost_level or 0) + 1
 
+            # Обновляем опыт и энергию
             await crud_user.update_progress(
                 session=session,
                 telegram_id=telegram_id,
@@ -230,12 +231,12 @@ async def click(data: dict = Body(...), session: AsyncSession = Depends(get_asyn
                 total_xp=user.total_xp + click_value
             )
 
+            # Обновляем прогресс задания, если оно еще не завершено
             if not user.daily_completed:
                 user.daily_progress += click_value
-
                 if user.daily_progress >= user.daily_target:
                     user.daily_progress = user.daily_target
-                    user.daily_completed = True
+                    user.daily_completed = True  # теперь можно вручную забрать награду
 
                 await session.commit()
                 await session.refresh(user)
@@ -243,6 +244,7 @@ async def click(data: dict = Body(...), session: AsyncSession = Depends(get_asyn
         return {"status": "clicked", "task_completed": user.daily_completed}
     except Exception as e:
         return {"status": "error", "message": str(e)}
+
 
 
 @app.post("/api/daily/claim_reward")
@@ -257,13 +259,12 @@ async def claim_daily_reward(data: dict = Body(...), session: AsyncSession = Dep
         if not user.daily_completed:
             return {"status": "not_completed"}
 
-        # Если награда уже получена (например, daily_reward_claimed = True), то не давать
-        if user.daily_reward_claimed:
-            return {"status": "already_claimed"}
-
+        # 🎁 Выдаём фиксированную награду
         reward = 50000
         user.total_xp += reward
-        user.daily_reward_claimed = True
+
+        # 🧹 Сбрасываем флаг — больше награду не получить
+        user.daily_completed = False
 
         session.add(user)
         await session.commit()
