@@ -8,7 +8,7 @@ const Shop: React.FC = () => {
   const [message, setMessage] = useState('');
   const [loading, setLoading] = useState(false);
   const [clickBoostLevel, setClickBoostLevel] = useState(0);
-  const [energyRefillCount, setEnergyRefillCount] = useState(0);
+  const [energyRefillsLeft, setEnergyRefillsLeft] = useState(0);
   const [totalXp, setTotalXp] = useState(0);
 
   const telegramUser = WebApp.initDataUnsafe?.user;
@@ -23,7 +23,7 @@ const Shop: React.FC = () => {
       });
       const data = await res.json();
       setClickBoostLevel(data.click_boost_level ?? 0);
-      setEnergyRefillCount(data.energy_refill_count ?? 0);
+      setEnergyRefillsLeft(data.energy_refills_left ?? 0);
       setTotalXp(data.total_xp ?? 0);
     } catch (err) {
       console.error('Ошибка при загрузке данных пользователя:', err);
@@ -54,7 +54,7 @@ const Shop: React.FC = () => {
 
       const data = await res.json();
       if (data.status === 'success') {
-        await fetchUserData(); // 🔁 синхронизация
+        await fetchUserData();
         setMessage(t('shop_success_boost', { value: `x${clickBoostLevel + 1}` }));
       } else {
         setMessage(`${t('shop_error')}: ${data.message}`);
@@ -79,7 +79,7 @@ const Shop: React.FC = () => {
 
       const data = await res.json();
       if (data.status === 'success') {
-        await fetchUserData(); // 🆕 для обновления максимальной энергии
+        await fetchUserData();
         setMessage(t('shop_success', { value: data.new_max_energy }));
       } else {
         setMessage(`${t('shop_error')}: ${data.message}`);
@@ -104,7 +104,7 @@ const Shop: React.FC = () => {
 
       const data = await res.json();
       if (data.status === 'success') {
-        await fetchUserData(); // 🆕 обновление счётчика восполнений
+        await fetchUserData();
         setMessage(t('refill_success'));
       } else {
         setMessage(`${t('shop_error')}: ${data.message}`);
@@ -117,7 +117,6 @@ const Shop: React.FC = () => {
   };
 
   const clickBoostPrice = 5000 * Math.pow(2, clickBoostLevel);
-  const energyRefillsLeft = Math.max(0, 2 - energyRefillCount);
 
   return (
     <div className="p-4 bg-[#131f2f] min-h-screen text-[#00f0ff]">
@@ -172,6 +171,7 @@ const Shop: React.FC = () => {
 };
 
 export default Shop;
+
 
 
 
