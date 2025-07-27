@@ -128,11 +128,10 @@ const Tasks: React.FC = () => {
   };
 
   const handleShare = () => {
-    WebApp.showPopup?.({
-      message: t('share_message_text'),
-      buttons: [{ id: 'share', type: 'default', text: t('share_with_friends') }],
-    });
-    WebApp.openTelegramLink('https://t.me/gap_pick_bot?start=from_task');
+    if (!telegramUserId) return;
+
+    const referralLink = `https://t.me/gap_pick_bot?start=${telegramUserId}`;
+    WebApp.openTelegramLink(referralLink);
   };
 
   const rewards = [100, 200, 300, 400, 500, 600, 700];
@@ -259,6 +258,7 @@ const Tasks: React.FC = () => {
 };
 
 export default Tasks;
+
 
 
 
