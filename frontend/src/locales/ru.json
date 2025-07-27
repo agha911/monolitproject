@@ -54,5 +54,9 @@
   "join_community": "Присоединиться к нашему Telegram-чату",
   "go_to_group": "Перейти в группу",
   "i_joined": "Я вступил(а)",
-  "already_done": "Уже выполнено"
+  "already_done": "Уже выполнено",
+  "daily_task_clicker": "Ежедневная задача: кликер",
+  "daily_task_goal": "Цель",
+  "task_completed": "✅ Выполнено!",
+  "keep_going": "Продолжай, почти получилось!"
 }
