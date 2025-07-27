@@ -32,6 +32,7 @@ class User(Base):
     daily_progress = Column(Integer, default=0)
     daily_completed = Column(Boolean, default=False)
     daily_updated_at = Column(DateTime, default=None)
+    daily_reward_claimed = Column(Boolean, default=False)
     
     
 
