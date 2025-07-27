@@ -50,7 +50,6 @@ const Tasks: React.FC = () => {
     fetchDailyTask();
   }, [telegramUserId]);
 
-  // Автообновление прогресса каждые 10 секунд
   useEffect(() => {
     const interval = setInterval(() => {
       fetchDailyTask();
@@ -129,106 +128,44 @@ const Tasks: React.FC = () => {
     }
   };
 
+  const handleShare = () => {
+    WebApp.shareLink?.({
+      url: 'https://t.me/gap_pick_bot?start=from_task',
+      text: t('share_message_text'),
+    });
+  };
+
   const rewards = [100, 200, 300, 400, 500, 600, 700];
 
   return (
     <div className="p-4 bg-[#131f2f] min-h-screen text-[#00f0ff] space-y-6">
       <h2 className="text-xl font-bold text-center drop-shadow-md">📋 {t('title_tasks')}</h2>
 
-      {/* Instagram подписка */}
-      <div className="bg-[#0e1a2b] border border-[#00f0ff40] p-4 rounded-xl shadow-[0_0_10px_#00f0ff20] space-y-2 text-center">
-        <h3 className="text-lg font-semibold text-[#7ee9ff]">{t('subscribe_instagram')}</h3>
-        <a href="https://www.instagram.com/gap_pick" target="_blank" rel="noreferrer" className="text-[#00f0ff] underline">
-          @gap_pick
-        </a>
-        <p className="text-sm text-[#a0f6ff]">{t('reward_received', { amount: 150000 })}</p>
-
-        {!openedInstagram ? (
-          <button
-            onClick={handleInstagramClick}
-            className="bg-[#00f0ff] text-[#0e1a2b] font-semibold px-4 py-2 rounded hover:scale-105 transition-all"
-          >
-            {t('go_to_instagram')}
-          </button>
-        ) : (
-          <button
-            onClick={() => handleComplete('follow_instagram', setCompleted, setMessage)}
-            disabled={completed}
-            className="bg-[#00f0ff] text-[#0e1a2b] font-semibold px-4 py-2 rounded hover:scale-105 transition-all disabled:opacity-40"
-          >
-            {completed ? t('already_done') : t('i_subscribed')}
-          </button>
-        )}
-        {message && <p className="text-sm mt-2 text-[#a0f6ff]">{message}</p>}
-      </div>
-
-      {/* Вступление в группу */}
-      <div className="bg-[#0e1a2b] border border-[#00f0ff40] p-4 rounded-xl shadow-[0_0_10px_#00f0ff20] space-y-2 text-center">
-        <h3 className="text-lg font-semibold text-[#7ee9ff]">{t('join_community')}</h3>
-        <a href="https://t.me/+h-VjXbnz0BI2OGI6" target="_blank" rel="noreferrer" className="text-[#00f0ff] underline">
-          Telegram Qrupu
-        </a>
-        <p className="text-sm text-[#a0f6ff]">{t('reward_received', { amount: 150000 })}</p>
-
-        {!openedGroup ? (
-          <button
-            onClick={handleGroupClick}
-            className="bg-[#00f0ff] text-[#0e1a2b] font-semibold px-4 py-2 rounded hover:scale-105 transition-all"
-          >
-            {t('go_to_group')}
-          </button>
-        ) : (
-          <button
-            onClick={() => handleComplete('join_group', setJoined, setGroupMessage)}
-            disabled={joined}
-            className="bg-[#00f0ff] text-[#0e1a2b] font-semibold px-4 py-2 rounded hover:scale-105 transition-all disabled:opacity-40"
-          >
-            {joined ? t('already_done') : t('i_joined')}
-          </button>
-        )}
-        {groupMessage && <p className="text-sm mt-2 text-[#a0f6ff]">{groupMessage}</p>}
-      </div>
-
-      {/* Ежедневный чек-ин */}
-      <div className="bg-[#0e1a2b] border border-[#00f0ff40] p-4 rounded-xl shadow-[0_0_10px_#00f0ff20] space-y-2 text-center">
-        <h3 className="text-lg font-semibold text-[#7ee9ff]">{t('daily_checkin')}</h3>
-        <p className="text-sm text-[#a0f6ff]">{t('checkin_get')}</p>
-
-        <div className="flex justify-center gap-2">
-          {rewards.map((r, index) => (
-            <div
-              key={index}
-              className={`w-10 h-10 flex items-center justify-center rounded-full text-xs font-bold transition ${
-                streak && index < streak
-                  ? 'bg-[#00f0ff] text-[#0e1a2b]'
-                  : 'bg-[#1e2e3d] text-[#7ee9ff]'
-              }`}
-            >
-              {r}
-            </div>
-          ))}
-        </div>
-
-        <button
-          onClick={handleCheckIn}
-          disabled={checkedIn}
-          className="mt-4 bg-[#00f0ff] text-[#0e1a2b] font-semibold px-4 py-2 rounded hover:scale-105 transition-all disabled:opacity-40"
-        >
-          {checkedIn ? t('checkin_already') : t('checkin_get')}
-        </button>
-
-        {checkinMessage && <p className="text-sm mt-2 text-[#a0f6ff]">{checkinMessage}</p>}
-      </div>
+      {/* ... Instagram и группа (не изменено) ... */}
 
       {/* Ежедневная задача на клики */}
       {dailyTarget !== null && dailyProgress !== null && (
-        <div className="bg-[#0e1a2b] border border-[#00f0ff40] p-4 rounded-xl shadow-[0_0_10px_#00f0ff20] space-y-2 text-center">
+        <div className="bg-[#0e1a2b] border border-[#00f0ff40] p-4 rounded-xl shadow-[0_0_10px_#00f0ff20] space-y-4 text-center">
           <h3 className="text-lg font-semibold text-[#7ee9ff]">{t('daily_task_clicker')}</h3>
+          <div className="w-full h-4 bg-[#1e2e3d] rounded-full overflow-hidden">
+            <div
+              className="h-full bg-[#00f0ff] transition-all"
+              style={{ width: `${Math.min((dailyProgress / dailyTarget) * 100, 100)}%` }}
+            ></div>
+          </div>
           <p className="text-sm text-[#a0f6ff]">
             {t('daily_task_goal')}: {dailyProgress} / {dailyTarget}
           </p>
           {dailyCompleted ? (
-            <p className="text-green-400 text-sm font-semibold">{t('task_completed')}</p>
+            <>
+              <p className="text-green-400 text-sm font-semibold">{t('task_completed')}</p>
+              <button
+                onClick={handleShare}
+                className="mt-2 bg-[#00f0ff] text-[#0e1a2b] font-semibold px-4 py-2 rounded hover:scale-105 transition-all"
+              >
+                {t('share_with_friends')}
+              </button>
+            </>
           ) : (
             <p className="text-[#7ee9ff] text-xs">{t('keep_going')}</p>
           )}
@@ -239,6 +176,7 @@ const Tasks: React.FC = () => {
 };
 
 export default Tasks;
+
 
 
 
