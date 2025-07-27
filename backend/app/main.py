@@ -138,7 +138,7 @@ async def register_user(
 
     return {"status": "ok"}
 
-@router.post("/api/game/progress")
+@app.post("/api/game/progress")
 async def get_progress(data: dict = Body(...), session: AsyncSession = Depends(get_async_session)):
     telegram_id = parse_telegram_user_id(data["init_data"])
     user = await crud_user.get_user(session, telegram_id)
