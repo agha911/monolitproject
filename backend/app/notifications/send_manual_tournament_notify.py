@@ -5,19 +5,17 @@ from app.models.user import User
 import asyncio
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo
 
-TEXT_WITH_INSTAGRAM = (
-    "📸 *150 000 $GAP qazan!* Bizə Instagram-da abunə ol və tapşırığı yerinə yetir!\n\n"
-    "➕ İndi *Telegram qrupumuza* da qoşula bilərsən — bu tapşırıq üçün də *150 000 $GAP* verilir!\n\n"
-    "🎯 Hər iki tapşırığı \"Tapşırıqlar\" bölməsində tamamlaya bilərsən."
+# 📩 Новый текст уведомления (единый для всех)
+ANNOUNCEMENT_TEXT = (
+    "🔔 *Vacib yeniliklər gəldi!*\n\n"
+    "⚙️ Enerji sistemində iki önəmli dəyişiklik:\n"
+    "1. Maksimum enerji artırıldıqda, artıq enerji avtomatik dolmur.\n"
+    "2. Enerji hamı üçün *8 saata tam* bərpa olunur.\n\n"
+    "🆕 Yeni gündəlik tapşırıq: klik et, nəticə göstər və *50 000 $GAP* qazan! Tapşırıq avtomatik qiymətləndirilir.\n\n"
+    "📲 \"Tapşırıqlar\" bölməsində yoxla və yeniliklərdən yararlan!"
 )
 
-TEXT_ONLY_GROUP = (
-    "💬 *Telegram qrupumuz artıq aktivdir!*\n\n"
-    "Qrupa qoşul və yeni tapşırığı yerinə yetir — *150 000 $GAP* qazan!\n\n"
-    "🎯 Tapşırığı \"Tapşırıqlar\" bölməsində tapa bilərsən."
-)
-
-# Кнопки: перейти в WebApp и в раздел Tapşırıqlar
+# 📌 Кнопки: переход в WebApp и раздел Tapşırıqlar
 markup = InlineKeyboardMarkup()
 markup.add(
     InlineKeyboardButton(
@@ -30,9 +28,8 @@ markup.add(
     )
 )
 
-INSTAGRAM_TASK_ID = "follow_instagram"
-
-async def send_group_task_announcement():
+# 📬 Основная функция рассылки
+async def send_announcement_to_all():
     async with async_session_maker() as session:
         result = await session.execute(select(User))
         users = result.scalars().all()
@@ -40,12 +37,9 @@ async def send_group_task_announcement():
     success, failed = 0, 0
     for user in users:
         try:
-            has_completed_instagram = INSTAGRAM_TASK_ID in (user.completed_tasks or [])
-            text = TEXT_ONLY_GROUP if has_completed_instagram else TEXT_WITH_INSTAGRAM
-
             await bot.send_message(
                 chat_id=user.telegram_id,
-                text=text,
+                text=ANNOUNCEMENT_TEXT,
                 parse_mode="Markdown",
                 reply_markup=markup
             )
@@ -54,11 +48,12 @@ async def send_group_task_announcement():
             print(f"[ERROR] {user.telegram_id}: {e}")
             failed += 1
 
-    print(f"[DONE] Sent: {success}, Failed: {failed}")
+    print(f"[DONE] Sent to {success} users, failed for {failed} users.")
 
-
+# 🚀 Запуск
 if __name__ == "__main__":
-    asyncio.run(send_group_task_announcement())
+    asyncio.run(send_announcement_to_all())
+
 
 
 
