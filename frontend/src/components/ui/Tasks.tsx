@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import API_BASE_URL from '../config';
 import WebApp from '@twa-dev/sdk';
@@ -21,6 +21,43 @@ const Tasks: React.FC = () => {
   const [checkedIn, setCheckedIn] = useState(false);
   const [checkinMessage, setCheckinMessage] = useState('');
 
+  const [dailyTarget, setDailyTarget] = useState<number | null>(null);
+  const [dailyProgress, setDailyProgress] = useState<number | null>(null);
+  const [dailyCompleted, setDailyCompleted] = useState<boolean>(false);
+
+  // Загрузка ежедневной задачи
+  const fetchDailyTask = async () => {
+    if (!telegramUserId) return;
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/task/daily`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user_id: telegramUserId }),
+      });
+
+      const data = await res.json();
+      if (data.status === 'ok') {
+        setDailyTarget(data.daily_target);
+        setDailyProgress(data.daily_progress);
+        setDailyCompleted(data.daily_completed);
+      }
+    } catch (err) {
+      console.error('Ошибка при загрузке ежедневной задачи', err);
+    }
+  };
+
+  useEffect(() => {
+    fetchDailyTask();
+  }, [telegramUserId]);
+
+  // Автообновление прогресса каждые 10 секунд
+  useEffect(() => {
+    const interval = setInterval(() => {
+      fetchDailyTask();
+    }, 10000);
+    return () => clearInterval(interval);
+  }, [telegramUserId]);
+
   const handleInstagramClick = () => {
     window.open('https://www.instagram.com/gap_pick', '_blank');
     setOpenedInstagram(true);
@@ -41,10 +78,7 @@ const Tasks: React.FC = () => {
       const res = await fetch(`${API_BASE_URL}/api/task/complete`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          user_id: telegramUserId,
-          task_id: task_id,
-        }),
+        body: JSON.stringify({ user_id: telegramUserId, task_id }),
       });
 
       const data = await res.json();
@@ -104,12 +138,7 @@ const Tasks: React.FC = () => {
       {/* Instagram подписка */}
       <div className="bg-[#0e1a2b] border border-[#00f0ff40] p-4 rounded-xl shadow-[0_0_10px_#00f0ff20] space-y-2 text-center">
         <h3 className="text-lg font-semibold text-[#7ee9ff]">{t('subscribe_instagram')}</h3>
-        <a
-          href="https://www.instagram.com/gap_pick"
-          target="_blank"
-          rel="noreferrer"
-          className="text-[#00f0ff] underline"
-        >
+        <a href="https://www.instagram.com/gap_pick" target="_blank" rel="noreferrer" className="text-[#00f0ff] underline">
           @gap_pick
         </a>
         <p className="text-sm text-[#a0f6ff]">{t('reward_received', { amount: 150000 })}</p>
@@ -130,19 +159,13 @@ const Tasks: React.FC = () => {
             {completed ? t('already_done') : t('i_subscribed')}
           </button>
         )}
-
         {message && <p className="text-sm mt-2 text-[#a0f6ff]">{message}</p>}
       </div>
 
       {/* Вступление в группу */}
       <div className="bg-[#0e1a2b] border border-[#00f0ff40] p-4 rounded-xl shadow-[0_0_10px_#00f0ff20] space-y-2 text-center">
         <h3 className="text-lg font-semibold text-[#7ee9ff]">{t('join_community')}</h3>
-        <a
-          href="https://t.me/+h-VjXbnz0BI2OGI6"
-          target="_blank"
-          rel="noreferrer"
-          className="text-[#00f0ff] underline"
-        >
+        <a href="https://t.me/+h-VjXbnz0BI2OGI6" target="_blank" rel="noreferrer" className="text-[#00f0ff] underline">
           Telegram Qrupu
         </a>
         <p className="text-sm text-[#a0f6ff]">{t('reward_received', { amount: 150000 })}</p>
@@ -163,7 +186,6 @@ const Tasks: React.FC = () => {
             {joined ? t('already_done') : t('i_joined')}
           </button>
         )}
-
         {groupMessage && <p className="text-sm mt-2 text-[#a0f6ff]">{groupMessage}</p>}
       </div>
 
@@ -197,11 +219,27 @@ const Tasks: React.FC = () => {
 
         {checkinMessage && <p className="text-sm mt-2 text-[#a0f6ff]">{checkinMessage}</p>}
       </div>
+
+      {/* Ежедневная задача на клики */}
+      {dailyTarget !== null && dailyProgress !== null && (
+        <div className="bg-[#0e1a2b] border border-[#00f0ff40] p-4 rounded-xl shadow-[0_0_10px_#00f0ff20] space-y-2 text-center">
+          <h3 className="text-lg font-semibold text-[#7ee9ff]">{t('daily_task_clicker')}</h3>
+          <p className="text-sm text-[#a0f6ff]">
+            {t('daily_task_goal')}: {dailyProgress} / {dailyTarget}
+          </p>
+          {dailyCompleted ? (
+            <p className="text-green-400 text-sm font-semibold">{t('task_completed')}</p>
+          ) : (
+            <p className="text-[#7ee9ff] text-xs">{t('keep_going')}</p>
+          )}
+        </div>
+      )}
     </div>
   );
 };
 
 export default Tasks;
+
 
 
 
