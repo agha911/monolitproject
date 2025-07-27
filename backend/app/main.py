@@ -171,7 +171,7 @@ async def get_progress(data: dict = Body(...), session: AsyncSession = Depends(g
             new_energy = user.energy
             new_last_update = last_update
 
-    await crud_user.update_energy_and_time(session, telegram_id, new_energy, new_last_update)
+        await crud_user.update_energy_and_time(session, telegram_id, new_energy, new_last_update)
         user.energy = new_energy
         user.lastEnergyUpdate = new_last_update
     else:
