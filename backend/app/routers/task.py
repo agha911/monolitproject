@@ -5,7 +5,7 @@ from pydantic import BaseModel
 
 from app.database import get_async_session
 from app.models.user import User
-from app.crud.user import get_user, complete_task, daily_checkin
+from app.crud.user import get_user, complete_task, daily_checkin, assign_or_get_daily_task
 
 router = APIRouter(prefix="/api/task")
 
@@ -95,4 +95,17 @@ async def join_group_endpoint(payload: GroupJoinPayload, session: AsyncSession =
     return {
         "status": "success",
         "reward": reward
+    }
+
+@router.post("/daily")
+async def get_daily_task(payload: UserIdPayload, session: AsyncSession = Depends(get_async_session)):
+    user = await get_user(session, payload.user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    task = await assign_or_get_daily_task(session, user)
+
+    return {
+        "status": "ok",
+        **task  # вернёт daily_target, daily_progress, daily_completed
     }
