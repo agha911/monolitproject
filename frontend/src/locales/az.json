@@ -60,6 +60,9 @@
   "task_completed": "✅ Tamamlandı!",
   "keep_going": "Davam et, az qaldı!",
   "share_message_text": "Bugünkü tapşırığı tamamladım! Gappick-də sən də öz nəticəni göstər – qoşul bizə!",
-  "available": "Mövcuddur"
+  "available": "Mövcuddur",
+  "claim_reward": "Mükafatı al",
+  "already_claimed": "Artıq alınıb",
+  "reward_received_short": "+{{amount}} qəpik"
 
 }
