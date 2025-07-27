@@ -4,7 +4,7 @@ import { useTranslation } from 'react-i18next';
 import MainButton from './MainButton';
 import API_BASE_URL from './config';
 
-const ENERGY_RESTORE_INTERVAL_MS = 1 * 60 * 1000;
+
 
 interface FloatingText {
   id: number;
@@ -92,7 +92,7 @@ const Clicker: React.FC = () => {
     return () => clearInterval(interval);
   }, [telegramUser, energy, maxEnergy]);
 
-  useEffect(() => {
+    useEffect(() => {
     const interval = setInterval(() => {
       if (!lastEnergyUpdate || energy >= maxEnergy) {
         setTimeToNextEnergy(null);
@@ -101,14 +101,20 @@ const Clicker: React.FC = () => {
 
       const now = new Date();
       const msPassed = now.getTime() - lastEnergyUpdate.getTime();
-      const msToNext = ENERGY_RESTORE_INTERVAL_MS - (msPassed % ENERGY_RESTORE_INTERVAL_MS);
+
+      const totalRecoveryMinutes = 480; // 8 часов
+      const recoveryIntervalMs = (totalRecoveryMinutes / maxEnergy) * 60 * 1000;
+
+      const msToNext = recoveryIntervalMs - (msPassed % recoveryIntervalMs);
       const minutes = Math.floor(msToNext / 60000);
       const seconds = Math.floor((msToNext % 60000) / 1000);
+
       setTimeToNextEnergy(`${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`);
     }, 1000);
 
     return () => clearInterval(interval);
   }, [lastEnergyUpdate, energy, maxEnergy]);
+
 
   const handleMultiClick = (x: number, y: number) => {
     if (!telegramUser || loading || energy <= 0) return;
