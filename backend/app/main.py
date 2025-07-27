@@ -25,7 +25,7 @@ from app.notifications.reset_energy_notified import reset_energy_flags
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo
 import concurrent.futures
 
-ENERGY_RECOVERY_INTERVAL_MINUTES = 1
+ENERGY_RECOVERY_TOTAL_MINUTES = 480
 MAX_ENERGY = 100
 DAILY_REWARDS = [100, 200, 300, 400, 500, 600, 700]
 
@@ -155,15 +155,25 @@ async def get_progress(data: dict = Body(...), session: AsyncSession = Depends(g
     max_energy = user.max_energy or 100
 
     if last_update:
-        minutes_passed = int((now - last_update).total_seconds() // 60)
-        energy_to_restore = minutes_passed // ENERGY_RECOVERY_INTERVAL_MINUTES
+        minutes_passed = (now - last_update).total_seconds() / 60
+        recovery_interval = ENERGY_RECOVERY_TOTAL_MINUTES / max_energy
+        energy_to_restore = int(minutes_passed // recovery_interval)
 
-        new_energy = min(max_energy, user.energy + energy_to_restore) if energy_to_restore > 0 and user.energy < max_energy else user.energy
+        if energy_to_restore > 0 and user.energy < max_energy:
+            new_energy = min(max_energy, user.energy + energy_to_restore)
 
-        # ✅ всегда обновляем lastEnergyUpdate (даже если энергия не изменилась)
-        await crud_user.update_energy_and_time(session, telegram_id, new_energy, now)
+            # ⏱️ Вычисляем, сколько времени прошло на восстановление этой энергии
+            updated_minutes = recovery_interval * (new_energy - user.energy)
+
+            # ⏳ Обновляем только на ту часть времени, которая реально "израсходована"
+            new_last_update = last_update + timedelta(minutes=updated_minutes)
+        else:
+            new_energy = user.energy
+            new_last_update = last_update
+
+    await crud_user.update_energy_and_time(session, telegram_id, new_energy, new_last_update)
         user.energy = new_energy
-        user.lastEnergyUpdate = now
+        user.lastEnergyUpdate = new_last_update
     else:
         await crud_user.update_energy_and_time(session, telegram_id, user.energy, now)
         user.lastEnergyUpdate = now
