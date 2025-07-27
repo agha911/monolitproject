@@ -54,5 +54,9 @@
   "join_community": "Telegram qrupumuza qoşul",
   "go_to_group": "Qrupa keç",
   "i_joined": "Mən qoşuldum",
-  "already_done": "Artıq tamamlanıb"
+  "already_done": "Artıq tamamlanıb",
+  "daily_task_clicker": "Gündəlik klik vəzifəsi",
+  "daily_task_goal": "Məqsəd",
+  "task_completed": "✅ Tamamlandı!",
+  "keep_going": "Davam et, az qaldı!"
 }
