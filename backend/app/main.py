@@ -26,6 +26,7 @@ from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo
 import concurrent.futures
 
 ENERGY_RECOVERY_TOTAL_MINUTES = 480
+ENERGY_REFILL_DAILY_LIMIT = 2
 MAX_ENERGY = 100
 DAILY_REWARDS = [100, 200, 300, 400, 500, 600, 700]
 
@@ -137,7 +138,7 @@ async def register_user(
 
     return {"status": "ok"}
 
-@app.post("/api/game/progress")
+@router.post("/api/game/progress")
 async def get_progress(data: dict = Body(...), session: AsyncSession = Depends(get_async_session)):
     telegram_id = parse_telegram_user_id(data["init_data"])
     user = await crud_user.get_user(session, telegram_id)
@@ -148,6 +149,8 @@ async def get_progress(data: dict = Body(...), session: AsyncSession = Depends(g
             "max_energy": 100,
             "lastEnergyUpdate": None,
             "click_boost_level": 0,
+            "energy_refill_count": 0,
+            "energy_refills_left": ENERGY_REFILL_DAILY_LIMIT
         }
 
     now = datetime.utcnow()
@@ -162,10 +165,7 @@ async def get_progress(data: dict = Body(...), session: AsyncSession = Depends(g
         if energy_to_restore > 0 and user.energy < max_energy:
             new_energy = min(max_energy, user.energy + energy_to_restore)
 
-            # ⏱️ Вычисляем, сколько времени прошло на восстановление этой энергии
             updated_minutes = recovery_interval * (new_energy - user.energy)
-
-            # ⏳ Обновляем только на ту часть времени, которая реально "израсходована"
             new_last_update = last_update + timedelta(minutes=updated_minutes)
         else:
             new_energy = user.energy
@@ -178,12 +178,22 @@ async def get_progress(data: dict = Body(...), session: AsyncSession = Depends(g
         await crud_user.update_energy_and_time(session, telegram_id, user.energy, now)
         user.lastEnergyUpdate = now
 
+    # 🗓 Обновим счётчик, если день сменился
+    if user.last_energy_refill and user.last_energy_refill.date() != now.date():
+        user.energy_refill_count = 0
+        session.add(user)
+        await session.commit()
+
+    energy_refills_left = max(0, ENERGY_REFILL_DAILY_LIMIT - (user.energy_refill_count or 0))
+
     return {
         "energy": user.energy,
         "total_xp": user.total_xp,
         "max_energy": user.max_energy,
         "lastEnergyUpdate": user.lastEnergyUpdate.isoformat() if user.lastEnergyUpdate else None,
         "click_boost_level": user.click_boost_level or 0,
+        "energy_refill_count": user.energy_refill_count or 0,
+        "energy_refills_left": energy_refills_left
     }
 
 
