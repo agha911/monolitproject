@@ -63,6 +63,6 @@
   "available": "Доступно",
   "claim_reward": "Забрать награду",
   "already_claimed": "Уже получено",
-  "reward_received_short": "+{{amount}} монет"
+  "reward_received_short": "+50000 монет"
 
 }
