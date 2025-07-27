@@ -59,6 +59,7 @@
   "daily_task_goal": "Goal",
   "task_completed": "✅ Completed!",
   "keep_going": "Keep going, you're close!",
-  "share_message_text": "I’ve completed today’s task! Join Gappick and show what you can do too!"
+  "share_message_text": "I’ve completed today’s task! Join Gappick and show what you can do too!",
+  "available": "Available"
 
 }
