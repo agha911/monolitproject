@@ -28,7 +28,10 @@ class User(Base):
     click_boost_level = Column(Integer, default=0)
     invited_at = Column(DateTime, nullable=True)
     joined_group = Column(Boolean, default=False)
-    
+    daily_target = Column(Integer, default=0)
+    daily_progress = Column(Integer, default=0)
+    daily_completed = Column(Boolean, default=False)
+    daily_updated_at = Column(DateTime, default=None)
     
     
 
