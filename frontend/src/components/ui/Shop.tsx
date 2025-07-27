@@ -54,7 +54,7 @@ const Shop: React.FC = () => {
 
       const data = await res.json();
       if (data.status === 'success') {
-        await fetchUserData(); // 🔁 синхронизация с бэком
+        await fetchUserData(); // 🔁 синхронизация
         setMessage(t('shop_success_boost', { value: `x${clickBoostLevel + 1}` }));
       } else {
         setMessage(`${t('shop_error')}: ${data.message}`);
@@ -79,6 +79,7 @@ const Shop: React.FC = () => {
 
       const data = await res.json();
       if (data.status === 'success') {
+        await fetchUserData(); // 🆕 для обновления максимальной энергии
         setMessage(t('shop_success', { value: data.new_max_energy }));
       } else {
         setMessage(`${t('shop_error')}: ${data.message}`);
@@ -103,7 +104,7 @@ const Shop: React.FC = () => {
 
       const data = await res.json();
       if (data.status === 'success') {
-        await fetchUserData(); // 🔁 синхронизация
+        await fetchUserData(); // 🆕 обновление счётчика восполнений
         setMessage(t('refill_success'));
       } else {
         setMessage(`${t('shop_error')}: ${data.message}`);
@@ -171,6 +172,7 @@ const Shop: React.FC = () => {
 };
 
 export default Shop;
+
 
 
 
