@@ -25,7 +25,6 @@ const Tasks: React.FC = () => {
   const [dailyProgress, setDailyProgress] = useState<number | null>(null);
   const [dailyCompleted, setDailyCompleted] = useState<boolean>(false);
 
-  // Загрузка ежедневной задачи
   const fetchDailyTask = async () => {
     if (!telegramUserId) return;
     try {
@@ -129,9 +128,17 @@ const Tasks: React.FC = () => {
   };
 
   const handleShare = () => {
-    WebApp.shareLink?.({
-      url: 'https://t.me/gap_pick_bot?start=from_task',
-      text: t('share_message_text'),
+    WebApp.showPopup({
+      title: t('share_with_friends'),
+      message: t('share_message_text'),
+      buttons: [
+        { id: 'share', type: 'default', text: t('share_now') },
+        { id: 'cancel', type: 'destructive', text: t('cancel') }
+      ],
+    }).then((result) => {
+      if (result === 'share') {
+        WebApp.openTelegramLink('https://t.me/gap_pick_bot?start=from_task');
+      }
     });
   };
 
@@ -141,8 +148,7 @@ const Tasks: React.FC = () => {
     <div className="p-4 bg-[#131f2f] min-h-screen text-[#00f0ff] space-y-6">
       <h2 className="text-xl font-bold text-center drop-shadow-md">📋 {t('title_tasks')}</h2>
 
-      {/* ... Instagram и группа (не изменено) ... */}
-
+      {/* Остальные задания остаются здесь */}
       {/* Ежедневная задача на клики */}
       {dailyTarget !== null && dailyProgress !== null && (
         <div className="bg-[#0e1a2b] border border-[#00f0ff40] p-4 rounded-xl shadow-[0_0_10px_#00f0ff20] space-y-4 text-center">
@@ -176,6 +182,7 @@ const Tasks: React.FC = () => {
 };
 
 export default Tasks;
+
 
 
 
