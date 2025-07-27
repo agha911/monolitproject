@@ -4,6 +4,7 @@ from typing import Optional
 from datetime import datetime
 from app.models.user import User
 from sqlalchemy.orm.attributes import flag_modified
+from math import ceil
 
 MAX_ENERGY_CAP = 30000
 ENERGY_INCREMENT = 100
@@ -113,3 +114,41 @@ async def mark_joined_group(session: AsyncSession, user: User, reward: int = 50)
     await session.commit()
     await session.refresh(user)
     return True
+
+async def assign_or_get_daily_task(session: AsyncSession, user: User):
+    now = datetime.utcnow()
+    today = now.date()
+
+    # если задача уже создана сегодня — возвращаем её
+    if user.daily_updated_at and user.daily_updated_at.date() == today:
+        return {
+            "daily_target": user.daily_target,
+            "daily_progress": user.daily_progress,
+            "daily_completed": user.daily_completed,
+        }
+
+    # иначе — пересчёт задачи
+    min_energy = 100
+    max_energy = 30000
+    max_coeff = 3.5
+    min_coeff = 1.2
+
+    energy = user.max_energy or 100
+    ratio = (energy - min_energy) / (max_energy - min_energy)
+    coefficient = max_coeff - ratio * (max_coeff - min_coeff)
+
+    target = ceil(energy * coefficient)
+
+    user.daily_target = target
+    user.daily_progress = 0
+    user.daily_completed = False
+    user.daily_updated_at = now
+
+    await session.commit()
+    await session.refresh(user)
+
+    return {
+        "daily_target": target,
+        "daily_progress": 0,
+        "daily_completed": False,
+    }
