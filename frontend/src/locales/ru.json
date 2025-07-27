@@ -60,6 +60,9 @@
   "task_completed": "✅ Выполнено!",
   "keep_going": "Продолжай, почти получилось!",
   "share_message_text": "Я выполнил сегодняшнюю задачу! Присоединяйся к Gappick и покажи, на что способен ты!",
-  "available": "Доступно"
+  "available": "Доступно",
+  "claim_reward": "Забрать награду",
+  "already_claimed": "Уже получено",
+  "reward_received_short": "+{{amount}} монет"
 
 }
