@@ -82,9 +82,6 @@ async def buy_max_energy(session: AsyncSession, user: User) -> bool:
     user.total_xp -= ENERGY_UPGRADE_COST
     user.max_energy += ENERGY_INCREMENT
 
-    if user.energy < user.max_energy:
-        user.energy = user.max_energy
-
     session.add(user)
     await session.commit()
     return True
