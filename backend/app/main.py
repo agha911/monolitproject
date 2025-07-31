@@ -271,7 +271,6 @@ async def claim_daily_reward(data: dict = Body(...), session: AsyncSession = Dep
         user.daily_reward_claimed = True
 
         session.add(user)
-        await session.flush()
         await session.commit()
         await session.refresh(user)
 
