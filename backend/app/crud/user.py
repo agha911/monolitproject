@@ -142,6 +142,7 @@ async def assign_or_get_daily_task(session: AsyncSession, user: User):
     user.daily_target = target
     user.daily_progress = 0
     user.daily_completed = False
+    user.daily_reward_claimed = False
     user.daily_updated_at = now
 
     await session.commit()
