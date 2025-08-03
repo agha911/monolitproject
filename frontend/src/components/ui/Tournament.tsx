@@ -1,74 +1,119 @@
-import React, { useEffect, useState } from 'react';
-import API_BASE_URL from '../config';
-import WebApp from '@twa-dev/sdk';
-import { useTranslation } from 'react-i18next';
+import React, { useEffect, useState } from "react";
+import API_BASE_URL from "../config";
+import { useTranslation } from "react-i18next";
 
 interface LeaderboardEntry {
-  rank: number;
-  telegram_id: number;
   username: string;
-  first_name: string;
-  last_name: string;
-  score: number;
+  clicks: number;
+  rank: number;
 }
 
-const Tournament: React.FC = () => {
+interface UserTournamentInfo {
+  league: "bronze" | "silver" | "gold" | null;
+  rank: number | null;
+  clicks: number;
+}
+
+const leagues = ["bronze", "silver", "gold"] as const;
+
+export default function Tournament() {
   const { t } = useTranslation();
-  const [top10, setTop10] = useState<LeaderboardEntry[]>([]);
-  const [myRank, setMyRank] = useState<number | null>(null);
-  const [myScore, setMyScore] = useState<number>(0);
+  const [activeLeague, setActiveLeague] = useState<"bronze" | "silver" | "gold">("bronze");
+  const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
+  const [userInfo, setUserInfo] = useState<UserTournamentInfo | null>(null);
+  const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    const fetchLeaderboard = async () => {
-      try {
-        const res = await fetch(`${API_BASE_URL}/api/tournament/leaderboard`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ init_data: WebApp.initData }),
-        });
-
-        const data = await res.json();
-        setTop10(data.top_10);
-        setMyRank(data.my_rank ?? null);
-        setMyScore(data.my_score ?? 0);
-      } catch (err) {
-        console.error('Ошибка загрузки турнира:', err);
-      }
-    };
-
-    fetchLeaderboard();
+    fetchUserInfo();
   }, []);
 
-  const renderName = (entry: LeaderboardEntry) => {
-    return entry.username || entry.first_name || `user_${entry.telegram_id}`;
+  useEffect(() => {
+    fetchLeaderboard(activeLeague);
+  }, [activeLeague]);
+
+  const fetchUserInfo = async () => {
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/tournament/me`, {
+        headers: { "init-data": window?.Telegram?.WebApp?.initData || "" },
+      });
+      const data = await res.json();
+      setUserInfo(data);
+
+      if (data.league) {
+        setActiveLeague(data.league);
+      }
+    } catch (err) {
+      console.error("Failed to fetch user info:", err);
+    }
+  };
+
+  const fetchLeaderboard = async (league: string) => {
+    try {
+      setLoading(true);
+      const res = await fetch(`${API_BASE_URL}/api/tournament/leaderboard?league=${league}`);
+      const data = await res.json();
+      setLeaderboard(data);
+    } catch (err) {
+      console.error("Failed to fetch leaderboard:", err);
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
-    <div className="p-4 bg-[#131f2f] min-h-screen text-[#00f0ff]">
-      <h2 className="text-xl font-bold text-center drop-shadow-md mb-4">🏆 {t('weekly_tournament')}</h2>
-      <p className="text-sm text-center mb-6 text-[#7ee9ff]">{t('top_invites_this_week')}</p>
+    <div className="p-4">
+      <h2 className="text-xl font-bold mb-4 text-center">🏆 Həftəlik Turnir</h2>
 
-      <div className="max-w-md mx-auto space-y-2">
-        {top10.map((entry) => (
-          <div
-            key={entry.telegram_id}
-            className="flex justify-between items-center bg-[#0e1a2b] px-4 py-2 rounded-xl border border-[#00f0ff40]"
+      {userInfo && (
+        <div className="mb-4 p-3 bg-gray-800 rounded-xl text-white text-sm">
+          <p><strong>Liqa:</strong> {userInfo.league ? t(userInfo.league) : "—"}</p>
+          <p><strong>Mövqe:</strong> {userInfo.rank ?? "—"}</p>
+          <p><strong>Toplanmış qəpik:</strong> {userInfo.clicks}</p>
+        </div>
+      )}
+
+      <div className="flex justify-center mb-4">
+        {leagues.map((league) => (
+          <button
+            key={league}
+            onClick={() => setActiveLeague(league)}
+            className={`px-3 py-1 mx-1 rounded-full text-sm ${
+              activeLeague === league ? "bg-yellow-400 text-black font-bold" : "bg-gray-700 text-white"
+            }`}
           >
-            <span className="font-semibold">#{entry.rank} {renderName(entry)}</span>
-            <span className="font-mono text-lg">{entry.score}</span>
-          </div>
+            {t(league)}
+          </button>
         ))}
       </div>
 
-      {myRank && myRank > 10 && (
-        <div className="mt-8 max-w-md mx-auto bg-[#0e1a2b] px-4 py-3 rounded-xl border border-[#00f0ff40]">
-          <p className="text-center font-semibold text-[#7ee9ff]">
-            {t('your_place')}: #{myRank} — {myScore} {t('invites')}
-          </p>
+      {loading ? (
+        <p className="text-center text-sm text-gray-400">Yüklənir...</p>
+      ) : (
+        <div className="bg-gray-900 rounded-xl p-3 text-white text-sm">
+          {leaderboard.length === 0 ? (
+            <p className="text-center">Bu liqada hələ heç kim yoxdur.</p>
+          ) : (
+            <table className="w-full text-left">
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>İstifadəçi</th>
+                  <th>Qəpik</th>
+                </tr>
+              </thead>
+              <tbody>
+                {leaderboard.map((entry) => (
+                  <tr key={entry.rank} className="border-t border-gray-700">
+                    <td className="py-1">{entry.rank}</td>
+                    <td className="py-1">{entry.username}</td>
+                    <td className="py-1">{entry.clicks}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
         </div>
       )}
     </div>
   );
-};
-
-export default Tournament;
+}
