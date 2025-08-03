@@ -3,6 +3,7 @@ from sqlalchemy.future import select
 from typing import Optional
 from datetime import datetime
 from app.models.user import User
+from app.models.app_stats import AppStats
 from sqlalchemy.orm.attributes import flag_modified
 from math import ceil
 
@@ -232,3 +233,21 @@ async def reset_tournament_data(session: AsyncSession):
         .values(tournament_clicks=0, tournament_updated_at=datetime.utcnow())
     )
     await session.commit()
+
+
+async def increment_total_spent(session: AsyncSession, amount: int):
+    result = await session.execute(select(AppStats).where(AppStats.id == 1))
+    stats = result.scalar_one_or_none()
+
+    if not stats:
+        stats = AppStats(id=1, total_spent=0)
+        session.add(stats)
+
+    stats.total_spent += amount
+    await session.commit()
+
+
+async def get_total_spent(session: AsyncSession) -> int:
+    result = await session.execute(select(AppStats.total_spent).where(AppStats.id == 1))
+    value = result.scalar()
+    return value or 0
