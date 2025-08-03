@@ -30,9 +30,14 @@ async def tournament_me(
     request: Request,
     session: AsyncSession = Depends(get_async_session)
 ):
-    user_id = parse_telegram_user_id(request)
-    if not user_id:
-        raise HTTPException(status_code=401, detail="Unauthorized")
+    init_data = request.headers.get("init-data")
+    if not init_data:
+        raise HTTPException(status_code=401, detail="No init-data header")
+
+    try:
+        user_id = parse_telegram_user_id(init_data)
+    except:
+        raise HTTPException(status_code=401, detail="Invalid init-data")
 
     info = await crud_user.get_user_tournament_info(session, user_id)
 
