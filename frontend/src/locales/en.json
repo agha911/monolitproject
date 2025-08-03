@@ -63,6 +63,12 @@
   "available": "Available",
   "claim_reward": "Claim reward",
   "already_claimed": "Already claimed",
-  "reward_received_short": "+50000 coins"
-
+  "reward_received_short": "+50000 coins",
+  "tournament_title": "Weekly Tournament",
+  "tournament_league": "League",
+  "tournament_rank": "Rank",
+  "tournament_clicks": "Coins",
+  "tournament_user": "User",
+  "tournament_empty": "No one in this league yet.",
+  "loading": "Loading..."
 }
