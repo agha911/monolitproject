@@ -70,5 +70,6 @@
   "tournament_clicks": "Coins",
   "tournament_user": "User",
   "tournament_empty": "No one in this league yet.",
-  "loading": "Loading..."
+  "loading": "Loading...",
+  "total_spent": "$GAP Fund"
 }
