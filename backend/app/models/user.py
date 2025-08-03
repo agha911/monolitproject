@@ -33,6 +33,8 @@ class User(Base):
     daily_completed = Column(Boolean, default=False)
     daily_updated_at = Column(DateTime, default=None)
     daily_reward_claimed = Column(Boolean, default=False)
+    tournament_clicks = Column(Integer, default=0)
+    tournament_updated_at = Column(DateTime, default=datetime.utcnow)
     
     
 
