@@ -6,14 +6,15 @@ from datetime import datetime
 from app.database import get_async_session
 from app.models.user import User
 from app.crud.user import get_user, buy_max_energy
-from app.crud import stats as crud_stats
 from app.crud import user as crud_user
 
 router = APIRouter(prefix="/api/shop")
 
+
 # 🔧 Модель запроса
 class UserIdPayload(BaseModel):
     telegram_id: int
+
 
 @router.post("/buy_max_energy")
 async def buy_max_energy_endpoint(payload: UserIdPayload, session: AsyncSession = Depends(get_async_session)):
@@ -27,13 +28,11 @@ async def buy_max_energy_endpoint(payload: UserIdPayload, session: AsyncSession 
 
     # 💰 Учитываем траты
     await crud_user.increment_spent(session, user.telegram_id, 5000)
-    await crud_stats.increment_total_spent(session, 5000)
+    await crud_user.increment_total_spent(session, 5000)
 
     return {"status": "success", "new_max_energy": user.max_energy}
 
 
-
-# ✅ Восполнение энергии
 @router.post("/buy_energy_refill")
 async def buy_energy_refill_endpoint(payload: UserIdPayload, session: AsyncSession = Depends(get_async_session)):
     user = await get_user(session, payload.telegram_id)
@@ -61,7 +60,7 @@ async def buy_energy_refill_endpoint(payload: UserIdPayload, session: AsyncSessi
 
     # 💰 Учитываем траты
     await crud_user.increment_spent(session, user.telegram_id, 500)
-    await crud_stats.increment_total_spent(session, 500)
+    await crud_user.increment_total_spent(session, 500)
 
     await session.commit()
 
@@ -72,8 +71,6 @@ async def buy_energy_refill_endpoint(payload: UserIdPayload, session: AsyncSessi
     }
 
 
-
-# ✅ Новый эндпоинт — покупка бустера на клик
 @router.post("/buy_click_boost")
 async def buy_click_boost_endpoint(payload: UserIdPayload, session: AsyncSession = Depends(get_async_session)):
     user = await get_user(session, payload.telegram_id)
@@ -99,11 +96,12 @@ async def buy_click_boost_endpoint(payload: UserIdPayload, session: AsyncSession
 
     # 💰 Учитываем траты
     await crud_user.increment_spent(session, user.telegram_id, price)
-    await crud_stats.increment_total_spent(session, price)
+    await crud_user.increment_total_spent(session, price)
 
     await session.commit()
 
     return {"status": "success", "new_boost_level": user.click_boost_level}
+
 
 
 
