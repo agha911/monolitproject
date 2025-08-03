@@ -8,7 +8,7 @@ from typing import Optional
 import os
 from app.database import get_async_session
 from app.crud import user as crud_user
-from app.routers import task, shop, invites
+from app.routers import task, shop, invites, tournament
 from sqlalchemy.future import select
 from app.models.user import User
 from app.utils import parse_telegram_user_id
@@ -232,17 +232,23 @@ async def click(data: dict = Body(...), session: AsyncSession = Depends(get_asyn
                 total_xp=user.total_xp + click_value
             )
 
-            # Обновляем прогресс задания, если оно еще не завершено
+            # Обновляем прогресс задания
             if not user.daily_completed:
                 user.daily_progress += click_value
                 if user.daily_progress >= user.daily_target:
                     user.daily_progress = user.daily_target
-                    user.daily_completed = True  # теперь можно вручную забрать награду
+                    user.daily_completed = True
 
                 await session.commit()
                 await session.refresh(user)
 
+            # Проверяем, попадает ли сейчас в период турнира
+            now = datetime.utcnow() + timedelta(hours=4)  # UTC+4
+            if now.weekday() in range(6):  # ПН (0) — СБ (5)
+                await crud_user.increment_tournament_clicks(session, user.id, amount=click_value)
+
         return {"status": "clicked", "task_completed": user.daily_completed}
+
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
@@ -391,6 +397,7 @@ async def count_users(session: AsyncSession = Depends(get_async_session)):
 app.include_router(task.router)
 app.include_router(shop.router)
 app.include_router(invites.router)
+app.include_router(tournament.router)
 
 async def reset_loop():
     while True:
