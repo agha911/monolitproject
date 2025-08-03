@@ -187,7 +187,7 @@ const Shop: React.FC = () => {
       {/* Товар-футболка */}
       <div className="bg-[#0e1a2b] border border-[#ffffff20] p-4 rounded-xl shadow-[0_0_10px_#ffffff20] text-center space-y-2 max-w-md mx-auto mt-10 opacity-60">
         <img
-          src="/images/tshirt-preview.png"
+          src="/tshirt-preview.png"
           alt="T-shirt"
           className="w-24 h-24 mx-auto rounded-md object-cover"
         />
