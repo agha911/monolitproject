@@ -38,10 +38,7 @@ export default function Tournament() {
       });
       const data = await res.json();
       setUserInfo(data);
-
-      if (data.league) {
-        setActiveLeague(data.league);
-      }
+      if (data.league) setActiveLeague(data.league);
     } catch (err) {
       console.error("Failed to fetch user info:", err);
     }
@@ -61,25 +58,34 @@ export default function Tournament() {
   };
 
   return (
-    <div className="p-4">
-      <h2 className="text-xl font-bold mb-4 text-center">🏆 Həftəlik Turnir</h2>
+    <div className="min-h-screen bg-[#0B0F1B] text-white px-4 py-6">
+      <h2 className="text-2xl font-bold mb-6 text-center tracking-wide">🏆 Həftəlik Turnir</h2>
 
       {userInfo && (
-        <div className="mb-4 p-3 bg-gray-800 rounded-xl text-white text-sm">
-          <p><strong>Liqa:</strong> {userInfo.league ? t(userInfo.league) : "—"}</p>
-          <p><strong>Mövqe:</strong> {userInfo.rank ?? "—"}</p>
-          <p><strong>Toplanmış qəpik:</strong> {userInfo.clicks}</p>
+        <div className="mb-6 p-4 bg-[#111827] rounded-2xl border border-cyan-400 shadow-cyan-500/20 shadow-md">
+          <p className="text-sm mb-1">
+            <span className="text-gray-400">Liqa:</span> {userInfo.league ? t(userInfo.league) : "—"}
+          </p>
+          <p className="text-sm mb-1">
+            <span className="text-gray-400">Mövqe:</span> {userInfo.rank ?? "—"}
+          </p>
+          <p className="text-sm">
+            <span className="text-gray-400">Qəpik:</span> {userInfo.clicks}
+          </p>
         </div>
       )}
 
-      <div className="flex justify-center mb-4">
+      <div className="flex justify-center gap-2 mb-5">
         {leagues.map((league) => (
           <button
             key={league}
             onClick={() => setActiveLeague(league)}
-            className={`px-3 py-1 mx-1 rounded-full text-sm ${
-              activeLeague === league ? "bg-yellow-400 text-black font-bold" : "bg-gray-700 text-white"
-            }`}
+            className={`px-4 py-1.5 rounded-full border text-sm font-medium transition-all duration-150
+              ${
+                activeLeague === league
+                  ? "bg-cyan-400 text-black border-cyan-400 shadow-md shadow-cyan-500/30"
+                  : "border-gray-600 text-gray-300 hover:border-cyan-500"
+              }`}
           >
             {t(league)}
           </button>
@@ -87,26 +93,26 @@ export default function Tournament() {
       </div>
 
       {loading ? (
-        <p className="text-center text-sm text-gray-400">Yüklənir...</p>
+        <p className="text-center text-gray-400 text-sm">Yüklənir...</p>
       ) : (
-        <div className="bg-gray-900 rounded-xl p-3 text-white text-sm">
+        <div className="bg-[#111827] rounded-xl overflow-hidden shadow-md shadow-cyan-800/10">
           {leaderboard.length === 0 ? (
-            <p className="text-center">Bu liqada hələ heç kim yoxdur.</p>
+            <p className="text-center py-6 text-gray-400 text-sm">Bu liqada hələ heç kim yoxdur.</p>
           ) : (
-            <table className="w-full text-left">
-              <thead>
+            <table className="w-full text-left text-sm">
+              <thead className="bg-[#1f2937] text-cyan-400 uppercase text-xs">
                 <tr>
-                  <th>#</th>
-                  <th>İstifadəçi</th>
-                  <th>Qəpik</th>
+                  <th className="py-2 px-3">#</th>
+                  <th className="py-2 px-3">İstifadəçi</th>
+                  <th className="py-2 px-3">Qəpik</th>
                 </tr>
               </thead>
               <tbody>
                 {leaderboard.map((entry) => (
-                  <tr key={entry.rank} className="border-t border-gray-700">
-                    <td className="py-1">{entry.rank}</td>
-                    <td className="py-1">{entry.username}</td>
-                    <td className="py-1">{entry.clicks}</td>
+                  <tr key={entry.rank} className="border-t border-gray-700 hover:bg-gray-800/40 transition">
+                    <td className="py-2 px-3">{entry.rank}</td>
+                    <td className="py-2 px-3">{entry.username}</td>
+                    <td className="py-2 px-3">{entry.clicks}</td>
                   </tr>
                 ))}
               </tbody>
@@ -117,3 +123,4 @@ export default function Tournament() {
     </div>
   );
 }
+
