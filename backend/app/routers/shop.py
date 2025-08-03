@@ -27,7 +27,7 @@ async def buy_max_energy_endpoint(payload: UserIdPayload, session: AsyncSession 
         raise HTTPException(status_code=400, detail="Not enough XP to buy energy")
 
     # 💰 Учитываем траты
-    await crud_user.increment_total_spent(session, 5000)
+    await crud_user.increment_total_spent(session, 500)
 
     return {"status": "success", "new_max_energy": user.max_energy}
 
