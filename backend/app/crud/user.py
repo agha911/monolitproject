@@ -244,9 +244,13 @@ async def increment_total_spent(session: AsyncSession, amount: int):
     if not stats:
         stats = AppStats(id=1, total_spent=0)
         session.add(stats)
+        await session.commit()  # Коммитим создание записи
+        # Или можно сразу вернуть, если в этой сессии первый раз:
+        # return
 
     stats.total_spent += amount
     await session.commit()
+
 
 
 async def get_total_spent(session: AsyncSession) -> int:
