@@ -27,7 +27,6 @@ async def buy_max_energy_endpoint(payload: UserIdPayload, session: AsyncSession 
         raise HTTPException(status_code=400, detail="Not enough XP to buy energy")
 
     # 💰 Учитываем траты
-    await crud_user.increment_spent(session, user.telegram_id, 5000)
     await crud_user.increment_total_spent(session, 5000)
 
     return {"status": "success", "new_max_energy": user.max_energy}
@@ -59,7 +58,6 @@ async def buy_energy_refill_endpoint(payload: UserIdPayload, session: AsyncSessi
     session.add(user)
 
     # 💰 Учитываем траты
-    await crud_user.increment_spent(session, user.telegram_id, 500)
     await crud_user.increment_total_spent(session, 500)
 
     await session.commit()
@@ -95,7 +93,6 @@ async def buy_click_boost_endpoint(payload: UserIdPayload, session: AsyncSession
     session.add(user)
 
     # 💰 Учитываем траты
-    await crud_user.increment_spent(session, user.telegram_id, price)
     await crud_user.increment_total_spent(session, price)
 
     await session.commit()
