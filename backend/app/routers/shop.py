@@ -6,6 +6,8 @@ from datetime import datetime
 from app.database import get_async_session
 from app.models.user import User
 from app.crud.user import get_user, buy_max_energy
+from app.crud import stats as crud_stats
+from app.crud import user as crud_user
 
 router = APIRouter(prefix="/api/shop")
 
@@ -23,7 +25,12 @@ async def buy_max_energy_endpoint(payload: UserIdPayload, session: AsyncSession 
     if not success:
         raise HTTPException(status_code=400, detail="Not enough XP to buy energy")
 
+    # 💰 Учитываем траты
+    await crud_user.increment_spent(session, user.telegram_id, 5000)
+    await crud_stats.increment_total_spent(session, 5000)
+
     return {"status": "success", "new_max_energy": user.max_energy}
+
 
 
 # ✅ Восполнение энергии
@@ -51,6 +58,11 @@ async def buy_energy_refill_endpoint(payload: UserIdPayload, session: AsyncSessi
     user.last_energy_refill = now
 
     session.add(user)
+
+    # 💰 Учитываем траты
+    await crud_user.increment_spent(session, user.telegram_id, 500)
+    await crud_stats.increment_total_spent(session, 500)
+
     await session.commit()
 
     return {
@@ -60,6 +72,7 @@ async def buy_energy_refill_endpoint(payload: UserIdPayload, session: AsyncSessi
     }
 
 
+
 # ✅ Новый эндпоинт — покупка бустера на клик
 @router.post("/buy_click_boost")
 async def buy_click_boost_endpoint(payload: UserIdPayload, session: AsyncSession = Depends(get_async_session)):
@@ -67,7 +80,6 @@ async def buy_click_boost_endpoint(payload: UserIdPayload, session: AsyncSession
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
-    # 🛡️ Гарантируем инициализацию
     if user.click_boost_level is None:
         user.click_boost_level = 0
 
@@ -84,9 +96,15 @@ async def buy_click_boost_endpoint(payload: UserIdPayload, session: AsyncSession
     user.click_boost_level = current_level + 1
 
     session.add(user)
+
+    # 💰 Учитываем траты
+    await crud_user.increment_spent(session, user.telegram_id, price)
+    await crud_stats.increment_total_spent(session, price)
+
     await session.commit()
 
     return {"status": "success", "new_boost_level": user.click_boost_level}
+
 
 
 
