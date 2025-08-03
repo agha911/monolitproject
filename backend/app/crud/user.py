@@ -156,7 +156,7 @@ async def assign_or_get_daily_task(session: AsyncSession, user: User):
     }
 
 
-async def increment_tournament_clicks(session: AsyncSession, telegram_id: int, amount: int = 1):
+async def increment_tournament_clicks(session: AsyncSession, telegram_id: int, amount: int):
     await session.execute(
         update(User)
         .where(User.telegram_id == telegram_id)
