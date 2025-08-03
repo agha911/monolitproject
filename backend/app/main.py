@@ -8,7 +8,7 @@ from typing import Optional
 import os
 from app.database import get_async_session
 from app.crud import user as crud_user
-from app.routers import task, shop, invites, tournament
+from app.routers import task, shop, invites, tournament, stats
 from sqlalchemy.future import select
 from app.models.user import User
 from app.utils import parse_telegram_user_id
@@ -398,6 +398,7 @@ app.include_router(task.router)
 app.include_router(shop.router)
 app.include_router(invites.router)
 app.include_router(tournament.router)
+app.include_router(stats.router)
 
 async def reset_loop():
     while True:
