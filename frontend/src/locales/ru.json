@@ -63,6 +63,13 @@
   "available": "Доступно",
   "claim_reward": "Забрать награду",
   "already_claimed": "Уже получено",
-  "reward_received_short": "+50000 монет"
+  "reward_received_short": "+50000 монет",
+  "tournament_title": "Еженедельный Турнир",
+  "tournament_league": "Лига",
+  "tournament_rank": "Место",
+  "tournament_clicks": "Монеты",
+  "tournament_user": "Пользователь",
+  "tournament_empty": "В этой лиге пока никого нет.",
+  "loading": "Загрузка..."
 
 }
