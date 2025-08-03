@@ -157,12 +157,14 @@ async def assign_or_get_daily_task(session: AsyncSession, user: User):
 
 
 async def increment_tournament_clicks(session: AsyncSession, telegram_id: int, amount: int):
-    await session.execute(
-        update(User)
-        .where(User.telegram_id == telegram_id)
-        .values(tournament_clicks=User.tournament_clicks + amount)
-    )
-    await session.commit()
+    result = await session.execute(select(User).where(User.telegram_id == telegram_id))
+    user = result.scalar_one_or_none()
+
+    if user:
+        user.tournament_clicks = (user.tournament_clicks or 0) + amount
+        session.add(user)
+        await session.commit()
+
 
 
 # 2. Получение топа по лиге
