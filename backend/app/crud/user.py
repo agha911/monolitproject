@@ -153,3 +153,76 @@ async def assign_or_get_daily_task(session: AsyncSession, user: User):
         "daily_progress": 0,
         "daily_completed": False,
     }
+
+
+async def increment_tournament_clicks(session: AsyncSession, user_id: int, amount: int = 1):
+    await session.execute(
+        update(User)
+        .where(User.id == user_id)
+        .values(tournament_clicks=User.tournament_clicks + amount)
+    )
+    await session.commit()
+
+
+async def get_tournament_leaderboard(session: AsyncSession, league: str):
+    if league == "bronze":
+        min_energy, max_energy = 5000, 15000
+    elif league == "silver":
+        min_energy, max_energy = 15000, 25000
+    elif league == "gold":
+        min_energy, max_energy = 25000, 30000
+    else:
+        raise ValueError("Invalid league")
+
+    result = await session.execute(
+        select(User)
+        .where(User.max_energy >= min_energy, User.max_energy < max_energy)
+        .order_by(User.tournament_clicks.desc())
+        .limit(10)
+    )
+    return result.scalars().all()
+
+
+async def get_user_tournament_info(session: AsyncSession, user_id: int):
+    user = await session.get(User, user_id)
+    if not user:
+        return None
+
+    if user.max_energy >= 25000:
+        league = "gold"
+        min_e, max_e = 25000, 30000
+    elif user.max_energy >= 15000:
+        league = "silver"
+        min_e, max_e = 15000, 25000
+    elif user.max_energy >= 5000:
+        league = "bronze"
+        min_e, max_e = 5000, 15000
+    else:
+        return {
+            "league": None,
+            "rank": None,
+            "clicks": 0
+        }
+
+    result = await session.execute(
+        select(User)
+        .where(User.max_energy >= min_e, User.max_energy < max_e)
+        .order_by(User.tournament_clicks.desc())
+    )
+    users = result.scalars().all()
+    rank = next((i + 1 for i, u in enumerate(users) if u.id == user_id), None)
+
+    return {
+        "league": league,
+        "rank": rank,
+        "clicks": user.tournament_clicks
+    }
+
+
+
+async def reset_tournament_data(session: AsyncSession):
+    await session.execute(
+        update(User)
+        .values(tournament_clicks=0, tournament_updated_at=datetime.utcnow())
+    )
+    await session.commit()
