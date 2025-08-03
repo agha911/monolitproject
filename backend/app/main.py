@@ -245,7 +245,7 @@ async def click(data: dict = Body(...), session: AsyncSession = Depends(get_asyn
             # Проверяем, попадает ли сейчас в период турнира
             now = datetime.utcnow() + timedelta(hours=4)  # UTC+4
             if now.weekday() in range(6):  # ПН (0) — СБ (5)
-                await crud_user.increment_tournament_clicks(session, user.id, amount=click_value)
+                await crud_user.increment_tournament_clicks(session, user.telegram_id, amount=click_value)
 
         return {"status": "clicked", "task_completed": user.daily_completed}
 
