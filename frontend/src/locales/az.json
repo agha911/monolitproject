@@ -63,6 +63,13 @@
   "available": "Mövcuddur",
   "claim_reward": "Mükafatı al",
   "already_claimed": "Artıq alınıb",
-  "reward_received_short": "+50000 qəpik"
+  "reward_received_short": "+50000 qəpik",
+  "tournament_title": "Həftəlik Turnir",
+  "tournament_league": "Liqa",
+  "tournament_rank": "Mövqe",
+  "tournament_clicks": "Qəpik",
+  "tournament_user": "İstifadəçi",
+  "tournament_empty": "Bu liqada hələ heç kim yoxdur.",
+  "loading": "Yüklənir..."
 
 }
