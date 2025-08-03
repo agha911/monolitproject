@@ -155,15 +155,16 @@ async def assign_or_get_daily_task(session: AsyncSession, user: User):
     }
 
 
-async def increment_tournament_clicks(session: AsyncSession, user_id: int, amount: int = 1):
+async def increment_tournament_clicks(session: AsyncSession, telegram_id: int, amount: int = 1):
     await session.execute(
         update(User)
-        .where(User.id == user_id)
+        .where(User.telegram_id == telegram_id)
         .values(tournament_clicks=User.tournament_clicks + amount)
     )
     await session.commit()
 
 
+# 2. Получение топа по лиге
 async def get_tournament_leaderboard(session: AsyncSession, league: str):
     if league == "bronze":
         min_energy, max_energy = 5000, 15000
@@ -183,8 +184,13 @@ async def get_tournament_leaderboard(session: AsyncSession, league: str):
     return result.scalars().all()
 
 
-async def get_user_tournament_info(session: AsyncSession, user_id: int):
-    user = await session.get(User, user_id)
+# 3. Получение информации пользователя в турнире
+async def get_user_tournament_info(session: AsyncSession, telegram_id: int):
+    result = await session.execute(
+        select(User).where(User.telegram_id == telegram_id)
+    )
+    user = result.scalar_one_or_none()
+
     if not user:
         return None
 
@@ -210,7 +216,7 @@ async def get_user_tournament_info(session: AsyncSession, user_id: int):
         .order_by(User.tournament_clicks.desc())
     )
     users = result.scalars().all()
-    rank = next((i + 1 for i, u in enumerate(users) if u.id == user_id), None)
+    rank = next((i + 1 for i, u in enumerate(users) if u.telegram_id == telegram_id), None)
 
     return {
         "league": league,
@@ -219,7 +225,7 @@ async def get_user_tournament_info(session: AsyncSession, user_id: int):
     }
 
 
-
+# 4. Сброс всех турнирных кликов (раз в неделю)
 async def reset_tournament_data(session: AsyncSession):
     await session.execute(
         update(User)
