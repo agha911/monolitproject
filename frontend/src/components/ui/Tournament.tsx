@@ -59,18 +59,19 @@ export default function Tournament() {
 
   return (
     <div className="min-h-screen bg-[#0B0F1B] text-white px-4 py-6">
-      <h2 className="text-2xl font-bold mb-6 text-center tracking-wide">🏆 Həftəlik Turnir</h2>
+      <h2 className="text-2xl font-bold mb-6 text-center tracking-wide">🏆 {t("tournament_title")}</h2>
 
       {userInfo && (
         <div className="mb-6 p-4 bg-[#111827] rounded-2xl border border-cyan-400 shadow-cyan-500/20 shadow-md">
           <p className="text-sm mb-1">
-            <span className="text-gray-400">Liqa:</span> {userInfo.league ? t(userInfo.league) : "—"}
+            <span className="text-gray-400">{t("tournament_league")}:</span>{" "}
+            {userInfo.league ? t(userInfo.league) : "—"}
           </p>
           <p className="text-sm mb-1">
-            <span className="text-gray-400">Mövqe:</span> {userInfo.rank ?? "—"}
+            <span className="text-gray-400">{t("tournament_rank")}:</span> {userInfo.rank ?? "—"}
           </p>
           <p className="text-sm">
-            <span className="text-gray-400">Qəpik:</span> {userInfo.clicks}
+            <span className="text-gray-400">{t("tournament_clicks")}:</span> {userInfo.clicks}
           </p>
         </div>
       )}
@@ -93,18 +94,18 @@ export default function Tournament() {
       </div>
 
       {loading ? (
-        <p className="text-center text-gray-400 text-sm">Yüklənir...</p>
+        <p className="text-center text-gray-400 text-sm">{t("loading")}</p>
       ) : (
         <div className="bg-[#111827] rounded-xl overflow-hidden shadow-md shadow-cyan-800/10">
           {leaderboard.length === 0 ? (
-            <p className="text-center py-6 text-gray-400 text-sm">Bu liqada hələ heç kim yoxdur.</p>
+            <p className="text-center py-6 text-gray-400 text-sm">{t("tournament_empty")}</p>
           ) : (
             <table className="w-full text-left text-sm">
               <thead className="bg-[#1f2937] text-cyan-400 uppercase text-xs">
                 <tr>
                   <th className="py-2 px-3">#</th>
-                  <th className="py-2 px-3">İstifadəçi</th>
-                  <th className="py-2 px-3">Qəpik</th>
+                  <th className="py-2 px-3">{t("tournament_user")}</th>
+                  <th className="py-2 px-3">{t("tournament_clicks")}</th>
                 </tr>
               </thead>
               <tbody>
