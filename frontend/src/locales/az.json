@@ -70,6 +70,7 @@
   "tournament_clicks": "Qəpik",
   "tournament_user": "İstifadəçi",
   "tournament_empty": "Bu liqada hələ heç kim yoxdur.",
-  "loading": "Yüklənir..."
+  "loading": "Yüklənir...",
+  "total_spent": "$GAP Fondu"
 
 }
