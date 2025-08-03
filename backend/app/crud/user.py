@@ -180,7 +180,7 @@ async def get_tournament_leaderboard(session: AsyncSession, league: str):
 
     result = await session.execute(
         select(User)
-        .where(User.max_energy >= min_energy, User.max_energy < max_energy)
+        .where(User.max_energy >= min_energy, User.max_energy <= max_energy)
         .order_by(User.tournament_clicks.desc())
         .limit(10)
     )
