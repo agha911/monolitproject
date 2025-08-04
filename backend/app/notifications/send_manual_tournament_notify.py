@@ -24,7 +24,7 @@ markup.add(
     InlineKeyboardButton(
         text="🚀 Başla",
         web_app=WebAppInfo(url="https://monolitproject-5g7v.vercel.app/")
-    )
+    ))
 
 # 📬 Основная функция рассылки
 async def send_announcement_to_all():
