@@ -8,7 +8,7 @@ from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo
 # 📩 Новый текст уведомления (единый для всех)
 ANNOUNCEMENT_TEXT = (
     "🏆 *Yeni turnir sistemi aktivdir!*\n\n"
-    "🥇 İndi "Həftəlik Turnir" *3 liqa* üzrə keçiriləcək:\n"
+    "🥇 İndi Həftəlik Turnir *3 liqa* üzrə keçiriləcək:\n"
     "• *Qızıl liqa* – ən güclülər (Maks. enerji >25.000)\n"
     "• *Gümüş liqa* – inkişaf yolunda olanlar (15.000 > Maks. enerji < 25.000)\n"
     "• *Bürünc liqa* – yeni başlayanlar (5.000 > Maks. enerji < 15.000)\n\n"
