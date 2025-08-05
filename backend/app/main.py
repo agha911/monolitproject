@@ -97,12 +97,27 @@ async def register_user(
     result = await session.execute(select(User).where(User.telegram_id == telegram_id))
     user = result.scalar_one_or_none()
 
-    info = get_user_info_from_bot_api(telegram_id)
-
+    info = get_user_info_from_bot_api(telegram_id)  # всегда обновляем info
     inviter_id_str = referral_cache.get(telegram_id_str)
     inviter = None
 
     if user:
+        # 🔄 Обновим username/first_name/last_name если они отсутствуют
+        updated = False
+        if not user.username and info.get("username"):
+            user.username = info["username"]
+            updated = True
+        if not user.first_name and info.get("first_name"):
+            user.first_name = info["first_name"]
+            updated = True
+        if not user.last_name and info.get("last_name"):
+            user.last_name = info["last_name"]
+            updated = True
+        if updated:
+            session.add(user)
+            await session.commit()
+
+        # 👇 старая логика
         if inviter_id_str and user.invited_by is None:
             inviter_id = int(inviter_id_str)
             inviter_result = await session.execute(select(User).where(User.telegram_id == inviter_id))
@@ -114,8 +129,10 @@ async def register_user(
                 inviter.total_xp += 1500
                 session.add_all([user, inviter])
                 await session.commit()
+
         return {"status": "already_registered"}
 
+    # 👇 регистрация нового пользователя
     if inviter_id_str:
         inviter_id = int(inviter_id_str)
         inviter_result = await session.execute(select(User).where(User.telegram_id == inviter_id))
@@ -137,6 +154,7 @@ async def register_user(
     await session.commit()
 
     return {"status": "ok"}
+
 
 @app.post("/api/game/progress")
 async def get_progress(data: dict = Body(...), session: AsyncSession = Depends(get_async_session)):
