@@ -28,7 +28,7 @@ const Tasks: React.FC = () => {
   const [rewardMessage, setRewardMessage] = useState('');
   const [rewardClaimed, setRewardClaimed] = useState(false);
 
-  const rewards = [10000, 200000, 30000, 40000, 50000, 60000, 70000];
+  const rewards = [10000, 20000, 30000, 40000, 50000, 60000, 70000];
 
   // ✅ Функция форматирования чисел
   const formatNumber = (num: number): string => {
