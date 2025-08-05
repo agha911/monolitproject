@@ -158,7 +158,7 @@ const Tasks: React.FC = () => {
     }
   };
 
-  const rewards = [100, 200, 300, 400, 500, 600, 700];
+  const rewards = [10000, 20000, 30000, 40000, 50000, 60000, 70000];
 
   return (
     <div className="p-4 bg-[#131f2f] min-h-screen text-[#00f0ff] space-y-6">
