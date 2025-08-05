@@ -28,6 +28,15 @@ const Tasks: React.FC = () => {
   const [rewardMessage, setRewardMessage] = useState('');
   const [rewardClaimed, setRewardClaimed] = useState(false);
 
+  const rewards = [10000, 200000, 30000, 40000, 50000, 60000, 70000];
+
+  // ✅ Функция форматирования чисел
+  const formatNumber = (num: number): string => {
+    if (num >= 1000000) return `${num / 1000000}M`;
+    if (num >= 1000) return `${num / 1000}k`;
+    return num.toString();
+  };
+
   const fetchDailyTask = async () => {
     if (!telegramUserId) return;
     try {
@@ -158,8 +167,6 @@ const Tasks: React.FC = () => {
     }
   };
 
-  const rewards = [10000, 200000, 30000, 40000, 50000, 60000, 70000];
-
   return (
     <div className="p-4 bg-[#131f2f] min-h-screen text-[#00f0ff] space-y-6">
       <h2 className="text-xl font-bold text-center drop-shadow-md">📋 {t('title_tasks')}</h2>
@@ -201,7 +208,7 @@ const Tasks: React.FC = () => {
         <div className="flex justify-center gap-2 mt-2">
           {rewards.map((r, index) => (
             <div key={index} className={`w-8 h-8 flex items-center justify-center rounded-full text-xs font-bold ${streak && index < streak ? 'bg-[#00f0ff] text-[#0e1a2b]' : 'bg-[#1e2e3d] text-[#7ee9ff]'}`}>
-              {r}
+              {formatNumber(r)}
             </div>
           ))}
         </div>
@@ -238,6 +245,7 @@ const Tasks: React.FC = () => {
 };
 
 export default Tasks;
+
 
 
 
