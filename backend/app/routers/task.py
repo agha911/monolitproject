@@ -49,7 +49,7 @@ async def daily_checkin_endpoint(payload: UserIdPayload, session: AsyncSession =
     # Если уже отмечался сегодня — ничего не даём
     if user.last_checkin and user.last_checkin.date() == today:
         streak = user.daily_streak or 1
-        reward = 100 * streak
+        reward = 10000 * streak
         return {
             "status": "already_checked_in",
             "reward": reward,
@@ -68,7 +68,7 @@ async def daily_checkin_endpoint(payload: UserIdPayload, session: AsyncSession =
     if streak > 7:
         streak = 1
 
-    reward = 100 * streak
+    reward = 10000 * streak
 
     # Сохраняем
     updated_user = await daily_checkin(session, user, now, reward, streak)
