@@ -51,7 +51,6 @@ const Friends: React.FC = () => {
 
       <div className="bg-[#0e1a2b] p-4 rounded shadow-lg border border-[#00f0ff30] text-center">
         <p className="text-lg mb-2">{t('invited_friends')}: {invitesCount}</p>
-        <p className="text-base mb-4">💰 {t('reward')}: {invitesCount * 1500} $GAP</p>
         <button
           onClick={handleInvite}
           className="bg-[#00f0ff] text-[#131f2f] font-bold py-2 px-6 rounded hover:bg-[#7ee9ff]"
