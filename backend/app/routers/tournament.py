@@ -15,7 +15,7 @@ async def tournament_leaderboard(
         users = await crud_user.get_tournament_leaderboard(session, league)
         return [
             {
-                "username": user.username,
+                "username": user.username if user.username else user.first_name or "Anonim",
                 "clicks": user.tournament_clicks,
                 "rank": i + 1
             }
