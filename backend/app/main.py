@@ -126,7 +126,7 @@ async def register_user(
                 user.invited_by = inviter.id
                 user.invited_at = datetime.utcnow() + timedelta(hours=4)
                 inviter.invites_count += 1
-                inviter.total_xp += 1500
+                inviter.total_xp += 50000
                 session.add_all([user, inviter])
                 await session.commit()
 
@@ -139,7 +139,7 @@ async def register_user(
         inviter = inviter_result.scalar_one_or_none()
         if inviter:
             inviter.invites_count += 1
-            inviter.total_xp += 1500
+            inviter.total_xp += 50000
             session.add(inviter)
 
     new_user = User(
