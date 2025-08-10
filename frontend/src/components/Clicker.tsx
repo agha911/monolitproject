@@ -26,7 +26,8 @@ const Clicker: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [clickBoost, setClickBoost] = useState(1);
   const [floatingTexts, setFloatingTexts] = useState<FloatingText[]>([]);
-  const [serverSeq, setServerSeq] = useState(0); // 👈 seq с бэка
+  const [serverSeq, setServerSeq] = useState<number | null>(null); // seq с бэка
+  const [seqReady, setSeqReady] = useState(false);                 // gating для флаша
 
   useEffect(() => {
     WebApp.ready();
@@ -73,14 +74,16 @@ const Clicker: React.FC = () => {
         setMaxEnergy(data.max_energy ?? 1000);
         setClickBoost((data.click_boost_level ?? 0) + 1);
 
-        // 👇 ВАЖНО: подтягиваем last_client_seq с бэка и сохраняем
+        // подтягиваем last_client_seq
         const s = Number(data.last_client_seq ?? 0);
         setServerSeq(s);
         try { localStorage.setItem(seqStorageKey, String(s)); } catch {}
 
+        setSeqReady(true);   // включаем автофлаш только после sync seq
         setLoading(false);
       } catch (error) {
         console.error('Ошибка инициализации пользователя:', error);
+        setSeqReady(false);
       }
     };
 
@@ -104,11 +107,11 @@ const Clicker: React.FC = () => {
         setMaxEnergy(data.max_energy ?? 1000);
         setClickBoost((data.click_boost_level ?? 0) + 1);
 
-        // если серверный seq вырос — обновим и локально
         const s = Number(data.last_client_seq ?? 0);
-        if (s > serverSeq) {
+        if (serverSeq === null || s > serverSeq) {
           setServerSeq(s);
           try { localStorage.setItem(seqStorageKey, String(s)); } catch {}
+          setSeqReady(true);
         }
       } catch (err) {
         console.error('Ошибка при автообновлении энергии:', err);
@@ -151,26 +154,48 @@ const Clicker: React.FC = () => {
     return () => clearInterval(interval);
   }, [lastEnergyUpdate, energy, maxEnergy]);
 
-  const onReconcile = (data: FlushResponse) => {
-    setEnergy(data.energy);
-    setTotalXp(data.total_xp);
-    // сервер сообщил новый server_seq — сохраняем
-    const s = Number(data.server_seq ?? 0);
-    if (s > 0) {
-      setServerSeq(s);
-      try { localStorage.setItem(seqStorageKey, String(s)); } catch {}
+  const onReconcile = async (data: FlushResponse) => {
+    if (data.status === 'ok') {
+      setEnergy(data.energy);
+      setTotalXp(data.total_xp);
+      const s = Number(data.server_seq ?? 0);
+      if (s > 0) {
+        setServerSeq(s);
+        try { localStorage.setItem(seqStorageKey, String(s)); } catch {}
+      }
+    } else {
+      // noop / error — подровняем состояние авторитетно с сервера
+      try {
+        const res = await fetch(`${API_BASE_URL}/api/game/progress`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ init_data: WebApp.initData }),
+        });
+        const p = await res.json();
+        setEnergy(p.energy);
+        setTotalXp(p.total_xp ?? 0);
+        setLastEnergyUpdate(p.lastEnergyUpdate ? new Date(p.lastEnergyUpdate) : null);
+        setMaxEnergy(p.max_energy ?? 1000);
+        setClickBoost((p.click_boost_level ?? 0) + 1);
+        const s = Number(p.last_client_seq ?? 0);
+        setServerSeq(s);
+        try { localStorage.setItem(seqStorageKey, String(s)); } catch {}
+        setSeqReady(true);
+      } catch (e) {
+        console.warn('refresh after noop failed', e);
+      }
     }
   };
 
   const { addClicks /*, forceFlush*/ } = useClickBuffer({
-    initData: WebApp.initData,                           // обязательно для бэка
+    initData: WebApp.initData,                 // обязательно для бэка
     sessionId,
     onReconcile,
     flushEveryMs: 250,
     threshold: 20,
-    // берём максимум из локального и серверного seq
-    initialSeq: Math.max(serverSeq, initialLocalSeq),    // 👈 ключевая синхронизация
-    maxBatch: 50,                                        // = MAX_DELTA_PER_FLUSH на бэке
+    initialSeq: Math.max(serverSeq ?? 0, initialLocalSeq),
+    maxBatch: 50,                              // = MAX_DELTA_PER_FLUSH
+    enabled: seqReady,                         // ← флашим только после sync seq
   });
 
   const handleMultiClick = (x: number, y: number) => {
