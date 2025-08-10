@@ -13,15 +13,14 @@ export type FlushResponse = {
 };
 
 type Options = {
-  initData?: string;
+  initData?: string;              // Telegram WebApp.initData
   sessionId: string;
   onReconcile: (r: FlushResponse) => void;
   flushEveryMs?: number;
   threshold?: number;
-  initialSeq?: number;   // last_client_seq с бэка/локалки
-  maxBatch?: number;     // = MAX_DELTA_PER_FLUSH
-  maxBurst?: number;     // сколько батчей подряд
-  seqReady?: boolean;    // 👈 флаг готовности последовательности
+  initialSeq?: number;            // last_client_seq с бэка
+  maxBatch?: number;              // = MAX_DELTA_PER_FLUSH на бэке
+  enabled?: boolean;              // запуск флаша только после sync seq
 };
 
 export function useClickBuffer({
@@ -32,65 +31,66 @@ export function useClickBuffer({
   threshold = 20,
   initialSeq = 0,
   maxBatch = 50,
-  maxBurst = 8,
-  seqReady = true,       // по умолчанию включено, но лучше передавать явно из кликера
+  enabled = true,
 }: Options) {
   const [buffered, setBuffered] = useState(0);
+
   const bufferedRef = useRef(0);
-
   const inflight = useRef(false);
-
-  // last подтверждённый seq
   const lastSeqRef = useRef<number>(initialSeq);
-  // следующий резервируемый seq
-  const nextSeqRef = useRef<number>(initialSeq + 1);
-
   const retryTimer = useRef<number | null>(null);
 
-  // если initialSeq подтянули позже — синхронизируем
+  // если initialSeq обновился после запроса прогресса — подтягиваем его
   useEffect(() => {
     if (typeof initialSeq === "number" && initialSeq > lastSeqRef.current) {
       lastSeqRef.current = initialSeq;
-      nextSeqRef.current = initialSeq + 1;
     }
   }, [initialSeq]);
 
+  const setBufferedSafe = (n: number) => {
+    bufferedRef.current = n;
+    setBuffered(n);
+  };
+
   const incBuffered = (n: number) => {
     if (n <= 0) return;
-    bufferedRef.current += n;
-    setBuffered((v) => v + n);
-  };
-  const decBuffered = (n: number) => {
-    if (n <= 0) return;
-    const next = Math.max(0, bufferedRef.current - n);
-    bufferedRef.current = next;
-    setBuffered(next);
+    setBufferedSafe(bufferedRef.current + n);
   };
 
   const resolveInitData = () => {
     if (initData && initData.length > 0) return initData;
-    const w = (typeof window !== "undefined" ? (window as any) : undefined);
-    const raw = w?.Telegram?.WebApp?.initData;
-    return typeof raw === "string" && raw.length > 0 ? raw : "";
+    if (typeof window !== "undefined") {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const w = window as any;
+      const raw = w?.Telegram?.WebApp?.initData;
+      if (raw && typeof raw === "string" && raw.length > 0) return raw;
+    }
+    return "";
   };
 
-  const addClicks = (n = 1) => incBuffered(n);
-
   const postBatch = async (seq: number, amount: number) => {
+    const safeSeq = Math.max(1, Math.floor(seq));
+    const safeAmount = Math.max(1, Math.min(Math.floor(amount), maxBatch));
     const rawInit = resolveInitData();
-    if (!rawInit || !sessionId) throw new Error("flush blocked: no init_data or session_id");
+
+    if (!rawInit || !sessionId) {
+      throw new Error("flush blocked: missing init_data or session_id");
+    }
+
     const payload = {
       init_data: rawInit,
-      delta_clicks: Math.max(1, Math.min(Math.floor(amount), maxBatch)),
-      client_seq: Math.max(1, Math.floor(seq)),
+      delta_clicks: safeAmount,
+      client_seq: safeSeq,
       session_id: sessionId,
     };
+
     const resp = await fetch(`${API_BASE_URL}/api/game/clicks/flush`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       credentials: "include",
       body: JSON.stringify(payload),
     });
+
     if (!resp.ok) {
       const text = await resp.text().catch(() => "");
       throw new Error(`flush failed ${resp.status}: ${text}`);
@@ -99,81 +99,82 @@ export function useClickBuffer({
   };
 
   const drain = async () => {
-    // 👇 Пауза до готовности seq: пока не знаем правильный last_seq — ничего не шлём
-    if (!seqReady) return;
+    if (!enabled) return;
     if (inflight.current) return;
 
-    inflight.current = true;
-    try {
-      let burst = maxBurst;
+    // цикл — пока что-то накоплено, шлём пачками
+    while (enabled && !inflight.current && bufferedRef.current > 0) {
+      inflight.current = true;
 
-      while (burst-- > 0) {
-        const toSend = Math.min(bufferedRef.current, maxBatch);
-        if (toSend <= 0) break;
+      // сколько прямо сейчас отправим
+      const toSend = Math.min(bufferedRef.current, maxBatch);
+      const nextSeq = lastSeqRef.current + 1;
 
-        // резерв текущего номера (фиксируем для ретраев)
-        const useSeq = nextSeqRef.current;
+      try {
+        const data = await postBatch(nextSeq, toSend);
 
-        let data: FlushResponse;
-        try {
-          data = await postBatch(useSeq, toSend);
-        } catch {
-          if (retryTimer.current) window.clearTimeout(retryTimer.current);
-          retryTimer.current = window.setTimeout(() => void drain(), 400) as unknown as number;
-          break;
+        // критично: уменьшаем буфер только на принятые клики!
+        const accepted = Math.max(0, data.accepted_clicks | 0);
+        if (accepted > 0) {
+          setBufferedSafe(Math.max(0, bufferedRef.current - accepted));
         }
 
-        const accepted = Math.max(0, data.accepted_clicks ?? 0);
-        if (accepted > 0) decBuffered(accepted);
+        // синхронизируем seq с сервером, а не с отправленным значением
+        lastSeqRef.current = Math.max(lastSeqRef.current, data.server_seq | 0);
 
-        // сдвигаем last/next по ответу сервера
-        const serverSeq = Number(data.server_seq ?? 0);
-        if (serverSeq >= lastSeqRef.current) {
-          lastSeqRef.current = serverSeq;
-          nextSeqRef.current = serverSeq + 1;
-        } else {
-          // fallback на случай несогласованного ответа
-          lastSeqRef.current = useSeq;
-          nextSeqRef.current = useSeq + 1;
-        }
+        inflight.current = false;
 
+        // позволяем родителю подтянуть авторитетное состояние
         onReconcile(data);
 
-        // энергии не хватило — дадим времени восстановиться
-        if (accepted < toSend) break;
+        // если ещё есть что слать — продолжим цикл сразу
+        // (без setTimeout — но дадим JS очереди отработать)
+        if (bufferedRef.current === 0) break;
+      } catch {
+        inflight.current = false;
+        // бэкофф и повтор
+        if (retryTimer.current) window.clearTimeout(retryTimer.current);
+        retryTimer.current = window.setTimeout(() => {
+          void drain();
+        }, 400) as unknown as number;
+        break; // выходим из цикла до ретрая
       }
-    } finally {
-      inflight.current = false;
     }
   };
 
-  // таймер
+  const addClicks = (n = 1) => {
+    if (n <= 0) return;
+    incBuffered(n);
+    // если навалили много — стартуем дрен немедленно
+    if (enabled && !inflight.current && bufferedRef.current >= threshold) {
+      void drain();
+    }
+  };
+
+  // авто-дрен по таймеру
   useEffect(() => {
+    if (!enabled) return;
     const t = window.setInterval(() => {
-      if (!inflight.current && bufferedRef.current > 0 && seqReady) void drain();
+      if (!inflight.current && bufferedRef.current > 0) void drain();
     }, flushEveryMs);
     return () => window.clearInterval(t);
-  }, [flushEveryMs, seqReady]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [enabled, flushEveryMs]);
 
-  // мгновенный старт при достижении порога
+  // «видимость»/закрытие — пытаемся отправить хотя бы одну пачку
   useEffect(() => {
-    if (buffered >= threshold && !inflight.current && seqReady) void drain();
-  }, [buffered, threshold, seqReady]);
+    if (!enabled) return;
 
-  // beacon на закрытие
-  useEffect(() => {
     const handler = () => {
-      if (!seqReady) return;
-      const pending = bufferedRef.current;
-      if (pending <= 0) return;
+      if (bufferedRef.current <= 0) return;
       const rawInit = resolveInitData();
       if (!rawInit || !sessionId) return;
 
-      const amount = Math.max(1, Math.min(pending, maxBatch));
+      const amount = Math.max(1, Math.min(bufferedRef.current, maxBatch));
       const beacon = {
         init_data: rawInit,
         delta_clicks: amount,
-        client_seq: nextSeqRef.current,
+        client_seq: lastSeqRef.current + 1,
         session_id: sessionId,
       };
       try {
@@ -181,12 +182,15 @@ export function useClickBuffer({
           `${API_BASE_URL}/api/game/clicks/flush`,
           new Blob([JSON.stringify(beacon)], { type: "application/json" })
         );
-        decBuffered(amount);
-        lastSeqRef.current = Math.max(lastSeqRef.current, nextSeqRef.current);
-        nextSeqRef.current = lastSeqRef.current + 1;
-      } catch {}
+        // не списываем локально — дождёмся следующего /progress или ответа
+      } catch {
+        // ignore
+      }
     };
-    const vis = () => document.visibilityState === "hidden" && handler();
+
+    const vis = () => {
+      if (document.visibilityState === "hidden") handler();
+    };
 
     window.addEventListener("beforeunload", handler);
     document.addEventListener("visibilitychange", vis);
@@ -194,7 +198,8 @@ export function useClickBuffer({
       window.removeEventListener("beforeunload", handler);
       document.removeEventListener("visibilitychange", vis);
     };
-  }, [sessionId, maxBatch, initData, seqReady]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [enabled, sessionId, maxBatch, initData]);
 
   const forceFlush = () => void drain();
 
@@ -203,9 +208,10 @@ export function useClickBuffer({
     forceFlush,
     buffered,
     lastSeq: lastSeqRef.current,
-    nextSeq: nextSeqRef.current,
+    nextSeq: lastSeqRef.current + 1,
   };
 }
+
 
 
 
