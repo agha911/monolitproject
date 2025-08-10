@@ -70,7 +70,7 @@ const Tasks: React.FC = () => {
   }, [telegramUserId]);
 
   const handleInstagramClick = () => {
-    window.open('https://www.instagram.com/gap_pick', '_blank');
+    window.open('https://www.instagram.com/promo_express_az?igsh=MTdtZWFpbWNlMG9hcw==', '_blank');
     setOpenedInstagram(true);
   };
 
