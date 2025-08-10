@@ -13,13 +13,13 @@ export type FlushResponse = {
 };
 
 type Options = {
-  initData: string;               // Telegram init_data
+  initData?: string;              // Telegram WebApp.initData (может прийти из SDK)
   sessionId: string;
-  onReconcile: (r: FlushResponse) => void; // применяем авторитетные значения от сервера
-  flushEveryMs?: number;          // интервал авто-флаша
-  threshold?: number;             // порог кликов для немедленного флаша
-  initialSeq?: number;            // если хранишь seq в localStorage
-  maxBatch?: number;              // лимит кликов в одном флаше (держи = MAX_DELTA_PER_FLUSH на бэке)
+  onReconcile: (r: FlushResponse) => void;
+  flushEveryMs?: number;
+  threshold?: number;
+  initialSeq?: number;            // ПОДАЁМ last_client_seq с бэка
+  maxBatch?: number;              // = MAX_DELTA_PER_FLUSH на бэке
 };
 
 export function useClickBuffer({
@@ -29,15 +29,32 @@ export function useClickBuffer({
   flushEveryMs = 250,
   threshold = 20,
   initialSeq = 0,
-  maxBatch = 50, // ⚠️ подстрой под бэкендовый MAX_DELTA_PER_FLUSH
+  maxBatch = 50,
 }: Options) {
   const [buffered, setBuffered] = useState(0);
 
-  // текущее состояние отправки
   const inflight = useRef(false);
   const seqRef = useRef<number>(initialSeq);
   const currentBatch = useRef<{ seq: number; amount: number } | null>(null);
   const retryTimer = useRef<number | null>(null);
+
+  // если initialSeq обновился после запроса прогресса — подтягиваем его
+  useEffect(() => {
+    if (typeof initialSeq === "number" && initialSeq > seqRef.current) {
+      seqRef.current = initialSeq;
+    }
+  }, [initialSeq]);
+
+  const resolveInitData = () => {
+    if (initData && initData.length > 0) return initData;
+    if (typeof window !== "undefined") {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const w = window as any;
+      const raw = w?.Telegram?.WebApp?.initData;
+      if (raw && typeof raw === "string" && raw.length > 0) return raw;
+    }
+    return "";
+  };
 
   const addClicks = (n = 1) => {
     if (n <= 0) return;
@@ -45,31 +62,43 @@ export function useClickBuffer({
   };
 
   const postBatch = async (seq: number, amount: number) => {
+    const safeSeq = Math.max(1, Math.floor(seq));
+    const safeAmount = Math.max(1, Math.min(Math.floor(amount), maxBatch));
+    const rawInit = resolveInitData();
+
+    if (!rawInit || !sessionId) {
+      throw new Error("flush blocked: missing init_data or session_id");
+    }
+
+    const payload = {
+      init_data: rawInit,
+      delta_clicks: safeAmount,
+      client_seq: safeSeq,
+      session_id: sessionId,
+    };
+
     const resp = await fetch(`${API_BASE_URL}/api/game/clicks/flush`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       credentials: "include",
-      body: JSON.stringify({
-        init_data: initData,
-        delta_clicks: amount,
-        client_seq: seq,            // ≥ 1
-        session_id: sessionId,
-      }),
+      body: JSON.stringify(payload),
     });
-    if (!resp.ok) throw new Error(`flush failed ${resp.status}`);
-    const data: FlushResponse = await resp.json();
-    return data;
+
+    if (!resp.ok) {
+      const text = await resp.text().catch(() => "");
+      throw new Error(`flush failed ${resp.status}: ${text}`);
+    }
+    return (await resp.json()) as FlushResponse;
   };
 
   const flush = async () => {
     if (inflight.current) return;
 
-    // Если нет активного батча — сформируем его из текущего буфера
     if (!currentBatch.current) {
       if (buffered <= 0) return;
       currentBatch.current = {
         seq: seqRef.current + 1,
-        amount: Math.max(1, Math.min(buffered, maxBatch)), // <= лимита бэка
+        amount: Math.max(1, Math.min(buffered, maxBatch)),
       };
     }
 
@@ -79,19 +108,14 @@ export function useClickBuffer({
     try {
       const data = await postBatch(seq, amount);
 
-      // Сервер принял — уменьшаем буфер ровно на отправленный батч
       setBuffered((v) => Math.max(0, v - amount));
-
-      // Обновляем последний успешный seq
       seqRef.current = seq;
 
-      // Обнуляем батч и снимаем флаг отправки
       currentBatch.current = null;
       inflight.current = false;
 
       onReconcile(data);
     } catch {
-      // Не получилось — повторим тот же батч с тем же seq чуть позже
       inflight.current = false;
       if (retryTimer.current) window.clearTimeout(retryTimer.current);
       retryTimer.current = window.setTimeout(() => {
@@ -100,7 +124,6 @@ export function useClickBuffer({
     }
   };
 
-  // Авто-флаш по таймеру
   useEffect(() => {
     const t = window.setInterval(() => {
       if (!inflight.current && buffered > 0) void flush();
@@ -109,7 +132,6 @@ export function useClickBuffer({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [flushEveryMs, buffered]);
 
-  // Немедленный флаш при достижении порога
   useEffect(() => {
     if (buffered >= threshold && !inflight.current && !currentBatch.current) {
       void flush();
@@ -117,13 +139,16 @@ export function useClickBuffer({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [buffered, threshold]);
 
-  // Попытка сохранить клики при закрытии вкладки
   useEffect(() => {
     const handler = () => {
       if (buffered <= 0) return;
-      const beaconAmount = Math.max(1, Math.min(buffered, maxBatch)); // тоже уважаем лимит
+
+      const rawInit = resolveInitData();
+      if (!rawInit || !sessionId) return;
+
+      const beaconAmount = Math.max(1, Math.min(buffered, maxBatch));
       const beacon = {
-        init_data: initData,
+        init_data: rawInit,
         delta_clicks: beaconAmount,
         client_seq: seqRef.current + 1,
         session_id: sessionId,
@@ -149,7 +174,7 @@ export function useClickBuffer({
       window.removeEventListener("beforeunload", handler);
       document.removeEventListener("visibilitychange", visibilityHandler);
     };
-  }, [buffered, initData, sessionId, maxBatch]);
+  }, [buffered, sessionId, maxBatch, initData]);
 
   const forceFlush = () => flush();
 
