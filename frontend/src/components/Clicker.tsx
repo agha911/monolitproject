@@ -195,7 +195,7 @@ const Clicker: React.FC = () => {
     threshold: 20,
     initialSeq: Math.max(serverSeq ?? 0, initialLocalSeq),
     maxBatch: 50,                              // = MAX_DELTA_PER_FLUSH
-    enabled: seqReady,                         // ← флашим только после sync seq
+    seqReady,                                  // ✅ флашим только после sync seq
   });
 
   const handleMultiClick = (x: number, y: number) => {
