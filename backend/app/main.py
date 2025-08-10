@@ -1,5 +1,9 @@
 from fastapi import FastAPI, Depends, HTTPException, Body
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
+from fastapi import Request
+import logging
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text, func
 from datetime import datetime, timedelta, timezone
@@ -271,6 +275,11 @@ async def get_progress(data: dict = Body(...), session: AsyncSession = Depends(g
 
 #     except Exception as e:
 #         return {"status": "error", "message": str(e)}
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    logging.error("422 on %s: %s", request.url, exc.errors())
+    return JSONResponse(status_code=422, content={"detail": exc.errors()})
+
 
 
 class ClicksFlushIn(BaseModel):
