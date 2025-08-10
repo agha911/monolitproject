@@ -311,76 +311,45 @@ async def clicks_flush(
     payload: ClicksFlushIn = Body(...),
     session: AsyncSession = Depends(get_async_session),
 ):
-    """
-    Принимает пакет кликов от клиента (агрегированный на фронте).
-    Идемпотентность по client_seq, атомарное применение, корректное восстановление энергии.
-    Обновляет daily_progress/complete и (по расписанию) турнирные клики.
-    """
     logger = logging.getLogger(__name__)
     try:
         telegram_id = parse_telegram_user_id(payload.init_data)
-
-        # 1) Находим пользователя (быстрый запрос)
-        user = await crud_user.get_user(session, telegram_id)
-        if not user:
-            raise HTTPException(status_code=404, detail="User not found")
-
         now_utc = datetime.now(timezone.utc)
 
-        # 2) Открываем транзакцию и берём пользователя под блокировку
+        # всё внутри одной транзакции — без предварительных SELECT снаружи
         async with session.begin():
+            # 1) находим пользователя и сразу используем ту же транзакцию
+            user = await crud_user.get_user(session, telegram_id)
+            if not user:
+                raise HTTPException(status_code=404, detail="User not found")
+
+            # 2) блокируем строку
             db_user = await crud_user.get_user_for_update(session, user.id)
 
-            # 3) Применяем пакет кликов (внутри корректное восстановление энергии)
-            try:
-                result = await crud_user.apply_clicks_flush(
-                    session=session,
-                    user=db_user,
-                    delta_clicks=payload.delta_clicks,
-                    client_seq=payload.client_seq,
-                    now_utc=now_utc,
-                )
-            except ValueError as e:
-                # Нарушение порядка seq — возвращаем NOOP со статусом 200
-                if str(e) == "out_of_order_sequence":
-                    task_completed = bool(db_user.daily_completed)
-                    energy = db_user.energy or 0
-                    total_xp = db_user.total_xp or 0
-                    daily_progress = db_user.daily_progress or 0
-                    server_seq = db_user.last_client_seq or 0
+            # 3) применяем пакет кликов (внутри корректное восстановление энергии)
+            result = await crud_user.apply_clicks_flush(
+                session=session,
+                user=db_user,
+                delta_clicks=payload.delta_clicks,
+                client_seq=payload.client_seq,
+                now_utc=now_utc,
+            )
 
-                    logger.info(
-                        "FLUSH noop(out_of_order): user_id=%s tg=%s delta=%s client_seq=%s last_seq=%s",
-                        user.id, telegram_id, payload.delta_clicks, payload.client_seq, server_seq
-                    )
-                    return ClicksFlushOut(
-                        status="noop",
-                        accepted_clicks=0,
-                        energy=energy,
-                        total_xp=total_xp,
-                        daily_progress=daily_progress,
-                        server_seq=server_seq,
-                        task_completed=task_completed,
-                    )
-                raise
-
-            # 4) Ежедневная задача: проверяем завершение
+            # 4) ежедневная задача
             if not (db_user.daily_completed or False):
-                # В apply_clicks_flush увеличили daily_progress на accepted_clicks
                 if (db_user.daily_progress or 0) >= (db_user.daily_target or 0) > 0:
                     db_user.daily_progress = db_user.daily_target
                     db_user.daily_completed = True
 
-            # 5) Турнирные клики: ПН(0)–СБ(5) по UTC+4
+            # 5) турнир ПН–СБ (UTC+4)
             now_az = datetime.utcnow() + timedelta(hours=4)
-            if now_az.weekday() in range(6):
-                if result["accepted_clicks"] > 0:
-                    db_user.tournament_clicks = (db_user.tournament_clicks or 0) + result["accepted_clicks"]
+            if now_az.weekday() in range(6) and result["accepted_clicks"] > 0:
+                db_user.tournament_clicks = (db_user.tournament_clicks or 0) + result["accepted_clicks"]
 
-            # фиксим в БД изменения (session.begin сам сделает commit)
             await session.flush()
 
-            # актуальные значения на момент ответа
+            # 6) собираем авторитетное состояние для ответа
+            user_id = db_user.id
             task_completed = bool(db_user.daily_completed)
             energy = db_user.energy or 0
             total_xp = db_user.total_xp or 0
@@ -388,11 +357,10 @@ async def clicks_flush(
             server_seq = int(result["server_seq"])
             accepted_clicks = int(result["accepted_clicks"])
 
-        # 6) Возвращаем авторитетное состояние
         status = "ok" if accepted_clicks > 0 else "noop"
         logger.info(
             "FLUSH %s: user_id=%s tg=%s delta=%s accepted=%s seq=%s energy=%s xp=%s",
-            status, user.id, telegram_id, payload.delta_clicks, accepted_clicks, server_seq, energy, total_xp
+            status, user_id, telegram_id, payload.delta_clicks, accepted_clicks, server_seq, energy, total_xp
         )
 
         return ClicksFlushOut(
@@ -409,7 +377,6 @@ async def clicks_flush(
         raise
     except Exception as e:
         logging.exception("FLUSH error")
-        # не роняем процесс, возвращаем понятную ошибку
         return ClicksFlushOut(
             status=f"error: {str(e)}",
             accepted_clicks=0,
@@ -419,6 +386,7 @@ async def clicks_flush(
             server_seq=0,
             task_completed=False,
         )
+
 
 
 
