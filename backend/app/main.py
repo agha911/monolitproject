@@ -175,7 +175,8 @@ async def get_progress(data: dict = Body(...), session: AsyncSession = Depends(g
             "click_boost_level": 0,
             "energy_refill_count": 0,
             "energy_refills_left": ENERGY_REFILL_DAILY_LIMIT,
-            "daily_reward_claimed": False
+            "daily_reward_claimed": False,
+            "last_client_seq": 0,
         }
 
     now = datetime.utcnow()
@@ -190,10 +191,16 @@ async def get_progress(data: dict = Body(...), session: AsyncSession = Depends(g
         if energy_to_restore > 0 and user.energy < max_energy:
             new_energy = min(max_energy, user.energy + energy_to_restore)
             updated_minutes = recovery_interval * (new_energy - user.energy)
-            new_last_update = last_update + timedelta(minutes=updated_minutes)
+
+            # если дошли до максимума — прижимаем метку к now,
+            # иначе сдвигаем на ровно "восстановленные" минуты
+            if new_energy == max_energy:
+                new_last_update = now
+            else:
+                new_last_update = last_update + timedelta(minutes=updated_minutes)
         else:
             new_energy = user.energy
-            new_last_update = now  # обновляем даже если энергия не изменилась
+            new_last_update = last_update      # 👈 НЕ трогаем метку, если прироста нет
     else:
         new_energy = user.energy
         new_last_update = now
@@ -220,6 +227,7 @@ async def get_progress(data: dict = Body(...), session: AsyncSession = Depends(g
         "daily_reward_claimed": user.daily_reward_claimed or False,
         "last_client_seq": user.last_client_seq or 0,
     }
+
 
 
 
