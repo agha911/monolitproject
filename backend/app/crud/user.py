@@ -362,14 +362,9 @@ async def apply_clicks_flush(
     available = max(0, int(user.energy or 0))
     accepted = max(0, min(int(delta_clicks), available))
 
-    # Бустер (как на фронте): (level or 0) + 1
-    click_boost_level = int(getattr(user, "click_boost_level", 0) or 0)
-    boost = click_boost_level + 1
-    gained_xp = accepted * boost
-
     if accepted > 0:
         user.energy = available - accepted
-        user.total_xp = int(user.total_xp or 0) + gained_xp
+        user.total_xp = int(user.total_xp or 0) + accepted
         user.daily_progress = int(user.daily_progress or 0) + accepted
         # Важно: фиксируем момент траты энергии (naive UTC)
         _set_last_energy_update(user, now_utc)
