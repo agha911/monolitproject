@@ -118,9 +118,7 @@ const Clicker: React.FC = () => {
       const intervalMsPerUnit = (totalRecoveryMinutes / maxEnergy) * 60 * 1000;
 
       const remainingUnits = maxEnergy - energy;
-      // Сколько осталось до ближайшего +1
       const msToNextUnit = intervalMsPerUnit - (msPassed % intervalMsPerUnit);
-      // До полного: время на оставшиеся "полные" единицы + хвост до ближайшего +1
       const msToFull = (remainingUnits - 1) * intervalMsPerUnit + msToNextUnit;
 
       const totalSeconds = Math.max(0, Math.ceil(msToFull / 1000));
@@ -147,11 +145,13 @@ const Clicker: React.FC = () => {
   };
 
   const { addClicks /*, forceFlush*/ } = useClickBuffer({
+    initData: WebApp.initData,   // ✅ добавили — требуется бэком
     sessionId,
     onReconcile,
     flushEveryMs: 250,
     threshold: 20,
     initialSeq,
+    maxBatch: 50,                // ⚠️ выстави = MAX_DELTA_PER_FLUSH на бэке
   });
 
   const handleMultiClick = (x: number, y: number) => {
@@ -225,19 +225,15 @@ const Clicker: React.FC = () => {
         `}</style>
       </div>
 
-      {/* Принудительный флаш по кнопке (опционально)
-      <button
-        onClick={forceFlush}
-        className="mt-4 px-3 py-2 rounded bg-[#0d273d] text-[#7ee9ff]"
-      >
+      {/* <button onClick={forceFlush} className="mt-4 px-3 py-2 rounded bg-[#0d273d] text-[#7ee9ff]">
         Sync now
-      </button>
-      */}
+      </button> */}
     </div>
   );
 };
 
 export default Clicker;
+
 
 
 
