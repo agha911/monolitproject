@@ -155,16 +155,15 @@ const Clicker: React.FC = () => {
   }, [lastEnergyUpdate, energy, maxEnergy]);
 
   const onReconcile = async (data: FlushResponse) => {
-    if (data.status === 'ok') {
-      setEnergy(data.energy);
-      setTotalXp(data.total_xp);
-      const s = Number(data.server_seq ?? 0);
-      if (s > 0) {
-        setServerSeq(s);
-        try { localStorage.setItem(seqStorageKey, String(s)); } catch {}
-      }
-    } else {
-      // noop / error — подровняем состояние авторитетно с сервера
+    // даже если status = "noop", тянем авторитетные значения
+    setEnergy(data.energy);
+    setTotalXp(data.total_xp);
+    const s = Number(data.server_seq ?? 0);
+    if (s > 0) {
+      try { localStorage.setItem(seqStorageKey, String(s)); } catch {}
+    }
+
+    if (data.status !== 'ok') {
       try {
         const res = await fetch(`${API_BASE_URL}/api/game/progress`, {
           method: 'POST',
@@ -177,9 +176,9 @@ const Clicker: React.FC = () => {
         setLastEnergyUpdate(p.lastEnergyUpdate ? new Date(p.lastEnergyUpdate) : null);
         setMaxEnergy(p.max_energy ?? 1000);
         setClickBoost((p.click_boost_level ?? 0) + 1);
-        const s = Number(p.last_client_seq ?? 0);
-        setServerSeq(s);
-        try { localStorage.setItem(seqStorageKey, String(s)); } catch {}
+        const ps = Number(p.last_client_seq ?? 0);
+        setServerSeq(ps);
+        try { localStorage.setItem(seqStorageKey, String(ps)); } catch {}
         setSeqReady(true);
       } catch (e) {
         console.warn('refresh after noop failed', e);
@@ -188,32 +187,33 @@ const Clicker: React.FC = () => {
   };
 
   const { addClicks /*, forceFlush*/ } = useClickBuffer({
-    initData: WebApp.initData,                 // обязательно для бэка
+    initData: WebApp.initData,
     sessionId,
     onReconcile,
     flushEveryMs: 250,
     threshold: 20,
     initialSeq: Math.max(serverSeq ?? 0, initialLocalSeq),
-    maxBatch: 50,                              // = MAX_DELTA_PER_FLUSH
-    seqReady,                                  // ✅ флашим только после sync seq
+    maxBatch: 50,
+    enabled: seqReady,                // ✅ было seqReady (как имя), должно быть enabled
   });
 
   const handleMultiClick = (x: number, y: number) => {
     if (!telegramUser || loading || energy <= 0) return;
 
-    const canSpend = Math.min(clickBoost, energy);
-    if (canSpend <= 0) return;
-
-    setTotalXp((prev) => prev + canSpend);
-    setEnergy((prev) => Math.max(0, prev - canSpend));
+    // локальный UI-эффект
+    const spend = Math.min(clickBoost, energy);
+    setTotalXp((prev) => prev + spend);
+    setEnergy((prev) => Math.max(0, prev - spend));
 
     const id = Date.now() + Math.random();
-    setFloatingTexts((prev) => [...prev, { id, value: canSpend, x, y }]);
+    setFloatingTexts((prev) => [...prev, { id, value: spend, x, y }]);
     setTimeout(() => {
       setFloatingTexts((prev) => prev.filter((t) => t.id !== id));
     }, 1000);
 
-    addClicks(canSpend);
+    // в буфер добавляем столько же «сырых» кликов, сколько потратили энергии
+    // (ежедневка считает «accepted_clicks», не буст)
+    addClicks(spend);
   };
 
   const energyProgress = Math.min((energy / maxEnergy) * 100, 100);
