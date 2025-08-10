@@ -149,38 +149,34 @@ const Clicker: React.FC = () => {
   }, [lastEnergyUpdate, energy, maxEnergy]);
 
   const onReconcile = async (data: FlushResponse) => {
-    // всегда подтягиваем авторитетные значения
+  if (data.status === "ok") {
     setEnergy(data.energy);
     setTotalXp(data.total_xp);
-
-    const s = Number(data.server_seq ?? 0);
-    if (!Number.isNaN(s) && s >= 0) {
-      setServerSeq(s);
-      try { localStorage.setItem(seqStorageKey, String(s)); } catch {}
+    // server_seq нам уже синхронизировал хук, но можем сохранить локально
+    setServerSeq(Number(data.server_seq ?? 0));
+  } else if (data.status === "noop") {
+    // ничего не делаем — хук сам выровняет seq и перешлёт батч повторно
+    return;
+  } else {
+    // error — мягкое авторитетное обновление
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/game/progress`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ init_data: WebApp.initData }),
+      });
+      const p = await res.json();
+      setEnergy(p.energy);
+      setTotalXp(p.total_xp ?? 0);
+      setLastEnergyUpdate(p.lastEnergyUpdate ? new Date(p.lastEnergyUpdate) : null);
+      setMaxEnergy(p.max_energy ?? 1000);
+      setClickBoost((p.click_boost_level ?? 0) + 1);
+      setServerSeq(Number(p.last_client_seq ?? 0));
+    } catch (e) {
+      console.warn("refresh after error failed", e);
     }
-
-    if (data.status !== 'ok') {
-      try {
-        const res = await fetch(`${API_BASE_URL}/api/game/progress`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ init_data: WebApp.initData }),
-        });
-        const p = await res.json();
-        setEnergy(p.energy);
-        setTotalXp(p.total_xp ?? 0);
-        setLastEnergyUpdate(p.lastEnergyUpdate ? new Date(p.lastEnergyUpdate) : null);
-        setMaxEnergy(p.max_energy ?? 1000);
-        setClickBoost((p.click_boost_level ?? 0) + 1);
-        const ps = Number(p.last_client_seq ?? 0);
-        setServerSeq(ps);
-        try { localStorage.setItem(seqStorageKey, String(ps)); } catch {}
-        setSeqReady(true);
-      } catch (e) {
-        console.warn('refresh after noop failed', e);
-      }
-    }
-  };
+  }
+};
 
   const { addClicks /*, forceFlush*/ } = useClickBuffer({
     initData: WebApp.initData,
