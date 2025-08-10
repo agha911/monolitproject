@@ -108,8 +108,12 @@ export function useClickBuffer({
     try {
       const data = await postBatch(seq, amount);
 
-      setBuffered((v) => Math.max(0, v - amount));
-      seqRef.current = seq;
+      // ↓↓↓ ВАЖНО: уменьшаем буфер только на ПРИНЯТЫЕ сервером клики
+      const accepted = Math.max(0, data.accepted_clicks ?? 0);
+      setBuffered((v) => Math.max(0, v - accepted));
+
+      // обновляем локальный seq авторитетно ответом сервера
+      seqRef.current = (data.server_seq ?? 0) > 0 ? data.server_seq : seq;
 
       currentBatch.current = null;
       inflight.current = false;
@@ -117,6 +121,7 @@ export function useClickBuffer({
       onReconcile(data);
     } catch {
       inflight.current = false;
+      // оставляем currentBatch.current как есть и пробуем повторить
       if (retryTimer.current) window.clearTimeout(retryTimer.current);
       retryTimer.current = window.setTimeout(() => {
         void flush();
