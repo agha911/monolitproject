@@ -267,28 +267,27 @@ def _as_naive_utc(dt: Optional[datetime]) -> Optional[datetime]:
         return dt
     return dt.astimezone(timezone.utc).replace(tzinfo=None)
 
-
 def _get_last_energy_update(user: User) -> Optional[datetime]:
     # Совместимость с разными именами поля в модели
     if hasattr(user, "lastEnergyUpdate"):
         return user.lastEnergyUpdate
     return getattr(user, "last_energy_update", None)
 
-
 def _set_last_energy_update(user: User, value: datetime) -> None:
-    value = _as_naive_utc(value)  # всегда сохраняем naive UTC
+    value = _as_naive_utc(value) or datetime.utcnow()
     if hasattr(user, "lastEnergyUpdate"):
         user.lastEnergyUpdate = value
     else:
         setattr(user, "last_energy_update", value)
 
+# --- energy recovery ---------------------------------------------------------
 
 def recover_energy_inplace(user: User, now_utc: datetime) -> None:
     """
     Восстановление энергии “на лету” (8 часов до полного восстановления).
-    Все расчёты ведём в naive UTC, чтобы не смешивать aware/naive.
+    Считаем всё в naive UTC, чтобы не мешать aware/naive.
     """
-    max_energy = user.max_energy or 100
+    max_energy = int(user.max_energy or 100)
     if max_energy <= 0:
         max_energy = 100
 
@@ -301,8 +300,7 @@ def recover_energy_inplace(user: User, now_utc: datetime) -> None:
 
     last_naive = _as_naive_utc(last) or datetime.utcnow()
 
-    # Интервал восстановления одной единицы
-    total_recovery_minutes = 480  # 8 часов
+    total_recovery_minutes = 480  # 8 часов до фула
     interval_sec = (total_recovery_minutes * 60) / max(1, max_energy)
 
     delta_sec = (now_naive - last_naive).total_seconds()
@@ -314,18 +312,19 @@ def recover_energy_inplace(user: User, now_utc: datetime) -> None:
         return
 
     before = int(user.energy or 0)
-    user.energy = min(max_energy, before + units)
+    after  = min(max_energy, before + units)
+    user.energy = after
 
     used_sec = units * interval_sec
     new_last = last_naive + timedelta(seconds=used_sec)
 
-    # Если дошли до максимума — синхронизируем таймштамп с текущим временем,
-    # чтобы не накапливался “долг” восстановления
-    if before < max_energy and user.energy == max_energy:
+    # если дошли до максимума — обнуляем «долг» восстановления
+    if before < max_energy and after == max_energy:
         _set_last_energy_update(user, now_naive)
     else:
         _set_last_energy_update(user, new_last)
 
+# --- clicks flush (soft-order, idempotent) -----------------------------------
 
 async def apply_clicks_flush(
     session: AsyncSession,
@@ -335,22 +334,25 @@ async def apply_clicks_flush(
     now_utc: Optional[datetime] = None
 ) -> Dict[str, int]:
     """
-    Атомарно применяет пакет кликов с ИДЕМПОТЕНТНОСТЬЮ и СТРОГИМ порядком.
-    Вызывай внутри открытой транзакции и после get_user_for_update().
-    Возвращает словарь для ответа API.
+    Идемпотентный батч кликов с МЯГКИМ порядком.
+    - Принимаем любой client_seq > last_client_seq (без требования +1).
+    - Повтор/старый пакет (client_seq <= last_seq) → NOOP.
+    - last_client_seq двигаем ВСЕГДА при client_seq > last_seq, даже если accepted=0,
+      чтобы не застревать на «битом» пакете и не терять следующие.
+    - delta_clicks трактуем как «энергия к списанию»: XP/ежедневка/турнир = accepted.
     """
-    # работаем с naive UTC, чтобы избежать TypeError (aware vs naive)
+    # всегда работаем в naive UTC
     now_utc = _as_naive_utc(now_utc) if now_utc else datetime.utcnow()
 
-    # 1) Восстанавливаем энергию “на лету”
+    # 1) Восстановим энергию
     recover_energy_inplace(user, now_utc)
 
-    # 2) Идемпотентность и СТРОГИЙ порядок по client_seq
+    # 2) Идемпотентность + мягкий порядок
     last_seq = int(getattr(user, "last_client_seq", 0) or 0)
-    client_seq = int(client_seq)
+    cur_seq  = int(client_seq)
 
-    if client_seq <= last_seq:
-        # Дубликат/старый пакет — ничего не меняем
+    if cur_seq <= last_seq:
+        # повтор/старый — ничего не делаем
         return {
             "accepted_clicks": 0,
             "energy": int(user.energy or 0),
@@ -359,35 +361,28 @@ async def apply_clicks_flush(
             "server_seq": last_seq,
         }
 
-    if client_seq != last_seq + 1:
-        # out-of-order — НЕ продвигаем последовательность, роутер вернёт NOOP
-        raise ValueError("out_of_order_sequence")
-
-    # 3) Сколько реально можем принять по энергии
-    available = max(0, int(user.energy or 0))
+    # 3) Применяем пакет (delta_clicks = «энергия к списанию»)
     requested = max(0, int(delta_clicks))
-    accepted = min(requested, available)
-
-    
+    available = max(0, int(user.energy or 0))
+    accepted  = min(requested, available)
 
     if accepted > 0:
-        user.energy = available - accepted                  # тратим «сырые» клики из энергии
-        user.total_xp = int(user.total_xp or 0) + accepted # монеты по бусту
-        user.daily_progress = int(user.daily_progress or 0) + accepted  # ежедневка по «сырым» кликам
-        _set_last_energy_update(user, now_utc)              # фиксируем момент траты энергии
+        user.energy = available - accepted
+        user.total_xp = int(user.total_xp or 0) + accepted
+        user.daily_progress = int(user.daily_progress or 0) + accepted
+        # фиксируем момент траты энергии (сброс таймера регена)
+        _set_last_energy_update(user, now_utc)
 
-    # Продвигаем последовательность ТОЛЬКО на корректном next-seq
-    setattr(user, "last_client_seq", client_seq)
+    # 4) Обновляем последовательность ВСЕГДА, раз пакет новее
+    setattr(user, "last_client_seq", cur_seq)
 
     session.add(user)
     await session.flush()
 
     return {
-        "accepted_clicks": accepted,
+        "accepted_clicks": int(accepted),
         "energy": int(user.energy or 0),
         "total_xp": int(user.total_xp or 0),
         "daily_progress": int(user.daily_progress or 0),
         "server_seq": int(getattr(user, "last_client_seq", 0) or 0),
     }
-
-
