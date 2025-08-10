@@ -24,6 +24,7 @@ from telebot import types
 from app.notifications.reset_energy_notified import reset_energy_flags
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo
 import concurrent.futures
+from pydantic import BaseModel
 
 ENERGY_RECOVERY_TOTAL_MINUTES = 480
 ENERGY_REFILL_DAILY_LIMIT = 2
