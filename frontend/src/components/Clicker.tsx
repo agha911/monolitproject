@@ -3,7 +3,7 @@ import WebApp from '@twa-dev/sdk';
 import { useTranslation } from 'react-i18next';
 import MainButton from './MainButton';
 import API_BASE_URL from './config';
-import { useClickBuffer, FlushResponse } from '../hooks/useClickBuffer';
+import { useClickBuffer, FlushResponse } from '../hooks/useClickBuffer'
 
 interface FloatingText {
   id: number;
