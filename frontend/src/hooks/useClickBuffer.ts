@@ -18,9 +18,10 @@ type Options = {
   onReconcile: (r: FlushResponse) => void;
   flushEveryMs?: number;
   threshold?: number;
-  initialSeq?: number;   // last_client_seq c бэка
+  initialSeq?: number;   // last_client_seq с бэка/локалки
   maxBatch?: number;     // = MAX_DELTA_PER_FLUSH
-  maxBurst?: number;     // батчей за один проход
+  maxBurst?: number;     // сколько батчей подряд
+  seqReady?: boolean;    // 👈 флаг готовности последовательности
 };
 
 export function useClickBuffer({
@@ -32,20 +33,21 @@ export function useClickBuffer({
   initialSeq = 0,
   maxBatch = 50,
   maxBurst = 8,
+  seqReady = true,       // по умолчанию включено, но лучше передавать явно из кликера
 }: Options) {
   const [buffered, setBuffered] = useState(0);
   const bufferedRef = useRef(0);
 
   const inflight = useRef(false);
 
-  // last подтверждённый seq с сервера
+  // last подтверждённый seq
   const lastSeqRef = useRef<number>(initialSeq);
-  // nextSeqRef — номер, который БУДЕТ отправлен в следующем запросе
+  // следующий резервируемый seq
   const nextSeqRef = useRef<number>(initialSeq + 1);
 
   const retryTimer = useRef<number | null>(null);
 
-  // если initialSeq подтянули позже — синхронизируем оба рефа
+  // если initialSeq подтянули позже — синхронизируем
   useEffect(() => {
     if (typeof initialSeq === "number" && initialSeq > lastSeqRef.current) {
       lastSeqRef.current = initialSeq;
@@ -96,9 +98,11 @@ export function useClickBuffer({
     return (await resp.json()) as FlushResponse;
   };
 
-  // ДРЕЙН: резервируем seq ДО отправки и используем его и при ретраях.
   const drain = async () => {
+    // 👇 Пауза до готовности seq: пока не знаем правильный last_seq — ничего не шлём
+    if (!seqReady) return;
     if (inflight.current) return;
+
     inflight.current = true;
     try {
       let burst = maxBurst;
@@ -107,14 +111,13 @@ export function useClickBuffer({
         const toSend = Math.min(bufferedRef.current, maxBatch);
         if (toSend <= 0) break;
 
-        // РЕЗЕРВ: берём текущий nextSeq и не трогаем его до ответа
+        // резерв текущего номера (фиксируем для ретраев)
         const useSeq = nextSeqRef.current;
 
         let data: FlushResponse;
         try {
           data = await postBatch(useSeq, toSend);
-        } catch (e) {
-          // при ошибке повторим ТОТ ЖЕ seq позже
+        } catch {
           if (retryTimer.current) window.clearTimeout(retryTimer.current);
           retryTimer.current = window.setTimeout(() => void drain(), 400) as unknown as number;
           break;
@@ -123,21 +126,20 @@ export function useClickBuffer({
         const accepted = Math.max(0, data.accepted_clicks ?? 0);
         if (accepted > 0) decBuffered(accepted);
 
-        // сервер подтвердил seq -> продвигаем last и next
-        // (учитываем случай, когда сервер мог “догнать/перепрыгнуть”)
+        // сдвигаем last/next по ответу сервера
         const serverSeq = Number(data.server_seq ?? 0);
         if (serverSeq >= lastSeqRef.current) {
           lastSeqRef.current = serverSeq;
           nextSeqRef.current = serverSeq + 1;
         } else {
-          // fallback, чтобы не застрять
+          // fallback на случай несогласованного ответа
           lastSeqRef.current = useSeq;
           nextSeqRef.current = useSeq + 1;
         }
 
         onReconcile(data);
 
-        // если энергии не хватило (приняли меньше, чем отправили) — ждём восстановления
+        // энергии не хватило — дадим времени восстановиться
         if (accepted < toSend) break;
       }
     } finally {
@@ -145,22 +147,23 @@ export function useClickBuffer({
     }
   };
 
-  // страховочный таймер
+  // таймер
   useEffect(() => {
     const t = window.setInterval(() => {
-      if (!inflight.current && bufferedRef.current > 0) void drain();
+      if (!inflight.current && bufferedRef.current > 0 && seqReady) void drain();
     }, flushEveryMs);
     return () => window.clearInterval(t);
-  }, [flushEveryMs]);
+  }, [flushEveryMs, seqReady]);
 
   // мгновенный старт при достижении порога
   useEffect(() => {
-    if (buffered >= threshold && !inflight.current) void drain();
-  }, [buffered, threshold]);
+    if (buffered >= threshold && !inflight.current && seqReady) void drain();
+  }, [buffered, threshold, seqReady]);
 
-  // best-effort на закрытие/сворачивание
+  // beacon на закрытие
   useEffect(() => {
     const handler = () => {
+      if (!seqReady) return;
       const pending = bufferedRef.current;
       if (pending <= 0) return;
       const rawInit = resolveInitData();
@@ -170,7 +173,6 @@ export function useClickBuffer({
       const beacon = {
         init_data: rawInit,
         delta_clicks: amount,
-        // используем текущий nextSeq (а не last+1 “на глаз”)
         client_seq: nextSeqRef.current,
         session_id: sessionId,
       };
@@ -179,9 +181,7 @@ export function useClickBuffer({
           `${API_BASE_URL}/api/game/clicks/flush`,
           new Blob([JSON.stringify(beacon)], { type: "application/json" })
         );
-        // локально спишем только отправленное
         decBuffered(amount);
-        // и сдвинем next — beacon мы уже заняли
         lastSeqRef.current = Math.max(lastSeqRef.current, nextSeqRef.current);
         nextSeqRef.current = lastSeqRef.current + 1;
       } catch {}
@@ -194,7 +194,7 @@ export function useClickBuffer({
       window.removeEventListener("beforeunload", handler);
       document.removeEventListener("visibilitychange", vis);
     };
-  }, [sessionId, maxBatch, initData]);
+  }, [sessionId, maxBatch, initData, seqReady]);
 
   const forceFlush = () => void drain();
 
@@ -202,10 +202,10 @@ export function useClickBuffer({
     addClicks,
     forceFlush,
     buffered,
-    // для дебага можно логировать это в UI
     lastSeq: lastSeqRef.current,
     nextSeq: nextSeqRef.current,
   };
 }
+
 
 
