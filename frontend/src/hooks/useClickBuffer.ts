@@ -1,3 +1,4 @@
+// frontend/src/hooks/useClickBuffer.ts
 import { useEffect, useRef, useState } from "react";
 import API_BASE_URL from "../components/config";
 
@@ -19,6 +20,7 @@ type Options = {
   threshold?: number;       // порог мгновенного старта
   initialSeq?: number;      // last_client_seq с бэка
   maxBatch?: number;        // = MAX_DELTA_PER_FLUSH на бэке
+  maxBurst?: number;        // сколько батчей максимум за один дрейн-проход
 };
 
 export function useClickBuffer({
@@ -29,8 +31,29 @@ export function useClickBuffer({
   threshold = 20,
   initialSeq = 0,
   maxBatch = 50,
+  maxBurst = 8,
 }: Options) {
+  // видимое состояние для UI
   const [buffered, setBuffered] = useState(0);
+  // истинное значение буфера для синхронного чтения
+  const bufferedRef = useRef(0);
+
+  // сеттеры, которые поддерживают и state, и ref
+  const incBuffered = (n: number) => {
+    if (n <= 0) return;
+    bufferedRef.current += n;
+    setBuffered((v) => v + n);
+  };
+  const decBuffered = (n: number) => {
+    if (n <= 0) return;
+    const next = Math.max(0, bufferedRef.current - n);
+    bufferedRef.current = next;
+    setBuffered(next);
+  };
+  const setBufferedExact = (n: number) => {
+    bufferedRef.current = Math.max(0, n);
+    setBuffered(bufferedRef.current);
+  };
 
   const inflight = useRef(false);
   const seqRef = useRef<number>(initialSeq);
@@ -54,8 +77,7 @@ export function useClickBuffer({
   };
 
   const addClicks = (n = 1) => {
-    if (n <= 0) return;
-    setBuffered((v) => v + n);
+    incBuffered(n);
   };
 
   const postBatch = async (seq: number, amount: number) => {
@@ -89,61 +111,45 @@ export function useClickBuffer({
   };
 
   /**
-   * Дрейним буфер последовательно, без ожидания таймера:
-   * шлём батчи, пока сервер принимает >= того, что мы отправили,
-   * и пока есть что отправлять.
+   * Дрейним буфер последовательно (без ожидания таймера).
+   * Используем bufferedRef для синхронного чтения текущего размера.
    */
   const drain = async () => {
     if (inflight.current) return;
     inflight.current = true;
 
     try {
-      // ограничитель на количество последовательных запросов за один проход,
-      // чтобы не забивать сеть при огромном буфере
-      let safety = 8;
+      let burst = maxBurst;
 
-      while (safety > 0) {
-        safety--;
-
-        let toSend = 0;
-        // захватываем текущий размер буфера атомарно
-        setBuffered((v) => {
-          toSend = Math.min(v, maxBatch);
-          return v; // не меняем здесь — изменим после ответа
-        });
-
+      while (burst-- > 0) {
+        const toSend = Math.min(bufferedRef.current, maxBatch);
         if (toSend <= 0) break;
 
         const nextSeq = seqRef.current + 1;
         const data = await postBatch(nextSeq, toSend);
 
         const accepted = Math.max(0, data.accepted_clicks ?? 0);
-
-        // уменьшаем буфер ровно на принятую часть
         if (accepted > 0) {
-          setBuffered((v) => Math.max(0, v - accepted));
+          decBuffered(accepted);
         }
 
-        // фиксируем seq по серверу
+        // авторитетно обновляем seq
         if (typeof data.server_seq === "number" && data.server_seq >= seqRef.current) {
           seqRef.current = data.server_seq;
         } else {
-          // на всякий — чтобы не застревать
+          // fallback, чтобы не застревать
           seqRef.current = nextSeq;
         }
 
         onReconcile(data);
 
-        // если сервер принял меньше, чем отправили — энергии нет,
-        // останавливаемся до следующего таймера/восстановления энергии
-        if (accepted < Math.min(toSend, maxBatch)) {
+        // если сервер принял меньше, чем отправили — энергии не хватило
+        if (accepted < toSend) {
           break;
         }
-
-        // если буфер ещё есть — крутим цикл дальше (без задержки)
+        // иначе — продолжаем без задержки, пока буфер не опустеет
       }
     } catch {
-      // мягкий бэкофф и повтор
       if (retryTimer.current) window.clearTimeout(retryTimer.current);
       retryTimer.current = window.setTimeout(() => {
         void drain();
@@ -156,11 +162,11 @@ export function useClickBuffer({
   // страховочный таймер
   useEffect(() => {
     const t = window.setInterval(() => {
-      if (!inflight.current && buffered > 0) void drain();
+      if (!inflight.current && bufferedRef.current > 0) void drain();
     }, flushEveryMs);
     return () => window.clearInterval(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [flushEveryMs, buffered]);
+  }, [flushEveryMs]);
 
   // мгновенный старт при достижении порога
   useEffect(() => {
@@ -170,15 +176,16 @@ export function useClickBuffer({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [buffered, threshold]);
 
-  // best-effort при скрытии/закрытии вкладки (один батч)
+  // best-effort при скрытии/закрытии вкладки
   useEffect(() => {
     const handler = () => {
-      if (buffered <= 0) return;
+      const pending = bufferedRef.current;
+      if (pending <= 0) return;
 
       const rawInit = resolveInitData();
       if (!rawInit || !sessionId) return;
 
-      const beaconAmount = Math.max(1, Math.min(buffered, maxBatch));
+      const beaconAmount = Math.max(1, Math.min(pending, maxBatch));
       const beacon = {
         init_data: rawInit,
         delta_clicks: beaconAmount,
@@ -190,6 +197,8 @@ export function useClickBuffer({
           `${API_BASE_URL}/api/game/clicks/flush`,
           new Blob([JSON.stringify(beacon)], { type: "application/json" })
         );
+        // локально спишем отправленное — остальное догрузит таймер после возврата
+        decBuffered(beaconAmount);
       } catch {
         // ignore
       }
@@ -206,10 +215,12 @@ export function useClickBuffer({
       window.removeEventListener("beforeunload", handler);
       document.removeEventListener("visibilitychange", visibilityHandler);
     };
-  }, [buffered, sessionId, maxBatch, initData]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionId, maxBatch, initData]);
 
   const forceFlush = () => drain();
 
-  return { addClicks, forceFlush, buffered, lastSeq: seqRef.current };
+  return { addClicks, forceFlush, buffered, lastSeq: seqRef.current, setBufferedExact };
 }
+
 
