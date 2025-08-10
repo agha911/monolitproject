@@ -1,24 +1,28 @@
 // frontend/src/hooks/useClickBuffer.ts
 import { useEffect, useRef, useState } from "react";
-import API_BASE_URL from '../components/config';
+import API_BASE_URL from "../components/config";
 
 export type FlushResponse = {
+  status: string;
   accepted_clicks: number;
   energy: number;
   total_xp: number;
   daily_progress: number;
   server_seq: number;
+  task_completed: boolean;
 };
 
 type Options = {
+  initData: string;               // Telegram init_data (строка из WebApp)
   sessionId: string;
   onReconcile: (r: FlushResponse) => void; // применяем авторитетные значения от сервера
-  flushEveryMs?: number; // интервал авто-флаша
-  threshold?: number;    // порог кликов для немедленного флаша
-  initialSeq?: number;   // если хранишь seq в localStorage
+  flushEveryMs?: number;          // интервал авто-флаша
+  threshold?: number;             // порог кликов для немедленного флаша
+  initialSeq?: number;            // если хранишь seq в localStorage
 };
 
 export function useClickBuffer({
+  initData,
   sessionId,
   onReconcile,
   flushEveryMs = 250,
@@ -44,8 +48,9 @@ export function useClickBuffer({
       headers: { "Content-Type": "application/json" },
       credentials: "include",
       body: JSON.stringify({
+        init_data: initData,        // ✅ соответствует ClicksFlushIn
         delta_clicks: amount,
-        client_seq: seq,
+        client_seq: seq,            // ≥ 1
         session_id: sessionId,
       }),
     });
@@ -115,6 +120,7 @@ export function useClickBuffer({
     const handler = () => {
       if (buffered <= 0) return;
       const beacon = {
+        init_data: initData,
         delta_clicks: buffered,
         client_seq: seqRef.current + 1,
         session_id: sessionId,
@@ -128,17 +134,22 @@ export function useClickBuffer({
         // ignore
       }
     };
-    window.addEventListener("beforeunload", handler);
-    document.addEventListener("visibilitychange", () => {
+
+    const visibilityHandler = () => {
       if (document.visibilityState === "hidden") handler();
-    });
+    };
+
+    window.addEventListener("beforeunload", handler);
+    document.addEventListener("visibilitychange", visibilityHandler);
+
     return () => {
       window.removeEventListener("beforeunload", handler);
-      document.removeEventListener("visibilitychange", handler as any);
+      document.removeEventListener("visibilitychange", visibilityHandler);
     };
-  }, [buffered, sessionId]);
+  }, [buffered, initData, sessionId]);
 
   const forceFlush = () => flush();
 
   return { addClicks, forceFlush, buffered, lastSeq: seqRef.current };
 }
+
