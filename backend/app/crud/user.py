@@ -267,11 +267,13 @@ def _as_naive_utc(dt: Optional[datetime]) -> Optional[datetime]:
         return dt
     return dt.astimezone(timezone.utc).replace(tzinfo=None)
 
+
 def _get_last_energy_update(user: User) -> Optional[datetime]:
     # Совместимость с разными именами поля в модели
     if hasattr(user, "lastEnergyUpdate"):
         return user.lastEnergyUpdate
     return getattr(user, "last_energy_update", None)
+
 
 def _set_last_energy_update(user: User, value: datetime) -> None:
     value = _as_naive_utc(value)  # всегда сохраняем naive UTC
@@ -279,6 +281,7 @@ def _set_last_energy_update(user: User, value: datetime) -> None:
         user.lastEnergyUpdate = value
     else:
         setattr(user, "last_energy_update", value)
+
 
 def recover_energy_inplace(user: User, now_utc: datetime) -> None:
     """
@@ -310,7 +313,7 @@ def recover_energy_inplace(user: User, now_utc: datetime) -> None:
     if units <= 0:
         return
 
-    before = user.energy or 0
+    before = int(user.energy or 0)
     user.energy = min(max_energy, before + units)
 
     used_sec = units * interval_sec
@@ -323,6 +326,7 @@ def recover_energy_inplace(user: User, now_utc: datetime) -> None:
     else:
         _set_last_energy_update(user, new_last)
 
+
 async def apply_clicks_flush(
     session: AsyncSession,
     user: User,
@@ -331,20 +335,17 @@ async def apply_clicks_flush(
     now_utc: Optional[datetime] = None
 ) -> Dict[str, int]:
     """
-    Атомарно применяет пакет кликов с идемпотентностью.
+    Атомарно применяет пакет кликов с ИДЕМПОТЕНТНОСТЬЮ и СТРОГИМ порядком.
     Вызывай внутри открытой транзакции и после get_user_for_update().
     Возвращает словарь для ответа API.
     """
     # работаем с naive UTC, чтобы избежать TypeError (aware vs naive)
-    if now_utc is None:
-        now_utc = datetime.utcnow()
-    else:
-        now_utc = _as_naive_utc(now_utc) or datetime.utcnow()
+    now_utc = _as_naive_utc(now_utc) if now_utc else datetime.utcnow()
 
     # 1) Восстанавливаем энергию “на лету”
     recover_energy_inplace(user, now_utc)
 
-    # 2) Идемпотентность по последнему принятому seq (мягкая)
+    # 2) Идемпотентность и СТРОГИЙ порядок по client_seq
     last_seq = int(getattr(user, "last_client_seq", 0) or 0)
     client_seq = int(client_seq)
 
@@ -358,18 +359,24 @@ async def apply_clicks_flush(
             "server_seq": last_seq,
         }
 
+    if client_seq != last_seq + 1:
+        # out-of-order — НЕ продвигаем последовательность, роутер вернёт NOOP
+        raise ValueError("out_of_order_sequence")
+
     # 3) Сколько реально можем принять по энергии
     available = max(0, int(user.energy or 0))
-    accepted = max(0, min(int(delta_clicks), available))
+    requested = max(0, int(delta_clicks))
+    accepted = min(requested, available)
+
+    
 
     if accepted > 0:
-        user.energy = available - accepted
-        user.total_xp = int(user.total_xp or 0) + accepted
-        user.daily_progress = int(user.daily_progress or 0) + accepted
-        # Важно: фиксируем момент траты энергии (naive UTC)
-        _set_last_energy_update(user, now_utc)
+        user.energy = available - accepted                  # тратим «сырые» клики из энергии
+        user.total_xp = int(user.total_xp or 0) + accepted # монеты по бусту
+        user.daily_progress = int(user.daily_progress or 0) + accepted  # ежедневка по «сырым» кликам
+        _set_last_energy_update(user, now_utc)              # фиксируем момент траты энергии
 
-    # Фиксируем последний принятый seq даже если accepted == 0
+    # Продвигаем последовательность ТОЛЬКО на корректном next-seq
     setattr(user, "last_client_seq", client_seq)
 
     session.add(user)
