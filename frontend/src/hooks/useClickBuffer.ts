@@ -1,8 +1,9 @@
+// frontend/src/hooks/useClickBuffer.ts
 import { useEffect, useRef, useState } from "react";
 import API_BASE_URL from "../components/config";
 
 export type FlushResponse = {
-  status: string;
+  status: "ok" | "noop" | string;
   accepted_clicks: number;
   energy: number;
   total_xp: number;
@@ -12,65 +13,53 @@ export type FlushResponse = {
 };
 
 type Options = {
-  initData?: string;          // Telegram WebApp.initData
+  initData?: string;
   sessionId: string;
   onReconcile: (r: FlushResponse) => void;
-
-  // Тюнинг
-  enabled?: boolean;          // можно включать/выключать флаш после sync seq
-  flushEveryMs?: number;      // debounce-интервал
-  threshold?: number;         // когда буфер >= threshold — шлём сразу
-  initialSeq?: number;        // начальный last_client_seq с бэка
-  maxBatch?: number;          // лимит бэка (MAX_DELTA_PER_FLUSH)
+  flushEveryMs?: number;
+  threshold?: number;
+  initialSeq?: number;
+  maxBatch?: number;
+  enabled?: boolean; // ← можно выключать флаш до синка seq
 };
 
 export function useClickBuffer({
   initData,
   sessionId,
   onReconcile,
-  enabled = true,
   flushEveryMs = 200,
   threshold = 50,
   initialSeq = 0,
   maxBatch = 50,
+  enabled = true,
 }: Options) {
-  const [buffered, _setBuffered] = useState(0);
+  const [buffered, setBuffered] = useState(0);
 
   const inflight = useRef(false);
   const seqRef = useRef<number>(initialSeq);
-  const timerRef = useRef<number | null>(null);
-  const retryTimer = useRef<number | null>(null);
   const currentBatch = useRef<{ seq: number; amount: number } | null>(null);
-  const beaconLockUntil = useRef<number>(0);
+  const retryTimer = useRef<number | null>(null);
 
-  // держим актуальное значение буфера в ref, чтобы избежать «захвата» старого значения в замыканиях
-  const bufferedRef = useRef(0);
-  const setBuffered = (fnOrVal: number | ((v: number) => number)) => {
-    _setBuffered((prev) => {
-      const next = typeof fnOrVal === "function" ? (fnOrVal as (v: number) => number)(prev) : fnOrVal;
-      bufferedRef.current = next;
-      return next;
-    });
-  };
-
-  // если initialSeq подтянули после /progress — обновим локальный seq
   useEffect(() => {
     if (typeof initialSeq === "number" && initialSeq > seqRef.current) {
       seqRef.current = initialSeq;
     }
   }, [initialSeq]);
 
-  // утилиты
-  const nowMs = () => (typeof performance !== "undefined" ? performance.now() : Date.now());
-
   const resolveInitData = () => {
     if (initData && initData.length > 0) return initData;
     if (typeof window !== "undefined") {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const w = window as any;
       const raw = w?.Telegram?.WebApp?.initData;
       if (raw && typeof raw === "string" && raw.length > 0) return raw;
     }
     return "";
+  };
+
+  const addClicks = (n = 1) => {
+    if (n <= 0) return;
+    setBuffered((v) => v + n);
   };
 
   const postBatch = async (seq: number, amount: number) => {
@@ -103,152 +92,112 @@ export function useClickBuffer({
     return (await resp.json()) as FlushResponse;
   };
 
-  const schedule = (delay = flushEveryMs) => {
-    if (timerRef.current != null) return;
-    timerRef.current = window.setTimeout(() => {
-      timerRef.current = null;
-      void drainOnce();
-    }, delay) as unknown as number;
-  };
+  const flush = async () => {
+    if (!enabled || inflight.current) return;
 
-  const cancelTimers = () => {
-    if (timerRef.current != null) {
-      window.clearTimeout(timerRef.current);
-      timerRef.current = null;
-    }
-    if (retryTimer.current != null) {
-      window.clearTimeout(retryTimer.current);
-      retryTimer.current = null;
-    }
-  };
-
-  const drainOnce = async () => {
-    if (!enabled) return;
-    if (inflight.current) return;
-
-    // защитимся от гонки с недавним sendBeacon
-    if (nowMs() < beaconLockUntil.current) return;
-
-    const available = bufferedRef.current;
-    if (available <= 0) return;
-
-    // используем один «текущий» батч, пока он не доотправится/не ретрайнется
     if (!currentBatch.current) {
-      const seq = seqRef.current + 1;
-      const amount = Math.min(available, maxBatch);
-      currentBatch.current = { seq, amount };
+      if (buffered <= 0) return;
+      currentBatch.current = {
+        seq: seqRef.current + 1,
+        amount: Math.max(1, Math.min(buffered, maxBatch)),
+      };
     }
 
-    inflight.current = true;
     const { seq, amount } = currentBatch.current;
+    inflight.current = true;
 
     try {
       const data = await postBatch(seq, amount);
 
-      // сколько реально засчитал сервер (может быть меньше в будущем, если введёте серверные лимиты)
-      const accepted = Math.max(0, Math.min(amount, Number(data.accepted_clicks ?? amount)));
-
-      // уменьшаем буфер на принятую часть
+      const accepted = Math.max(0, Math.min(data.accepted_clicks ?? 0, amount));
+      // КЛЮЧЕВОЕ: удаляем из буфера только ПРИНЯТЫЕ клики,
+      // остальное оставляем (оно дольётся следующими флашами)
       setBuffered((v) => Math.max(0, v - accepted));
 
-      // важная синхронизация seq: берём максимум из локального seq и server_seq
-      const serverSeq = Number(data.server_seq ?? 0);
-      seqRef.current = Math.max(seqRef.current, serverSeq, seq);
+      // Выравниваем локальную последовательность по серверу,
+      // а не по «попытке»
+      if (Number.isFinite(data.server_seq)) {
+        seqRef.current = data.server_seq;
+      } else {
+        // на всякий случай
+        seqRef.current = Math.max(seqRef.current, seq);
+      }
 
       currentBatch.current = null;
       inflight.current = false;
 
       onReconcile(data);
-
-      // если ещё есть в буфере — продолжим без дебаунса (быстро «выгрызем» очередь)
-      if (bufferedRef.current >= maxBatch) {
-        // немедленно следующая посылка
-        void drainOnce();
-      } else if (bufferedRef.current > 0) {
-        // немного подождём, вдруг пользователь перестанет кликать
-        schedule(flushEveryMs);
-      }
     } catch (e) {
       inflight.current = false;
-      // попробуем тот же батч ещё раз
+      // не трогаем буфер, просто повторим попытку
       if (retryTimer.current) window.clearTimeout(retryTimer.current);
       retryTimer.current = window.setTimeout(() => {
-        void drainOnce();
-      }, 400) as unknown as number;
+        void flush();
+      }, 300) as unknown as number;
     }
   };
 
-  // публичный метод для добавления «сырых» кликов (у тебя это = spend = boost)
-  const addClicks = (n = 1) => {
-    if (!enabled) return;
-    if (n <= 0) return;
-    setBuffered((v) => v + n);
-
-    // если буфер вырос до порога — отправим сразу
-    if (!inflight.current && bufferedRef.current >= threshold) {
-      cancelTimers();
-      void drainOnce();
-    } else {
-      // иначе просто задебаунсим
-      schedule(flushEveryMs);
-    }
-  };
-
-  // попытка сохранить клики при закрытии/сворачивании
   useEffect(() => {
+    if (!enabled) return;
+    const t = window.setInterval(() => {
+      if (!inflight.current && buffered > 0) void flush();
+    }, flushEveryMs);
+    return () => window.clearInterval(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [flushEveryMs, buffered, enabled]);
+
+  useEffect(() => {
+    if (!enabled) return;
+    if (buffered >= threshold && !inflight.current && !currentBatch.current) {
+      void flush();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [buffered, threshold, enabled]);
+
+  // best-effort отправка при закрытии вкладки
+  useEffect(() => {
+    if (!enabled) return;
     const handler = () => {
-      if (!enabled) return;
-      const left = bufferedRef.current;
-      if (left <= 0) return;
+      if (buffered <= 0) return;
 
       const rawInit = resolveInitData();
       if (!rawInit || !sessionId) return;
 
-      const amount = Math.min(left, maxBatch);
+      const beaconAmount = Math.max(1, Math.min(buffered, maxBatch));
       const beacon = {
         init_data: rawInit,
-        delta_clicks: amount,
+        delta_clicks: beaconAmount,
         client_seq: seqRef.current + 1,
         session_id: sessionId,
       };
       try {
-        // небольшой «лок» на конкурентные обычные флаши
-        beaconLockUntil.current = nowMs() + 800;
-        cancelTimers();
         navigator.sendBeacon(
           `${API_BASE_URL}/api/game/clicks/flush`,
           new Blob([JSON.stringify(beacon)], { type: "application/json" })
         );
-        // не трогаем локальный буфер — если бэкон не дойдёт, обычный ретрай догрызёт
       } catch {
         // ignore
       }
     };
 
-    const vis = () => {
+    const visibilityHandler = () => {
       if (document.visibilityState === "hidden") handler();
     };
 
     window.addEventListener("beforeunload", handler);
-    document.addEventListener("visibilitychange", vis);
+    document.addEventListener("visibilitychange", visibilityHandler);
+
     return () => {
       window.removeEventListener("beforeunload", handler);
-      document.removeEventListener("visibilitychange", vis);
+      document.removeEventListener("visibilitychange", visibilityHandler);
     };
-  }, [enabled, sessionId, maxBatch, initData, flushEveryMs]);
+  }, [buffered, sessionId, maxBatch, initData, enabled]);
 
-  // если включили/выключили — почистим таймеры
-  useEffect(() => {
-    if (!enabled) cancelTimers();
-  }, [enabled]);
+  const forceFlush = () => void flush();
 
-  return {
-    addClicks,
-    forceFlush: () => { cancelTimers(); void drainOnce(); },
-    buffered,
-    lastSeq: seqRef.current,
-  };
+  return { addClicks, forceFlush, buffered, lastSeq: seqRef.current };
 }
+
 
 
 
