@@ -217,7 +217,8 @@ async def get_progress(data: dict = Body(...), session: AsyncSession = Depends(g
         "click_boost_level": user.click_boost_level or 0,
         "energy_refill_count": user.energy_refill_count or 0,
         "energy_refills_left": energy_refills_left,
-        "daily_reward_claimed": user.daily_reward_claimed or False
+        "daily_reward_claimed": user.daily_reward_claimed or False,
+        "last_client_seq": user.last_client_seq or 0,
     }
 
 
@@ -307,6 +308,7 @@ async def clicks_flush(
     Идемпотентность по client_seq, атомарное применение, корректное восстановление энергии.
     Обновляет daily_progress/complete и (по расписанию) турнирные клики.
     """
+    logger = logging.getLogger(__name__)
     try:
         telegram_id = parse_telegram_user_id(payload.init_data)
 
@@ -331,14 +333,32 @@ async def clicks_flush(
                     now_utc=now_utc,
                 )
             except ValueError as e:
-                # Нарушение порядка seq — сообщаем клиенту
+                # Нарушение порядка seq — возвращаем NOOP со статусом 200
                 if str(e) == "out_of_order_sequence":
-                    raise HTTPException(status_code=409, detail="Out-of-order sequence")
+                    task_completed = bool(db_user.daily_completed)
+                    energy = db_user.energy or 0
+                    total_xp = db_user.total_xp or 0
+                    daily_progress = db_user.daily_progress or 0
+                    server_seq = db_user.last_client_seq or 0
+
+                    logger.info(
+                        "FLUSH noop(out_of_order): user_id=%s tg=%s delta=%s client_seq=%s last_seq=%s",
+                        user.id, telegram_id, payload.delta_clicks, payload.client_seq, server_seq
+                    )
+                    return ClicksFlushOut(
+                        status="noop",
+                        accepted_clicks=0,
+                        energy=energy,
+                        total_xp=total_xp,
+                        daily_progress=daily_progress,
+                        server_seq=server_seq,
+                        task_completed=task_completed,
+                    )
                 raise
 
             # 4) Ежедневная задача: проверяем завершение
             if not (db_user.daily_completed or False):
-                # В apply_clicks_flush мы увеличиваем daily_progress на принятые "сырые" клики
+                # В apply_clicks_flush увеличили daily_progress на accepted_clicks
                 if (db_user.daily_progress or 0) >= (db_user.daily_target or 0) > 0:
                     db_user.daily_progress = db_user.daily_target
                     db_user.daily_completed = True
@@ -346,7 +366,6 @@ async def clicks_flush(
             # 5) Турнирные клики: ПН(0)–СБ(5) по UTC+4
             now_az = datetime.utcnow() + timedelta(hours=4)
             if now_az.weekday() in range(6):
-                # считаем "сырые" клики (accepted_clicks), как это соответствует ежедневке
                 if result["accepted_clicks"] > 0:
                     db_user.tournament_clicks = (db_user.tournament_clicks or 0) + result["accepted_clicks"]
 
@@ -358,12 +377,18 @@ async def clicks_flush(
             energy = db_user.energy or 0
             total_xp = db_user.total_xp or 0
             daily_progress = db_user.daily_progress or 0
-            server_seq = result["server_seq"]
-            accepted_clicks = result["accepted_clicks"]
+            server_seq = int(result["server_seq"])
+            accepted_clicks = int(result["accepted_clicks"])
 
         # 6) Возвращаем авторитетное состояние
+        status = "ok" if accepted_clicks > 0 else "noop"
+        logger.info(
+            "FLUSH %s: user_id=%s tg=%s delta=%s accepted=%s seq=%s energy=%s xp=%s",
+            status, user.id, telegram_id, payload.delta_clicks, accepted_clicks, server_seq, energy, total_xp
+        )
+
         return ClicksFlushOut(
-            status="ok",
+            status=status,
             accepted_clicks=accepted_clicks,
             energy=energy,
             total_xp=total_xp,
@@ -375,6 +400,7 @@ async def clicks_flush(
     except HTTPException:
         raise
     except Exception as e:
+        logging.exception("FLUSH error")
         # не роняем процесс, возвращаем понятную ошибку
         return ClicksFlushOut(
             status=f"error: {str(e)}",
