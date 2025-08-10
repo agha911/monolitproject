@@ -148,11 +148,13 @@ const Clicker: React.FC = () => {
   }, [lastEnergyUpdate, energy, maxEnergy]);
 
   const onReconcile = async (data: FlushResponse) => {
-    // даже если status = "noop", тянем авторитетные значения
+    // всегда подтягиваем авторитетные значения
     setEnergy(data.energy);
     setTotalXp(data.total_xp);
+
     const s = Number(data.server_seq ?? 0);
-    if (s > 0) {
+    if (!Number.isNaN(s) && s >= 0) {
+      setServerSeq(s);
       try { localStorage.setItem(seqStorageKey, String(s)); } catch {}
     }
 
@@ -183,16 +185,17 @@ const Clicker: React.FC = () => {
     initData: WebApp.initData,
     sessionId,
     onReconcile,
-    flushEveryMs: 250,
-    threshold: 20,
+    enabled: seqReady && !!telegramUser,
+    flushEveryMs: 200,
+    threshold: 50,
     initialSeq: Math.max(serverSeq ?? 0, initialLocalSeq),
     maxBatch: 50,
-    enabled: seqReady,
   });
 
   const handleMultiClick = (x: number, y: number) => {
     if (!telegramUser || loading || energy <= 0) return;
 
+    // одна «сырая» единица = 1 очко, но кликаем по boost-значению
     const spend = Math.min(clickBoost, energy);
     if (spend <= 0) return;
 
@@ -206,7 +209,7 @@ const Clicker: React.FC = () => {
       setFloatingTexts((prev) => prev.filter((t) => t.id !== id));
     }, 1000);
 
-    // для ежедневки учитываем «сырые» клики
+    // отправляем «сырые» клики (ровно сколько потратили энергии)
     addClicks(spend);
   };
 
@@ -271,6 +274,7 @@ const Clicker: React.FC = () => {
 };
 
 export default Clicker;
+
 
 
 
