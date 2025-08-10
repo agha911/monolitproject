@@ -26,6 +26,7 @@ const Clicker: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [clickBoost, setClickBoost] = useState(1);
   const [floatingTexts, setFloatingTexts] = useState<FloatingText[]>([]);
+  const [serverSeq, setServerSeq] = useState(0); // 👈 seq с бэка
 
   useEffect(() => {
     WebApp.ready();
@@ -38,7 +39,7 @@ const Clicker: React.FC = () => {
   const sessionId = useMemo(() => `${userId}-${Date.now()}`, [userId]);
   const seqStorageKey = useMemo(() => `gappick:lastSeq:${userId}`, [userId]);
 
-  const initialSeq = useMemo(() => {
+  const initialLocalSeq = useMemo(() => {
     try {
       const saved = localStorage.getItem(seqStorageKey);
       return saved ? Number(saved) : 0;
@@ -65,11 +66,18 @@ const Clicker: React.FC = () => {
         });
 
         const data = await res.json();
+
         setEnergy(data.energy);
         setTotalXp(data.total_xp ?? 0);
         setLastEnergyUpdate(data.lastEnergyUpdate ? new Date(data.lastEnergyUpdate) : null);
         setMaxEnergy(data.max_energy ?? 1000);
         setClickBoost((data.click_boost_level ?? 0) + 1);
+
+        // 👇 ВАЖНО: подтягиваем last_client_seq с бэка и сохраняем
+        const s = Number(data.last_client_seq ?? 0);
+        setServerSeq(s);
+        try { localStorage.setItem(seqStorageKey, String(s)); } catch {}
+
         setLoading(false);
       } catch (error) {
         console.error('Ошибка инициализации пользователя:', error);
@@ -77,7 +85,7 @@ const Clicker: React.FC = () => {
     };
 
     initializeUser();
-  }, [telegramUser]);
+  }, [telegramUser, seqStorageKey]);
 
   useEffect(() => {
     const interval = setInterval(async () => {
@@ -95,13 +103,20 @@ const Clicker: React.FC = () => {
         setLastEnergyUpdate(data.lastEnergyUpdate ? new Date(data.lastEnergyUpdate) : null);
         setMaxEnergy(data.max_energy ?? 1000);
         setClickBoost((data.click_boost_level ?? 0) + 1);
+
+        // если серверный seq вырос — обновим и локально
+        const s = Number(data.last_client_seq ?? 0);
+        if (s > serverSeq) {
+          setServerSeq(s);
+          try { localStorage.setItem(seqStorageKey, String(s)); } catch {}
+        }
       } catch (err) {
         console.error('Ошибка при автообновлении энергии:', err);
       }
     }, 10000);
 
     return () => clearInterval(interval);
-  }, [telegramUser, energy, maxEnergy]);
+  }, [telegramUser, energy, maxEnergy, serverSeq, seqStorageKey]);
 
   // ==== ТАЙМЕР ДО ПОЛНОГО ВОССТАНОВЛЕНИЯ ====
   useEffect(() => {
@@ -114,7 +129,7 @@ const Clicker: React.FC = () => {
       const now = new Date();
       const msPassed = now.getTime() - lastEnergyUpdate.getTime();
 
-      const totalRecoveryMinutes = 480; // 8 часов до полного восстановления
+      const totalRecoveryMinutes = 480; // 8 часов
       const intervalMsPerUnit = (totalRecoveryMinutes / maxEnergy) * 60 * 1000;
 
       const remainingUnits = maxEnergy - energy;
@@ -139,19 +154,23 @@ const Clicker: React.FC = () => {
   const onReconcile = (data: FlushResponse) => {
     setEnergy(data.energy);
     setTotalXp(data.total_xp);
-    try {
-      localStorage.setItem(seqStorageKey, String(data.server_seq ?? 0));
-    } catch {}
+    // сервер сообщил новый server_seq — сохраняем
+    const s = Number(data.server_seq ?? 0);
+    if (s > 0) {
+      setServerSeq(s);
+      try { localStorage.setItem(seqStorageKey, String(s)); } catch {}
+    }
   };
 
   const { addClicks /*, forceFlush*/ } = useClickBuffer({
-    initData: WebApp.initData,   // ✅ добавили — требуется бэком
+    initData: WebApp.initData,                           // обязательно для бэка
     sessionId,
     onReconcile,
     flushEveryMs: 250,
     threshold: 20,
-    initialSeq,
-    maxBatch: 50,                // ⚠️ выстави = MAX_DELTA_PER_FLUSH на бэке
+    // берём максимум из локального и серверного seq
+    initialSeq: Math.max(serverSeq, initialLocalSeq),    // 👈 ключевая синхронизация
+    maxBatch: 50,                                        // = MAX_DELTA_PER_FLUSH на бэке
   });
 
   const handleMultiClick = (x: number, y: number) => {
@@ -233,6 +252,7 @@ const Clicker: React.FC = () => {
 };
 
 export default Clicker;
+
 
 
 
