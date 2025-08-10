@@ -2,7 +2,7 @@ from fastapi import FastAPI, Depends, HTTPException, Body
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text, func
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import requests
 from typing import Optional
 import os
@@ -27,8 +27,9 @@ import concurrent.futures
 
 ENERGY_RECOVERY_TOTAL_MINUTES = 480
 ENERGY_REFILL_DAILY_LIMIT = 2
-MAX_ENERGY = 100
+MAX_ENERGY = 1000
 DAILY_REWARDS = [10000, 20000, 30000, 40000, 50000, 60000, 70000]
+MAX_DELTA_PER_FLUSH = 100
 
 app = FastAPI()
 print("[APP] Using DATABASE_URL:", os.getenv("DATABASE_URL"))
@@ -216,59 +217,164 @@ async def get_progress(data: dict = Body(...), session: AsyncSession = Depends(g
 
 
 
-@app.post("/api/game/save_progress")
-async def save_progress(data: dict = Body(...), session: AsyncSession = Depends(get_async_session)):
-    try:
-        telegram_id = parse_telegram_user_id(data["init_data"])
-        await crud_user.update_progress(
-            session=session,
-            telegram_id=telegram_id,
-            energy=data["energy"],
-            total_xp=data.get("total_xp", 0),
-        )
-        print(f"[SAVED] {telegram_id} → ENERGY: {data['energy']}")
-        return {"status": "saved"}
-    except Exception as e:
-        return {"status": "error", "message": str(e)}
+# @app.post("/api/game/save_progress")
+# async def save_progress(data: dict = Body(...), session: AsyncSession = Depends(get_async_session)):
+#     try:
+#         telegram_id = parse_telegram_user_id(data["init_data"])
+#         await crud_user.update_progress(
+#             session=session,
+#             telegram_id=telegram_id,
+#             energy=data["energy"],
+#             total_xp=data.get("total_xp", 0),
+#         )
+#         print(f"[SAVED] {telegram_id} → ENERGY: {data['energy']}")
+#         return {"status": "saved"}
+#     except Exception as e:
+#         return {"status": "error", "message": str(e)}
 
-from math import ceil
+# from math import ceil
 
-@app.post("/api/game/click")
-async def click(data: dict = Body(...), session: AsyncSession = Depends(get_async_session)):
+# @app.post("/api/game/click")
+# async def click(data: dict = Body(...), session: AsyncSession = Depends(get_async_session)):
+#     try:
+#         telegram_id = parse_telegram_user_id(data["init_data"])
+#         user = await crud_user.get_user(session, telegram_id)
+
+#         if user:
+#             click_value = (user.click_boost_level or 0) + 1
+
+#             # Обновляем опыт и энергию
+#             await crud_user.update_progress(
+#                 session=session,
+#                 telegram_id=telegram_id,
+#                 energy=user.energy,
+#                 total_xp=user.total_xp + click_value
+#             )
+
+#             # Обновляем прогресс задания
+#             if not user.daily_completed:
+#                 user.daily_progress += click_value
+#                 if user.daily_progress >= user.daily_target:
+#                     user.daily_progress = user.daily_target
+#                     user.daily_completed = True
+
+#                 await session.commit()
+#                 await session.refresh(user)
+
+#             # Проверяем, попадает ли сейчас в период турнира
+#             now = datetime.utcnow() + timedelta(hours=4)  # UTC+4
+#             if now.weekday() in range(6):  # ПН (0) — СБ (5)
+#                 await crud_user.increment_tournament_clicks(session, user.telegram_id, amount=click_value)
+
+#         return {"status": "clicked", "task_completed": user.daily_completed}
+
+#     except Exception as e:
+#         return {"status": "error", "message": str(e)}
+
+
+class ClicksFlushIn(BaseModel):
+    init_data: str
+    delta_clicks: int = Field(ge=1, le=MAX_DELTA_PER_FLUSH)
+    client_seq: int = Field(ge=1)
+    session_id: str
+
+class ClicksFlushOut(BaseModel):
+    status: str
+    accepted_clicks: int
+    energy: int
+    total_xp: int
+    daily_progress: int
+    server_seq: int
+    task_completed: bool
+
+@app.post("/api/game/clicks/flush", response_model=ClicksFlushOut)
+async def clicks_flush(
+    payload: ClicksFlushIn = Body(...),
+    session: AsyncSession = Depends(get_async_session),
+):
+    """
+    Принимает пакет кликов от клиента (агрегированный на фронте).
+    Идемпотентность по client_seq, атомарное применение, корректное восстановление энергии.
+    Обновляет daily_progress/complete и (по расписанию) турнирные клики.
+    """
     try:
-        telegram_id = parse_telegram_user_id(data["init_data"])
+        telegram_id = parse_telegram_user_id(payload.init_data)
+
+        # 1) Находим пользователя (быстрый запрос)
         user = await crud_user.get_user(session, telegram_id)
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
 
-        if user:
-            click_value = (user.click_boost_level or 0) + 1
+        now_utc = datetime.now(timezone.utc)
 
-            # Обновляем опыт и энергию
-            await crud_user.update_progress(
-                session=session,
-                telegram_id=telegram_id,
-                energy=user.energy,
-                total_xp=user.total_xp + click_value
-            )
+        # 2) Открываем транзакцию и берём пользователя под блокировку
+        async with session.begin():
+            db_user = await crud_user.get_user_for_update(session, user.id)
 
-            # Обновляем прогресс задания
-            if not user.daily_completed:
-                user.daily_progress += click_value
-                if user.daily_progress >= user.daily_target:
-                    user.daily_progress = user.daily_target
-                    user.daily_completed = True
+            # 3) Применяем пакет кликов (внутри корректное восстановление энергии)
+            try:
+                result = await crud_user.apply_clicks_flush(
+                    session=session,
+                    user=db_user,
+                    delta_clicks=payload.delta_clicks,
+                    client_seq=payload.client_seq,
+                    now_utc=now_utc,
+                )
+            except ValueError as e:
+                # Нарушение порядка seq — сообщаем клиенту
+                if str(e) == "out_of_order_sequence":
+                    raise HTTPException(status_code=409, detail="Out-of-order sequence")
+                raise
 
-                await session.commit()
-                await session.refresh(user)
+            # 4) Ежедневная задача: проверяем завершение
+            if not (db_user.daily_completed or False):
+                # В apply_clicks_flush мы увеличиваем daily_progress на принятые "сырые" клики
+                if (db_user.daily_progress or 0) >= (db_user.daily_target or 0) > 0:
+                    db_user.daily_progress = db_user.daily_target
+                    db_user.daily_completed = True
 
-            # Проверяем, попадает ли сейчас в период турнира
-            now = datetime.utcnow() + timedelta(hours=4)  # UTC+4
-            if now.weekday() in range(6):  # ПН (0) — СБ (5)
-                await crud_user.increment_tournament_clicks(session, user.telegram_id, amount=click_value)
+            # 5) Турнирные клики: ПН(0)–СБ(5) по UTC+4
+            now_az = datetime.utcnow() + timedelta(hours=4)
+            if now_az.weekday() in range(6):
+                # считаем "сырые" клики (accepted_clicks), как это соответствует ежедневке
+                if result["accepted_clicks"] > 0:
+                    db_user.tournament_clicks = (db_user.tournament_clicks or 0) + result["accepted_clicks"]
 
-        return {"status": "clicked", "task_completed": user.daily_completed}
+            # фиксим в БД изменения (session.begin сам сделает commit)
+            await session.flush()
 
+            # актуальные значения на момент ответа
+            task_completed = bool(db_user.daily_completed)
+            energy = db_user.energy or 0
+            total_xp = db_user.total_xp or 0
+            daily_progress = db_user.daily_progress or 0
+            server_seq = result["server_seq"]
+            accepted_clicks = result["accepted_clicks"]
+
+        # 6) Возвращаем авторитетное состояние
+        return ClicksFlushOut(
+            status="ok",
+            accepted_clicks=accepted_clicks,
+            energy=energy,
+            total_xp=total_xp,
+            daily_progress=daily_progress,
+            server_seq=server_seq,
+            task_completed=task_completed,
+        )
+
+    except HTTPException:
+        raise
     except Exception as e:
-        return {"status": "error", "message": str(e)}
+        # не роняем процесс, возвращаем понятную ошибку
+        return ClicksFlushOut(
+            status=f"error: {str(e)}",
+            accepted_clicks=0,
+            energy=0,
+            total_xp=0,
+            daily_progress=0,
+            server_seq=0,
+            task_completed=False,
+        )
 
 
 

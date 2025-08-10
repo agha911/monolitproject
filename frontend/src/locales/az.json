@@ -71,6 +71,12 @@
   "tournament_user": "İstifadəçi",
   "tournament_empty": "Bu liqada hələ heç kim yoxdur.",
   "loading": "Yüklənir...",
-  "total_spent": "$GAP Fondu"
+  "total_spent": "$GAP Fondu",
+  "full_in": "Tam dolma vaxtı",
+  "boost": "Güc",
+  "click": "Klik",
+  "max_energy_reached": "Maksimum enerji həddinə çatıldı",
+  "refill_limit_reached": "Bugünkü doldurma limiti çatıb",
+  "not_enough_gap": "Kifayət qədər $GAP yoxdur"
 
 }

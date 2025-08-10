@@ -1,15 +1,24 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from typing import Optional
-from datetime import datetime
+from sqlalchemy import update  # для reset_tournament_data
+from typing import Optional, Tuple, Dict
+from datetime import datetime, timedelta, timezone
 from app.models.user import User
 from app.models.app_stats import AppStats
 from sqlalchemy.orm.attributes import flag_modified
 from math import ceil
 
-MAX_ENERGY_CAP = 30000
-ENERGY_INCREMENT = 100
-ENERGY_UPGRADE_COST = 500
+
+# --- НОВОЕ: безопасное получение пользователя для атомарных операций ---
+async def get_user_for_update(session: AsyncSession, user_id: int) -> User:
+    """
+    Возвращает пользователя с блокировкой строки (SELECT ... FOR UPDATE).
+    Используй внутри транзакции session.begin() / router уровень.
+    """
+    result = await session.execute(
+        select(User).where(User.id == user_id).with_for_update()
+    )
+    return result.scalar_one()
 
 
 async def get_user(session: AsyncSession, telegram_id: int):
@@ -64,7 +73,12 @@ async def update_energy_and_time(
     user = result.scalar_one_or_none()
     if user:
         user.energy = energy
-        user.lastEnergyUpdate = time
+        # В проекте используется camelCase в API — сохраняем совместимость
+        # Модель может называться lastEnergyUpdate (как в фронте) или last_energy_update.
+        if hasattr(user, "lastEnergyUpdate"):
+            user.lastEnergyUpdate = time
+        else:
+            setattr(user, "last_energy_update", time)
         await session.commit()
         await session.refresh(user)
 
@@ -74,19 +88,6 @@ async def get_leaderboard(session: AsyncSession, limit: int = 50):
     )
     return result.scalars().all()
 
-async def buy_max_energy(session: AsyncSession, user: User) -> bool:
-    if user.max_energy >= MAX_ENERGY_CAP:
-        return False
-
-    if user.total_xp < ENERGY_UPGRADE_COST:
-        return False
-
-    user.total_xp -= ENERGY_UPGRADE_COST
-    user.max_energy += ENERGY_INCREMENT
-
-    session.add(user)
-    await session.commit()
-    return True
 
 async def complete_task(session: AsyncSession, user: User, task_id: str, reward: int = 50):
     if task_id in user.completed_tasks:
@@ -245,8 +246,6 @@ async def increment_total_spent(session: AsyncSession, amount: int):
         stats = AppStats(id=1, total_spent=0)
         session.add(stats)
         await session.commit()  # Коммитим создание записи
-        # Или можно сразу вернуть, если в этой сессии первый раз:
-        # return
 
     stats.total_spent += amount
     await session.commit()
@@ -257,3 +256,125 @@ async def get_total_spent(session: AsyncSession) -> int:
     result = await session.execute(select(AppStats.total_spent).where(AppStats.id == 1))
     value = result.scalar()
     return value or 0
+
+
+# =========================
+# НОВОЕ: ЛОГИКА ДЛЯ БАТЧ-КЛИКОВ
+# =========================
+
+def _get_last_energy_update(user: User) -> Optional[datetime]:
+    # Совместимость с разными именами поля в модели
+    if hasattr(user, "lastEnergyUpdate"):
+        return user.lastEnergyUpdate
+    return getattr(user, "last_energy_update", None)
+
+def _set_last_energy_update(user: User, value: datetime) -> None:
+    if hasattr(user, "lastEnergyUpdate"):
+        user.lastEnergyUpdate = value
+    else:
+        setattr(user, "last_energy_update", value)
+
+def recover_energy_inplace(user: User, now_utc: datetime) -> None:
+    """
+    Восстановление энергии “на лету” (8 часов до полного восстановления).
+    Ключевой момент: обновляем таймштамп даже при достигнутом MAX,
+    чтобы не было скачка до фула через несколько секунд.
+    """
+    max_energy = user.max_energy or 100
+    if max_energy <= 0:
+        max_energy = 100
+
+    last = _get_last_energy_update(user)
+    if last is None:
+        _set_last_energy_update(user, now_utc)
+        return
+
+    # Интервал восстановления одной единицы
+    total_recovery_minutes = 480  # 8 часов
+    interval_sec = (total_recovery_minutes * 60) / max(1, max_energy)
+
+    delta_sec = (now_utc - last).total_seconds()
+    if delta_sec < 1:
+        return
+
+    units = int(delta_sec // interval_sec)
+    if units <= 0:
+        return
+
+    before = user.energy or 0
+    user.energy = min(max_energy, before + units)
+
+    used_sec = units * interval_sec
+    new_last = last + timedelta(seconds=used_sec)
+
+    # Если дошли до максимума — синхронизируем таймштамп с текущим временем,
+    # чтобы не накапливался “долг” восстановления
+    if before < max_energy and user.energy == max_energy:
+        _set_last_energy_update(user, now_utc)
+    else:
+        _set_last_energy_update(user, new_last)
+
+
+async def apply_clicks_flush(
+    session: AsyncSession,
+    user: User,
+    delta_clicks: int,
+    client_seq: int,
+    now_utc: Optional[datetime] = None
+) -> Dict[str, int]:
+    """
+    Атомарно применяет пакет кликов с идемпотентностью.
+    Вызывай внутри открытой транзакции и после get_user_for_update().
+    Возвращает словарь для ответа API.
+    """
+    if now_utc is None:
+        now_utc = datetime.now(timezone.utc)
+
+    # 1) Сначала восстановим энергию “на лету”
+    recover_energy_inplace(user, now_utc)
+
+    # 2) Идемпотентность по последнему принятому seq
+    last_seq = getattr(user, "last_client_seq", 0) or 0
+    if client_seq <= last_seq:
+        # Повтор ранее принятого пакета — ничего не изменяем
+        return {
+            "accepted_clicks": 0,
+            "energy": user.energy or 0,
+            "total_xp": user.total_xp or 0,
+            "daily_progress": user.daily_progress or 0,
+            "server_seq": last_seq,
+        }
+    if client_seq != last_seq + 1:
+        # Нарушение порядка — пусть роутер вернёт 409
+        raise ValueError("out_of_order_sequence")
+
+    # 3) Сколько реально можем принять по энергии
+    available = max(0, user.energy or 0)
+    accepted = min(delta_clicks, available)
+
+    # Учитываем бустер, если он есть в модели (как на фронте: (level or 0) + 1)
+    click_boost_level = getattr(user, "click_boost_level", 0) or 0
+    boost = click_boost_level + 1
+    gained_xp = accepted * boost
+
+    if accepted > 0:
+        user.energy = available - accepted
+        user.total_xp = (user.total_xp or 0) + gained_xp
+        user.daily_progress = (user.daily_progress or 0) + accepted
+        # Если считаешь турнир по кликам — раскомментируй:
+        # user.tournament_clicks = (user.tournament_clicks or 0) + accepted
+
+    # Фиксируем последний принятый seq
+    setattr(user, "last_client_seq", client_seq)
+
+    session.add(user)
+    await session.flush()
+
+    return {
+        "accepted_clicks": accepted,
+        "energy": user.energy or 0,
+        "total_xp": user.total_xp or 0,
+        "daily_progress": user.daily_progress or 0,
+        "server_seq": getattr(user, "last_client_seq", 0) or 0,
+    }
+

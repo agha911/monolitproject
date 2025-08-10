@@ -1,10 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import WebApp from '@twa-dev/sdk';
 import { useTranslation } from 'react-i18next';
 import MainButton from './MainButton';
 import API_BASE_URL from './config';
-
-
+import { useClickBuffer, FlushResponse } from './hooks/useClickBuffer';
 
 interface FloatingText {
   id: number;
@@ -13,15 +12,17 @@ interface FloatingText {
   y: number;
 }
 
+type WebAppUser = any;
+
 const Clicker: React.FC = () => {
   const { t } = useTranslation();
 
   const [telegramUser, setTelegramUser] = useState<WebAppUser | null>(null);
   const [totalXp, setTotalXp] = useState(0);
-  const [energy, setEnergy] = useState(100);
-  const [maxEnergy, setMaxEnergy] = useState(100);
+  const [energy, setEnergy] = useState(1000);
+  const [maxEnergy, setMaxEnergy] = useState(1000);
   const [lastEnergyUpdate, setLastEnergyUpdate] = useState<Date | null>(null);
-  const [timeToNextEnergy, setTimeToNextEnergy] = useState<string | null>(null);
+  const [timeToFullEnergy, setTimeToFullEnergy] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [clickBoost, setClickBoost] = useState(1);
   const [floatingTexts, setFloatingTexts] = useState<FloatingText[]>([]);
@@ -29,12 +30,22 @@ const Clicker: React.FC = () => {
   useEffect(() => {
     WebApp.ready();
     const user = WebApp.initDataUnsafe?.user;
-    if (user) {
-      setTelegramUser(user);
-    } else {
-      alert('Ошибка: не удалось получить данные Telegram-пользователя.');
-    }
+    if (user) setTelegramUser(user);
+    else alert('Ошибка: не удалось получить данные Telegram-пользователя.');
   }, []);
+
+  const userId = telegramUser?.id ? String(telegramUser.id) : 'guest';
+  const sessionId = useMemo(() => `${userId}-${Date.now()}`, [userId]);
+  const seqStorageKey = useMemo(() => `gappick:lastSeq:${userId}`, [userId]);
+
+  const initialSeq = useMemo(() => {
+    try {
+      const saved = localStorage.getItem(seqStorageKey);
+      return saved ? Number(saved) : 0;
+    } catch {
+      return 0;
+    }
+  }, [seqStorageKey]);
 
   useEffect(() => {
     if (!telegramUser) return;
@@ -57,7 +68,7 @@ const Clicker: React.FC = () => {
         setEnergy(data.energy);
         setTotalXp(data.total_xp ?? 0);
         setLastEnergyUpdate(data.lastEnergyUpdate ? new Date(data.lastEnergyUpdate) : null);
-        setMaxEnergy(data.max_energy ?? 100);
+        setMaxEnergy(data.max_energy ?? 1000);
         setClickBoost((data.click_boost_level ?? 0) + 1);
         setLoading(false);
       } catch (error) {
@@ -82,7 +93,7 @@ const Clicker: React.FC = () => {
         const data = await res.json();
         setEnergy(data.energy);
         setLastEnergyUpdate(data.lastEnergyUpdate ? new Date(data.lastEnergyUpdate) : null);
-        setMaxEnergy(data.max_energy ?? 100);
+        setMaxEnergy(data.max_energy ?? 1000);
         setClickBoost((data.click_boost_level ?? 0) + 1);
       } catch (err) {
         console.error('Ошибка при автообновлении энергии:', err);
@@ -92,61 +103,73 @@ const Clicker: React.FC = () => {
     return () => clearInterval(interval);
   }, [telegramUser, energy, maxEnergy]);
 
-    useEffect(() => {
+  // ==== ТАЙМЕР ДО ПОЛНОГО ВОССТАНОВЛЕНИЯ ====
+  useEffect(() => {
     const interval = setInterval(() => {
       if (!lastEnergyUpdate || energy >= maxEnergy) {
-        setTimeToNextEnergy(null);
+        setTimeToFullEnergy(null);
         return;
       }
 
       const now = new Date();
       const msPassed = now.getTime() - lastEnergyUpdate.getTime();
 
-      const totalRecoveryMinutes = 480; // 8 часов
-      const recoveryIntervalMs = (totalRecoveryMinutes / maxEnergy) * 60 * 1000;
+      const totalRecoveryMinutes = 480; // 8 часов до полного восстановления
+      const intervalMsPerUnit = (totalRecoveryMinutes / maxEnergy) * 60 * 1000;
 
-      const msToNext = recoveryIntervalMs - (msPassed % recoveryIntervalMs);
-      const minutes = Math.floor(msToNext / 60000);
-      const seconds = Math.floor((msToNext % 60000) / 1000);
+      const remainingUnits = maxEnergy - energy;
+      // Сколько осталось до ближайшего +1
+      const msToNextUnit = intervalMsPerUnit - (msPassed % intervalMsPerUnit);
+      // До полного: время на оставшиеся "полные" единицы + хвост до ближайшего +1
+      const msToFull = (remainingUnits - 1) * intervalMsPerUnit + msToNextUnit;
 
-      setTimeToNextEnergy(`${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`);
+      const totalSeconds = Math.max(0, Math.ceil(msToFull / 1000));
+      const hours = Math.floor(totalSeconds / 3600);
+      const minutes = Math.floor((totalSeconds % 3600) / 60);
+      const seconds = totalSeconds % 60;
+
+      const hh = hours.toString().padStart(2, '0');
+      const mm = minutes.toString().padStart(2, '0');
+      const ss = seconds.toString().padStart(2, '0');
+
+      setTimeToFullEnergy(`${hh}:${mm}:${ss}`);
     }, 1000);
 
     return () => clearInterval(interval);
   }, [lastEnergyUpdate, energy, maxEnergy]);
 
+  const onReconcile = (data: FlushResponse) => {
+    setEnergy(data.energy);
+    setTotalXp(data.total_xp);
+    try {
+      localStorage.setItem(seqStorageKey, String(data.server_seq ?? 0));
+    } catch {}
+  };
+
+  const { addClicks /*, forceFlush*/ } = useClickBuffer({
+    sessionId,
+    onReconcile,
+    flushEveryMs: 250,
+    threshold: 20,
+    initialSeq,
+  });
 
   const handleMultiClick = (x: number, y: number) => {
     if (!telegramUser || loading || energy <= 0) return;
 
-    const gain = clickBoost;
-    const newTotalXp = totalXp + gain;
-    const newEnergy = energy - gain;
+    const canSpend = Math.min(clickBoost, energy);
+    if (canSpend <= 0) return;
 
-    setTotalXp(newTotalXp);
-    setEnergy(newEnergy);
+    setTotalXp((prev) => prev + canSpend);
+    setEnergy((prev) => Math.max(0, prev - canSpend));
 
     const id = Date.now() + Math.random();
-    setFloatingTexts((prev) => [...prev, { id, value: gain, x, y }]);
+    setFloatingTexts((prev) => [...prev, { id, value: canSpend, x, y }]);
     setTimeout(() => {
       setFloatingTexts((prev) => prev.filter((t) => t.id !== id));
     }, 1000);
 
-    fetch(`${API_BASE_URL}/api/game/click`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ init_data: WebApp.initData }),
-    });
-
-    fetch(`${API_BASE_URL}/api/game/save_progress`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        init_data: WebApp.initData,
-        total_xp: newTotalXp,
-        energy: newEnergy,
-      }),
-    });
+    addClicks(canSpend);
   };
 
   const energyProgress = Math.min((energy / maxEnergy) * 100, 100);
@@ -157,16 +180,18 @@ const Clicker: React.FC = () => {
       <div className="text-sm text-[#7ee9ff] mb-2">x{clickBoost} boost</div>
 
       <div className="my-4 w-full max-w-md">
-        <label className="block mb-1 text-sm text-[#7ee9ff]">{t('energy')}: {energy} / {maxEnergy}</label>
+        <label className="block mb-1 text-sm text-[#7ee9ff]">
+          {t('energy')}: {energy} / {maxEnergy}
+        </label>
         <div className="w-full h-4 bg-[#0d273d] rounded overflow-hidden shadow-inner">
           <div
             className="h-full bg-gradient-to-r from-[#7af9ff] to-[#00f0ff] transition-all"
             style={{ width: `${energyProgress}%` }}
           />
         </div>
-        {energy < maxEnergy && timeToNextEnergy && (
+        {energy < maxEnergy && timeToFullEnergy && (
           <p className="text-xs mt-1 text-[#89dfff]">
-            +1 {t('energy')} {t('in')} {timeToNextEnergy}
+            {t('full_in')} {timeToFullEnergy}
           </p>
         )}
       </div>
@@ -199,11 +224,22 @@ const Clicker: React.FC = () => {
           }
         `}</style>
       </div>
+
+      {/* Принудительный флаш по кнопке (опционально)
+      <button
+        onClick={forceFlush}
+        className="mt-4 px-3 py-2 rounded bg-[#0d273d] text-[#7ee9ff]"
+      >
+        Sync now
+      </button>
+      */}
     </div>
   );
 };
 
 export default Clicker;
+
+
 
 
 

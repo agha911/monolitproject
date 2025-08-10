@@ -3,18 +3,35 @@ import { useTranslation } from 'react-i18next';
 import API_BASE_URL from '../config';
 import WebApp from '@twa-dev/sdk';
 
+const ENERGY_UPGRADE_PRICE = 2500; // должен совпадать с беком
+const REFILL_PRICE = 2500;         // должен совпадать с беком
+
 const Shop: React.FC = () => {
   const { t } = useTranslation();
   const [message, setMessage] = useState('');
   const [loading, setLoading] = useState(false);
+
+  // user basics
   const [clickBoostLevel, setClickBoostLevel] = useState(0);
-  const [energyRefillsLeft, setEnergyRefillsLeft] = useState(0);
   const [totalXp, setTotalXp] = useState(0);
   const [totalSpent, setTotalSpent] = useState(0);
+
+  // upgrade max energy status
+  const [energyUpgradeLimit, setEnergyUpgradeLimit] = useState<number | null>(null);
+  const [energyUpgradesLeft, setEnergyUpgradesLeft] = useState<number | null>(null);
+  const [userMaxEnergy, setUserMaxEnergy] = useState<number | null>(null);
+  const [maxEnergyCap, setMaxEnergyCap] = useState<number | null>(null);
+
+  // refill status
+  const [refillLimit, setRefillLimit] = useState<number | null>(null);
+  const [refillsLeft, setRefillsLeft] = useState<number | null>(null);
+  const [currentEnergy, setCurrentEnergy] = useState<number | null>(null);
+  const [refillMaxEnergy, setRefillMaxEnergy] = useState<number | null>(null);
 
   const telegramUser = WebApp.initDataUnsafe?.user;
   const telegramUserId = telegramUser?.id;
 
+  // ------- loaders -------
   const fetchUserData = async () => {
     try {
       const res = await fetch(`${API_BASE_URL}/api/game/progress`, {
@@ -24,8 +41,9 @@ const Shop: React.FC = () => {
       });
       const data = await res.json();
       setClickBoostLevel(data.click_boost_level ?? 0);
-      setEnergyRefillsLeft(data.energy_refills_left ?? 0);
       setTotalXp(data.total_xp ?? 0);
+      if (typeof data.max_energy === 'number') setUserMaxEnergy(data.max_energy);
+      if (typeof data.energy === 'number') setCurrentEnergy(data.energy);
     } catch (err) {
       console.error('Ошибка при загрузке данных пользователя:', err);
     }
@@ -41,18 +59,64 @@ const Shop: React.FC = () => {
     }
   };
 
+  const fetchEnergyUpgradeStatus = async () => {
+    if (!telegramUserId) return;
+    try {
+      const res = await fetch(
+        `${API_BASE_URL}/api/shop/buy_max_energy/status?telegram_id=${telegramUserId}`
+      );
+      if (!res.ok) return;
+      const data = await res.json();
+      const limit = Number(data.limit ?? 0);
+      const used = Number(data.upgrades_today ?? 0);
+      setEnergyUpgradeLimit(limit);
+      setEnergyUpgradesLeft(Math.max(0, limit - used));
+      if (typeof data.max_energy === 'number') setUserMaxEnergy(data.max_energy);
+      if (typeof data.max_energy_cap === 'number') setMaxEnergyCap(data.max_energy_cap);
+    } catch (err) {
+      console.error('Ошибка статуса апгрейда max energy:', err);
+    }
+  };
+
+  const fetchRefillStatus = async () => {
+    if (!telegramUserId) return;
+    try {
+      const res = await fetch(
+        `${API_BASE_URL}/api/shop/buy_energy_refill/status?telegram_id=${telegramUserId}`
+      );
+      if (!res.ok) return;
+      const data = await res.json();
+      const limit = Number(data.limit ?? 0);
+      const used = Number(data.refills_today ?? 0);
+      setRefillLimit(limit);
+      setRefillsLeft(Math.max(0, limit - used));
+      if (typeof data.current_energy === 'number') setCurrentEnergy(data.current_energy);
+      if (typeof data.max_energy === 'number') setRefillMaxEnergy(data.max_energy);
+    } catch (err) {
+      console.error('Ошибка статуса рефилла:', err);
+    }
+  };
+
   useEffect(() => {
     fetchUserData();
     fetchTotalSpent();
+    fetchEnergyUpgradeStatus();
+    fetchRefillStatus();
   }, []);
 
+  // ------- actions -------
   const handleBuyClickBoost = async () => {
     setLoading(true);
     setMessage('');
-
     const price = 5000 * Math.pow(2, clickBoostLevel);
+
     if (clickBoostLevel >= 4) {
       setMessage(t('shop_max_level'));
+      setLoading(false);
+      return;
+    }
+    if (totalXp < price) {
+      setMessage(t('shop_error')); // "Not enough GAP"
       setLoading(false);
       return;
     }
@@ -63,7 +127,6 @@ const Shop: React.FC = () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ telegram_id: telegramUserId }),
       });
-
       const data = await res.json();
       if (data.status === 'success') {
         await fetchUserData();
@@ -83,17 +146,39 @@ const Shop: React.FC = () => {
     setLoading(true);
     setMessage('');
 
+    if (totalXp < ENERGY_UPGRADE_PRICE) {
+      setMessage(t('shop_error')); // "Not enough GAP"
+      setLoading(false);
+      return;
+    }
+    if (energyUpgradesLeft !== null && energyUpgradesLeft <= 0) {
+      setMessage(t('shop_error')); // "Limit reached"
+      setLoading(false);
+      return;
+    }
+    if (maxEnergyCap !== null && userMaxEnergy !== null && userMaxEnergy >= maxEnergyCap) {
+      setMessage(t('shop_error')); // "Cap reached"
+      setLoading(false);
+      return;
+    }
+
     try {
       const res = await fetch(`${API_BASE_URL}/api/shop/buy_max_energy`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ telegram_id: telegramUserId }),
       });
-
       const data = await res.json();
       if (data.status === 'success') {
         await fetchUserData();
         await fetchTotalSpent();
+        // backend возвращает {limit, upgrades_today}
+        if (typeof data.limit === 'number' && typeof data.upgrades_today === 'number') {
+          setEnergyUpgradeLimit(data.limit);
+          setEnergyUpgradesLeft(Math.max(0, data.limit - data.upgrades_today));
+        } else {
+          await fetchEnergyUpgradeStatus();
+        }
         setMessage(t('shop_success', { value: data.new_max_energy }));
       } else {
         setMessage(`${t('shop_error')}: ${data.message}`);
@@ -109,17 +194,49 @@ const Shop: React.FC = () => {
     setLoading(true);
     setMessage('');
 
+    const isFull =
+      currentEnergy !== null &&
+      (refillMaxEnergy ?? userMaxEnergy ?? 0) > 0 &&
+      currentEnergy >= (refillMaxEnergy ?? userMaxEnergy ?? 0);
+
+    if (isFull) {
+      setMessage(t('shop_error')); // "Energy already full"
+      setLoading(false);
+      return;
+    }
+    if (refillsLeft !== null && refillsLeft <= 0) {
+      setMessage(t('shop_error')); // "Limit reached"
+      setLoading(false);
+      return;
+    }
+    if (totalXp < REFILL_PRICE) {
+      setMessage(t('shop_error')); // "Not enough GAP"
+      setLoading(false);
+      return;
+    }
+
     try {
       const res = await fetch(`${API_BASE_URL}/api/shop/buy_energy_refill`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ telegram_id: telegramUserId }),
       });
-
       const data = await res.json();
       if (data.status === 'success') {
         await fetchUserData();
         await fetchTotalSpent();
+
+        // backend (наш вариант) возвращает {limit, refill_count}, но статус-роут — refills_today
+        if (typeof data.limit === 'number' && typeof data.refill_count === 'number') {
+          // пересчёт остатка из ответа покупки
+          const used = data.refill_count; // покупок сегодня после операции
+          setRefillLimit(data.limit);
+          setRefillsLeft(Math.max(0, data.limit - used));
+          setCurrentEnergy(data.energy);
+        } else {
+          await fetchRefillStatus();
+        }
+
         setMessage(t('refill_success'));
       } else {
         setMessage(`${t('shop_error')}: ${data.message}`);
@@ -131,7 +248,25 @@ const Shop: React.FC = () => {
     }
   };
 
+  // derived
   const clickBoostPrice = 5000 * Math.pow(2, clickBoostLevel);
+
+  const disableEnergyUpgrade =
+    loading ||
+    totalXp < ENERGY_UPGRADE_PRICE ||
+    (energyUpgradesLeft !== null && energyUpgradesLeft <= 0) ||
+    (maxEnergyCap !== null && userMaxEnergy !== null && userMaxEnergy >= maxEnergyCap);
+
+  const energyIsFull =
+    currentEnergy !== null &&
+    (refillMaxEnergy ?? userMaxEnergy ?? 0) > 0 &&
+    currentEnergy >= (refillMaxEnergy ?? userMaxEnergy ?? 0);
+
+  const disableRefill =
+    loading ||
+    totalXp < REFILL_PRICE ||
+    (refillsLeft !== null && refillsLeft <= 0) ||
+    energyIsFull;
 
   return (
     <div className="p-4 bg-[#131f2f] min-h-screen text-[#00f0ff]">
@@ -148,7 +283,7 @@ const Shop: React.FC = () => {
 
         <button
           onClick={handleBuyClickBoost}
-          disabled={loading || clickBoostLevel >= 4}
+          disabled={loading || clickBoostLevel >= 4 || totalXp < clickBoostPrice}
           className="bg-[#00f0ff] text-[#0e1a2b] font-semibold px-4 py-2 rounded hover:scale-105 transition-all disabled:opacity-40"
         >
           {loading ? '...' : t('buy')}
@@ -158,11 +293,19 @@ const Shop: React.FC = () => {
       {/* Увеличение максимальной энергии */}
       <div className="bg-[#0e1a2b] border border-[#00f0ff40] p-4 rounded-xl shadow-[0_0_10px_#00f0ff30] text-center space-y-2 max-w-md mx-auto mb-6">
         <h3 className="text-lg font-semibold text-[#7ee9ff]">🔋 {t('energy_upgrade')}</h3>
-        <p className="text-sm text-[#a0f6ff]">500 $GAP</p>
+        <p className="text-sm text-[#a0f6ff]">{ENERGY_UPGRADE_PRICE} $GAP</p>
+        {energyUpgradeLimit !== null && energyUpgradesLeft !== null && (
+          <p className="text-xs text-[#89dfff]">
+            {t('available')}: {energyUpgradesLeft} / {energyUpgradeLimit}
+          </p>
+        )}
+        {maxEnergyCap !== null && userMaxEnergy !== null && userMaxEnergy >= maxEnergyCap && (
+          <p className="text-xs text-[#ffadad]">{t('max_reached')}</p>
+        )}
 
         <button
           onClick={handleBuyEnergyUpgrade}
-          disabled={loading}
+          disabled={disableEnergyUpgrade}
           className="bg-[#00f0ff] text-[#0e1a2b] font-semibold px-4 py-2 rounded hover:scale-105 transition-all disabled:opacity-40"
         >
           {loading ? '...' : t('buy')}
@@ -172,12 +315,19 @@ const Shop: React.FC = () => {
       {/* Восполнение энергии */}
       <div className="bg-[#0e1a2b] border border-[#00f0ff40] p-4 rounded-xl shadow-[0_0_10px_#00f0ff30] text-center space-y-2 max-w-md mx-auto mb-6">
         <h3 className="text-lg font-semibold text-[#7ee9ff]">⚡ {t('refill_energy')}</h3>
-        <p className="text-sm text-[#a0f6ff]">500 $GAP</p>
-        <p className="text-xs text-[#89dfff]">{t('available')}: {energyRefillsLeft} / 2</p>
+        <p className="text-sm text-[#a0f6ff]">{REFILL_PRICE} $GAP</p>
+        {refillLimit !== null && refillsLeft !== null && (
+          <p className="text-xs text-[#89dfff]">
+            {t('available')}: {refillsLeft} / {refillLimit}
+          </p>
+        )}
+        {energyIsFull && (
+          <p className="text-xs text-[#ffadad]">{t('energy_full')}</p>
+        )}
 
         <button
           onClick={handleRefillEnergy}
-          disabled={loading || energyRefillsLeft <= 0}
+          disabled={disableRefill}
           className="bg-[#00f0ff] text-[#0e1a2b] font-semibold px-4 py-2 rounded hover:scale-105 transition-all disabled:opacity-40"
         >
           {loading ? '...' : t('buy')}
@@ -208,6 +358,8 @@ const Shop: React.FC = () => {
 };
 
 export default Shop;
+
+
 
 
 

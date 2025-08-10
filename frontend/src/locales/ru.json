@@ -71,6 +71,12 @@
   "tournament_user": "Пользователь",
   "tournament_empty": "В этой лиге пока никого нет.",
   "loading": "Загрузка...",
-  "total_spent": "Фонд $GAP"
+  "total_spent": "Фонд $GAP",
+  "full_in": "Полностью через",
+  "boost": "Буст",
+  "click": "Клик",
+  "max_energy_reached": "Достигнут максимум энергии",
+  "refill_limit_reached": "Лимит восполнений на сегодня исчерпан",
+  "not_enough_gap": "Недостаточно $GAP"
 
 }

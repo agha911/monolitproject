@@ -71,5 +71,11 @@
   "tournament_user": "User",
   "tournament_empty": "No one in this league yet.",
   "loading": "Loading...",
-  "total_spent": "$GAP Fund"
+  "total_spent": "$GAP Fund",
+  "full_in": "Full in",
+  "boost": "Boost",
+  "click": "Click",
+  "max_energy_reached": "Maximum energy reached",
+  "refill_limit_reached": "Refill limit reached for today",
+  "not_enough_gap": "Not enough $GAP"
 }

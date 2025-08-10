@@ -35,6 +35,9 @@ class User(Base):
     daily_reward_claimed = Column(Boolean, default=False)
     tournament_clicks = Column(Integer, default=0, nullable=False)
     tournament_updated_at = Column(DateTime, default=datetime.utcnow)
+    last_client_seq = Column(Integer, nullable=False, server_default="0")
+    energy_upgrade_count = Column(Integer, default=0)
+    last_energy_upgrade = Column(DateTime, nullable=True)
     
     
 
