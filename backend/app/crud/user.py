@@ -8,7 +8,6 @@ from app.models.app_stats import AppStats
 from sqlalchemy.orm.attributes import flag_modified
 from math import ceil
 
-
 # --- НОВОЕ: безопасное получение пользователя для атомарных операций ---
 async def get_user_for_update(session: AsyncSession, user_id: int) -> User:
     """
@@ -19,7 +18,6 @@ async def get_user_for_update(session: AsyncSession, user_id: int) -> User:
         select(User).where(User.id == user_id).with_for_update()
     )
     return result.scalar_one()
-
 
 async def get_user(session: AsyncSession, telegram_id: int):
     result = await session.execute(select(User).where(User.telegram_id == telegram_id))
@@ -67,6 +65,16 @@ async def update_energy_and_time(
     energy: int,
     time: datetime
 ):
+    # нормализуем к naive UTC, чтобы не смешивать aware/naive
+    def _as_naive_utc(dt: Optional[datetime]) -> Optional[datetime]:
+        if dt is None:
+            return None
+        if dt.tzinfo is None:
+            return dt
+        return dt.astimezone(timezone.utc).replace(tzinfo=None)
+
+    time = _as_naive_utc(time)
+
     result = await session.execute(
         select(User).where(User.telegram_id == telegram_id)
     )
@@ -88,7 +96,6 @@ async def get_leaderboard(session: AsyncSession, limit: int = 50):
     )
     return result.scalars().all()
 
-
 async def complete_task(session: AsyncSession, user: User, task_id: str, reward: int = 50):
     if task_id in user.completed_tasks:
         return False
@@ -106,7 +113,6 @@ async def daily_checkin(session: AsyncSession, user: User, now: datetime, reward
     await session.commit()
     await session.refresh(user)
     return user
-
 
 async def mark_joined_group(session: AsyncSession, user: User, reward: int = 50):
     if user.joined_group:
@@ -156,7 +162,6 @@ async def assign_or_get_daily_task(session: AsyncSession, user: User):
         "daily_completed": False,
     }
 
-
 async def increment_tournament_clicks(session: AsyncSession, telegram_id: int, amount: int):
     result = await session.execute(select(User).where(User.telegram_id == telegram_id))
     user = result.scalar_one_or_none()
@@ -165,8 +170,6 @@ async def increment_tournament_clicks(session: AsyncSession, telegram_id: int, a
         user.tournament_clicks = (user.tournament_clicks or 0) + amount
         session.add(user)
         await session.commit()
-
-
 
 # 2. Получение топа по лиге
 async def get_tournament_leaderboard(session: AsyncSession, league: str):
@@ -186,7 +189,6 @@ async def get_tournament_leaderboard(session: AsyncSession, league: str):
         .limit(10)
     )
     return result.scalars().all()
-
 
 # 3. Получение информации пользователя в турнире
 async def get_user_tournament_info(session: AsyncSession, telegram_id: int):
@@ -228,7 +230,6 @@ async def get_user_tournament_info(session: AsyncSession, telegram_id: int):
         "clicks": user.tournament_clicks
     }
 
-
 # 4. Сброс всех турнирных кликов (раз в неделю)
 async def reset_tournament_data(session: AsyncSession):
     await session.execute(
@@ -236,7 +237,6 @@ async def reset_tournament_data(session: AsyncSession):
         .values(tournament_clicks=0, tournament_updated_at=datetime.utcnow())
     )
     await session.commit()
-
 
 async def increment_total_spent(session: AsyncSession, amount: int):
     result = await session.execute(select(AppStats).where(AppStats.id == 1))
@@ -250,17 +250,22 @@ async def increment_total_spent(session: AsyncSession, amount: int):
     stats.total_spent += amount
     await session.commit()
 
-
-
 async def get_total_spent(session: AsyncSession) -> int:
     result = await session.execute(select(AppStats.total_spent).where(AppStats.id == 1))
     value = result.scalar()
     return value or 0
 
-
 # =========================
 # НОВОЕ: ЛОГИКА ДЛЯ БАТЧ-КЛИКОВ
 # =========================
+
+# --- НОВОЕ: унификация времени к naive UTC ---
+def _as_naive_utc(dt: Optional[datetime]) -> Optional[datetime]:
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        return dt
+    return dt.astimezone(timezone.utc).replace(tzinfo=None)
 
 def _get_last_energy_update(user: User) -> Optional[datetime]:
     # Совместимость с разными именами поля в модели
@@ -269,6 +274,7 @@ def _get_last_energy_update(user: User) -> Optional[datetime]:
     return getattr(user, "last_energy_update", None)
 
 def _set_last_energy_update(user: User, value: datetime) -> None:
+    value = _as_naive_utc(value)  # всегда сохраняем naive UTC
     if hasattr(user, "lastEnergyUpdate"):
         user.lastEnergyUpdate = value
     else:
@@ -277,23 +283,26 @@ def _set_last_energy_update(user: User, value: datetime) -> None:
 def recover_energy_inplace(user: User, now_utc: datetime) -> None:
     """
     Восстановление энергии “на лету” (8 часов до полного восстановления).
-    Ключевой момент: обновляем таймштамп даже при достигнутом MAX,
-    чтобы не было скачка до фула через несколько секунд.
+    Все расчёты ведём в naive UTC, чтобы не смешивать aware/naive.
     """
     max_energy = user.max_energy or 100
     if max_energy <= 0:
         max_energy = 100
 
+    now_naive = _as_naive_utc(now_utc) or datetime.utcnow()
+
     last = _get_last_energy_update(user)
     if last is None:
-        _set_last_energy_update(user, now_utc)
+        _set_last_energy_update(user, now_naive)
         return
+
+    last_naive = _as_naive_utc(last) or datetime.utcnow()
 
     # Интервал восстановления одной единицы
     total_recovery_minutes = 480  # 8 часов
     interval_sec = (total_recovery_minutes * 60) / max(1, max_energy)
 
-    delta_sec = (now_utc - last).total_seconds()
+    delta_sec = (now_naive - last_naive).total_seconds()
     if delta_sec < 1:
         return
 
@@ -305,15 +314,14 @@ def recover_energy_inplace(user: User, now_utc: datetime) -> None:
     user.energy = min(max_energy, before + units)
 
     used_sec = units * interval_sec
-    new_last = last + timedelta(seconds=used_sec)
+    new_last = last_naive + timedelta(seconds=used_sec)
 
     # Если дошли до максимума — синхронизируем таймштамп с текущим временем,
     # чтобы не накапливался “долг” восстановления
     if before < max_energy and user.energy == max_energy:
-        _set_last_energy_update(user, now_utc)
+        _set_last_energy_update(user, now_naive)
     else:
         _set_last_energy_update(user, new_last)
-
 
 async def apply_clicks_flush(
     session: AsyncSession,
@@ -327,8 +335,11 @@ async def apply_clicks_flush(
     Вызывай внутри открытой транзакции и после get_user_for_update().
     Возвращает словарь для ответа API.
     """
+    # работаем с naive UTC, чтобы избежать TypeError (aware vs naive)
     if now_utc is None:
-        now_utc = datetime.now(timezone.utc)
+        now_utc = datetime.utcnow()
+    else:
+        now_utc = _as_naive_utc(now_utc) or datetime.utcnow()
 
     # 1) Восстанавливаем энергию “на лету”
     recover_energy_inplace(user, now_utc)
@@ -347,10 +358,6 @@ async def apply_clicks_flush(
             "server_seq": last_seq,
         }
 
-    # Разрешаем «скачки» последовательности (пропуски), просто логируем при необходимости
-    # logging.getLogger(__name__).warning("seq jump: user_id=%s last=%s new=%s",
-    #                                     getattr(user, "id", None), last_seq, client_seq)
-
     # 3) Сколько реально можем принять по энергии
     available = max(0, int(user.energy or 0))
     accepted = max(0, min(int(delta_clicks), available))
@@ -364,7 +371,7 @@ async def apply_clicks_flush(
         user.energy = available - accepted
         user.total_xp = int(user.total_xp or 0) + gained_xp
         user.daily_progress = int(user.daily_progress or 0) + accepted
-        # Важно: фиксируем момент траты энергии
+        # Важно: фиксируем момент траты энергии (naive UTC)
         _set_last_energy_update(user, now_utc)
 
     # Фиксируем последний принятый seq даже если accepted == 0
@@ -380,4 +387,5 @@ async def apply_clicks_flush(
         "daily_progress": int(user.daily_progress or 0),
         "server_seq": int(getattr(user, "last_client_seq", 0) or 0),
     }
+
 
