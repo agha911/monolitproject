@@ -1,6 +1,6 @@
 // frontend/src/hooks/useClickBuffer.ts
 import { useEffect, useRef, useState } from "react";
-import API_BASE_URL from "../config";
+import API_BASE_URL from '../components/config';
 
 export type FlushResponse = {
   accepted_clicks: number;
