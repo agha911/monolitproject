@@ -330,41 +330,44 @@ async def apply_clicks_flush(
     if now_utc is None:
         now_utc = datetime.now(timezone.utc)
 
-    # 1) Сначала восстановим энергию “на лету”
+    # 1) Восстанавливаем энергию “на лету”
     recover_energy_inplace(user, now_utc)
 
-    # 2) Идемпотентность по последнему принятому seq
-    last_seq = getattr(user, "last_client_seq", 0) or 0
+    # 2) Идемпотентность по последнему принятому seq (мягкая)
+    last_seq = int(getattr(user, "last_client_seq", 0) or 0)
+    client_seq = int(client_seq)
+
     if client_seq <= last_seq:
-        # Повтор ранее принятого пакета — ничего не изменяем
+        # Дубликат/старый пакет — ничего не меняем
         return {
             "accepted_clicks": 0,
-            "energy": user.energy or 0,
-            "total_xp": user.total_xp or 0,
-            "daily_progress": user.daily_progress or 0,
+            "energy": int(user.energy or 0),
+            "total_xp": int(user.total_xp or 0),
+            "daily_progress": int(user.daily_progress or 0),
             "server_seq": last_seq,
         }
-    if client_seq != last_seq + 1:
-        # Нарушение порядка — пусть роутер вернёт 409
-        raise ValueError("out_of_order_sequence")
+
+    # Разрешаем «скачки» последовательности (пропуски), просто логируем при необходимости
+    # logging.getLogger(__name__).warning("seq jump: user_id=%s last=%s new=%s",
+    #                                     getattr(user, "id", None), last_seq, client_seq)
 
     # 3) Сколько реально можем принять по энергии
-    available = max(0, user.energy or 0)
-    accepted = min(delta_clicks, available)
+    available = max(0, int(user.energy or 0))
+    accepted = max(0, min(int(delta_clicks), available))
 
-    # Учитываем бустер, если он есть в модели (как на фронте: (level or 0) + 1)
-    click_boost_level = getattr(user, "click_boost_level", 0) or 0
+    # Бустер (как на фронте): (level or 0) + 1
+    click_boost_level = int(getattr(user, "click_boost_level", 0) or 0)
     boost = click_boost_level + 1
     gained_xp = accepted * boost
 
     if accepted > 0:
         user.energy = available - accepted
-        user.total_xp = (user.total_xp or 0) + gained_xp
-        user.daily_progress = (user.daily_progress or 0) + accepted
-        # Если считаешь турнир по кликам — раскомментируй:
-        # user.tournament_clicks = (user.tournament_clicks or 0) + accepted
+        user.total_xp = int(user.total_xp or 0) + gained_xp
+        user.daily_progress = int(user.daily_progress or 0) + accepted
+        # Важно: фиксируем момент траты энергии
+        _set_last_energy_update(user, now_utc)
 
-    # Фиксируем последний принятый seq
+    # Фиксируем последний принятый seq даже если accepted == 0
     setattr(user, "last_client_seq", client_seq)
 
     session.add(user)
@@ -372,9 +375,9 @@ async def apply_clicks_flush(
 
     return {
         "accepted_clicks": accepted,
-        "energy": user.energy or 0,
-        "total_xp": user.total_xp or 0,
-        "daily_progress": user.daily_progress or 0,
-        "server_seq": getattr(user, "last_client_seq", 0) or 0,
+        "energy": int(user.energy or 0),
+        "total_xp": int(user.total_xp or 0),
+        "daily_progress": int(user.daily_progress or 0),
+        "server_seq": int(getattr(user, "last_client_seq", 0) or 0),
     }
 
