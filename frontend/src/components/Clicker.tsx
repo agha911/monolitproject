@@ -26,8 +26,8 @@ const Clicker: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [clickBoost, setClickBoost] = useState(1);
   const [floatingTexts, setFloatingTexts] = useState<FloatingText[]>([]);
-  const [serverSeq, setServerSeq] = useState<number | null>(null); // seq с бэка
-  const [seqReady, setSeqReady] = useState(false);                 // gating для флаша
+  const [serverSeq, setServerSeq] = useState<number | null>(null);
+  const [seqReady, setSeqReady] = useState(false);
 
   useEffect(() => {
     WebApp.ready();
@@ -74,12 +74,11 @@ const Clicker: React.FC = () => {
         setMaxEnergy(data.max_energy ?? 1000);
         setClickBoost((data.click_boost_level ?? 0) + 1);
 
-        // подтягиваем last_client_seq
         const s = Number(data.last_client_seq ?? 0);
         setServerSeq(s);
         try { localStorage.setItem(seqStorageKey, String(s)); } catch {}
 
-        setSeqReady(true);   // включаем автофлаш только после sync seq
+        setSeqReady(true);
         setLoading(false);
       } catch (error) {
         console.error('Ошибка инициализации пользователя:', error);
@@ -121,33 +120,27 @@ const Clicker: React.FC = () => {
     return () => clearInterval(interval);
   }, [telegramUser, energy, maxEnergy, serverSeq, seqStorageKey]);
 
-  // ==== ТАЙМЕР ДО ПОЛНОГО ВОССТАНОВЛЕНИЯ ====
+  // таймер до полного восстановления
   useEffect(() => {
     const interval = setInterval(() => {
       if (!lastEnergyUpdate || energy >= maxEnergy) {
         setTimeToFullEnergy(null);
         return;
       }
-
       const now = new Date();
       const msPassed = now.getTime() - lastEnergyUpdate.getTime();
-
-      const totalRecoveryMinutes = 480; // 8 часов
+      const totalRecoveryMinutes = 480;
       const intervalMsPerUnit = (totalRecoveryMinutes / maxEnergy) * 60 * 1000;
-
       const remainingUnits = maxEnergy - energy;
       const msToNextUnit = intervalMsPerUnit - (msPassed % intervalMsPerUnit);
       const msToFull = (remainingUnits - 1) * intervalMsPerUnit + msToNextUnit;
-
       const totalSeconds = Math.max(0, Math.ceil(msToFull / 1000));
       const hours = Math.floor(totalSeconds / 3600);
       const minutes = Math.floor((totalSeconds % 3600) / 60);
       const seconds = totalSeconds % 60;
-
       const hh = hours.toString().padStart(2, '0');
       const mm = minutes.toString().padStart(2, '0');
       const ss = seconds.toString().padStart(2, '0');
-
       setTimeToFullEnergy(`${hh}:${mm}:${ss}`);
     }, 1000);
 
@@ -194,14 +187,16 @@ const Clicker: React.FC = () => {
     threshold: 20,
     initialSeq: Math.max(serverSeq ?? 0, initialLocalSeq),
     maxBatch: 50,
-    enabled: seqReady,                // ✅ было seqReady (как имя), должно быть enabled
+    enabled: seqReady,
   });
 
   const handleMultiClick = (x: number, y: number) => {
     if (!telegramUser || loading || energy <= 0) return;
 
-    // локальный UI-эффект
     const spend = Math.min(clickBoost, energy);
+    if (spend <= 0) return;
+
+    // локальный UI
     setTotalXp((prev) => prev + spend);
     setEnergy((prev) => Math.max(0, prev - spend));
 
@@ -211,8 +206,7 @@ const Clicker: React.FC = () => {
       setFloatingTexts((prev) => prev.filter((t) => t.id !== id));
     }, 1000);
 
-    // в буфер добавляем столько же «сырых» кликов, сколько потратили энергии
-    // (ежедневка считает «accepted_clicks», не буст)
+    // для ежедневки учитываем «сырые» клики
     addClicks(spend);
   };
 
@@ -277,6 +271,7 @@ const Clicker: React.FC = () => {
 };
 
 export default Clicker;
+
 
 
 
