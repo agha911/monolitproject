@@ -1,3 +1,4 @@
+// frontend/src/components/Clicker.tsx
 import React, { useState, useEffect, useMemo } from 'react';
 import WebApp from '@twa-dev/sdk';
 import { useTranslation } from 'react-i18next';
@@ -195,11 +196,10 @@ const Clicker: React.FC = () => {
   const handleMultiClick = (x: number, y: number) => {
     if (!telegramUser || loading || energy <= 0) return;
 
-    // одна «сырая» единица = 1 очко, но кликаем по boost-значению
+    // «сырые» клики = расход энергии = размер прироста монет
     const spend = Math.min(clickBoost, energy);
     if (spend <= 0) return;
 
-    // локальный UI
     setTotalXp((prev) => prev + spend);
     setEnergy((prev) => Math.max(0, prev - spend));
 
@@ -209,8 +209,7 @@ const Clicker: React.FC = () => {
       setFloatingTexts((prev) => prev.filter((t) => t.id !== id));
     }, 1000);
 
-    // отправляем «сырые» клики (ровно сколько потратили энергии)
-    addClicks(spend);
+    addClicks(spend); // отправляем «сырые» клики
   };
 
   const energyProgress = Math.min((energy / maxEnergy) * 100, 100);
@@ -274,6 +273,7 @@ const Clicker: React.FC = () => {
 };
 
 export default Clicker;
+
 
 
 
