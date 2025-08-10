@@ -13,12 +13,13 @@ export type FlushResponse = {
 };
 
 type Options = {
-  initData: string;               // Telegram init_data (строка из WebApp)
+  initData: string;               // Telegram init_data
   sessionId: string;
   onReconcile: (r: FlushResponse) => void; // применяем авторитетные значения от сервера
   flushEveryMs?: number;          // интервал авто-флаша
   threshold?: number;             // порог кликов для немедленного флаша
   initialSeq?: number;            // если хранишь seq в localStorage
+  maxBatch?: number;              // лимит кликов в одном флаше (держи = MAX_DELTA_PER_FLUSH на бэке)
 };
 
 export function useClickBuffer({
@@ -28,6 +29,7 @@ export function useClickBuffer({
   flushEveryMs = 250,
   threshold = 20,
   initialSeq = 0,
+  maxBatch = 50, // ⚠️ подстрой под бэкендовый MAX_DELTA_PER_FLUSH
 }: Options) {
   const [buffered, setBuffered] = useState(0);
 
@@ -48,7 +50,7 @@ export function useClickBuffer({
       headers: { "Content-Type": "application/json" },
       credentials: "include",
       body: JSON.stringify({
-        init_data: initData,        // ✅ соответствует ClicksFlushIn
+        init_data: initData,
         delta_clicks: amount,
         client_seq: seq,            // ≥ 1
         session_id: sessionId,
@@ -67,7 +69,7 @@ export function useClickBuffer({
       if (buffered <= 0) return;
       currentBatch.current = {
         seq: seqRef.current + 1,
-        amount: buffered,
+        amount: Math.max(1, Math.min(buffered, maxBatch)), // <= лимита бэка
       };
     }
 
@@ -119,9 +121,10 @@ export function useClickBuffer({
   useEffect(() => {
     const handler = () => {
       if (buffered <= 0) return;
+      const beaconAmount = Math.max(1, Math.min(buffered, maxBatch)); // тоже уважаем лимит
       const beacon = {
         init_data: initData,
-        delta_clicks: buffered,
+        delta_clicks: beaconAmount,
         client_seq: seqRef.current + 1,
         session_id: sessionId,
       };
@@ -146,10 +149,9 @@ export function useClickBuffer({
       window.removeEventListener("beforeunload", handler);
       document.removeEventListener("visibilitychange", visibilityHandler);
     };
-  }, [buffered, initData, sessionId]);
+  }, [buffered, initData, sessionId, maxBatch]);
 
   const forceFlush = () => flush();
 
   return { addClicks, forceFlush, buffered, lastSeq: seqRef.current };
 }
-
