@@ -1,15 +1,14 @@
 from fastapi import FastAPI, Depends, HTTPException, Body
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
-from fastapi import Request
-import logging
+from fastapi.responses import JSONResponse  # если не нужен — можно убрать
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text, func
 from datetime import datetime, timedelta, timezone
 import requests
+from pydantic import BaseModel, Field
 from typing import Optional
-import os
+import os, sys, time, logging
+
 from app.database import get_async_session
 from app.crud import user as crud_user
 from app.routers import task, shop, invites, tournament, stats
@@ -18,17 +17,61 @@ from app.models.user import User
 from app.utils import parse_telegram_user_id
 from app.core.referral_cache import referral_cache
 from app.bot_instance import bot
-import threading
 from app.config import TELEGRAM_BOT_TOKEN
-import time
 from telebot.apihelper import ApiTelegramException
 from app.notifications.notify_energy import notify_max_energy_users
 import asyncio
 from telebot import types
 from app.notifications.reset_energy_notified import reset_energy_flags
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo
-import concurrent.futures
-from pydantic import BaseModel, Field
+
+# ---------------- logging setup ----------------
+
+def setup_app_logging(level: str = None):
+    level = (level or os.getenv("APP_LOG_LEVEL") or "INFO").upper()
+    lvl = getattr(logging, level, logging.INFO)
+
+    class UTCFormatter(logging.Formatter):
+        converter = time.gmtime  # UTC timestamps
+
+    fmt = "%(asctime)s %(levelname)s %(name)s | %(message)s"
+    datefmt = "%Y-%m-%d %H:%M:%S"
+
+    handler = logging.StreamHandler(sys.stdout)
+    handler.setLevel(lvl)
+    handler.setFormatter(UTCFormatter(fmt=fmt, datefmt=datefmt))
+
+    # root — сдержанно
+    root = logging.getLogger()
+    root.handlers.clear()
+    root.setLevel(logging.WARNING)
+    root.addHandler(handler)
+
+    # наш namespace — говорливее
+    app_logger = logging.getLogger("app")
+    app_logger.setLevel(lvl)
+    app_logger.propagate = False
+    app_logger.handlers.clear()
+    app_logger.addHandler(handler)  # ВАЖНО: свой хендлер, иначе ничего не видно
+
+    # дочерние — поднимаются к "app"
+    for name in ("app.api", "app.clicks", "app.energy", "app.tournament",
+                 "app.daily", "app.users", "app.stats"):
+        lg = logging.getLogger(name)
+        lg.setLevel(lvl)
+        lg.propagate = True
+        lg.handlers.clear()
+
+    # приглушим SQLAlchemy шум
+    logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)
+    logging.getLogger("sqlalchemy.pool").setLevel(logging.WARNING)
+
+# применяем сразу при импорте
+setup_app_logging()
+
+api_log = logging.getLogger("app.api")
+
+# ---------------- constants ----------------
 
 ENERGY_RECOVERY_TOTAL_MINUTES = 480
 ENERGY_REFILL_DAILY_LIMIT = 2
@@ -36,8 +79,10 @@ MAX_ENERGY = 1000
 DAILY_REWARDS = [10000, 20000, 30000, 40000, 50000, 60000, 70000]
 MAX_DELTA_PER_FLUSH = 50
 
+# ---------------- app + CORS ----------------
+
 app = FastAPI()
-print("[APP] Using DATABASE_URL:", os.getenv("DATABASE_URL"))
+api_log.info("APP start | DATABASE_URL=%s", os.getenv("DATABASE_URL"))
 
 app.add_middleware(
     CORSMiddleware,
@@ -47,46 +92,67 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-def get_user_info_from_bot_api(user_id):
+# ---------------- helpers ----------------
+
+def get_user_info_from_bot_api(user_id: int) -> dict:
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/getChat"
     params = {"chat_id": user_id}
     try:
-        response = requests.get(url, params=params)
-        data = response.json()
+        resp = requests.get(url, params=params, timeout=10)
+        data = resp.json()
         if data.get("ok"):
-            result = data["result"]
+            r = data["result"]
             return {
-                "first_name": result.get("first_name", ""),
-                "last_name": result.get("last_name", ""),
-                "username": result.get("username", ""),
+                "first_name": r.get("first_name", ""),
+                "last_name": r.get("last_name", ""),
+                "username": r.get("username", ""),
             }
     except Exception as e:
-        print(f"[GETCHAT ERROR] {e}")
+        api_log.warning("GETCHAT error | user_id=%s err=%s", user_id, e)
     return {}
+
+# ---------------- bot handlers ----------------
 
 @bot.message_handler(commands=["start"])
 async def handle_start(message: types.Message):
     user_telegram_id = str(message.from_user.id)
-    parts = message.text.split()
+    parts = (message.text or "").split()
     if len(parts) > 1 and parts[1].isdigit():
         inviter_telegram_id = str(int(parts[1]))
         referral_cache[user_telegram_id] = inviter_telegram_id
-        print(f"[REF-CACHE] {user_telegram_id} invited by {inviter_telegram_id}")
+        api_log.info("REF-CACHE set | user=%s invited_by=%s", user_telegram_id, inviter_telegram_id)
 
     info = get_user_info_from_bot_api(int(user_telegram_id))
-    print(f"[USER INFO] {info}")
+    api_log.info("USER INFO | %s", info)
 
     markup = InlineKeyboardMarkup()
     markup.add(InlineKeyboardButton("🚀 Başla", web_app=WebAppInfo(url="https://monolitproject-5g7v.vercel.app/")))
 
     await bot.send_message(
         chat_id=message.chat.id,
-        text=(
-            "👋 Salam! Gappick-ə xoş gəlmisən!\n\n"
-            "Oyuna başlamaq üçün aşağıdakı düyməni kliklə."
-        ),
+        text=("👋 Salam! Gappick-ə xoş gəlmisən!\n\n"
+              "Oyuna başlamaq üçün aşağıdakı düyməni kliklə."),
         reply_markup=markup
     )
+
+# ---------------- API models ----------------
+
+class ClicksFlushIn(BaseModel):
+    init_data: str
+    delta_clicks: int = Field(ge=1, le=MAX_DELTA_PER_FLUSH)
+    client_seq: int = Field(ge=1)
+    session_id: str
+
+class ClicksFlushOut(BaseModel):
+    status: str
+    accepted_clicks: int
+    energy: int
+    total_xp: int
+    daily_progress: int
+    server_seq: int
+    task_completed: bool
+
+# ---------------- routes ----------------
 
 @app.post("/api/user/register")
 async def register_user(
@@ -103,27 +169,22 @@ async def register_user(
     result = await session.execute(select(User).where(User.telegram_id == telegram_id))
     user = result.scalar_one_or_none()
 
-    info = get_user_info_from_bot_api(telegram_id)  # всегда обновляем info
+    info = get_user_info_from_bot_api(telegram_id)
     inviter_id_str = referral_cache.get(telegram_id_str)
     inviter = None
 
     if user:
-        # 🔄 Обновим username/first_name/last_name если они отсутствуют
         updated = False
         if not user.username and info.get("username"):
-            user.username = info["username"]
-            updated = True
+            user.username = info["username"]; updated = True
         if not user.first_name and info.get("first_name"):
-            user.first_name = info["first_name"]
-            updated = True
+            user.first_name = info["first_name"]; updated = True
         if not user.last_name and info.get("last_name"):
-            user.last_name = info["last_name"]
-            updated = True
+            user.last_name = info["last_name"]; updated = True
         if updated:
             session.add(user)
             await session.commit()
 
-        # 👇 старая логика
         if inviter_id_str and user.invited_by is None:
             inviter_id = int(inviter_id_str)
             inviter_result = await session.execute(select(User).where(User.telegram_id == inviter_id))
@@ -138,7 +199,6 @@ async def register_user(
 
         return {"status": "already_registered"}
 
-    # 👇 регистрация нового пользователя
     if inviter_id_str:
         inviter_id = int(inviter_id_str)
         inviter_result = await session.execute(select(User).where(User.telegram_id == inviter_id))
@@ -160,7 +220,6 @@ async def register_user(
     await session.commit()
 
     return {"status": "ok"}
-
 
 @app.post("/api/game/progress")
 async def get_progress(data: dict = Body(...), session: AsyncSession = Depends(get_async_session)):
@@ -191,23 +250,15 @@ async def get_progress(data: dict = Body(...), session: AsyncSession = Depends(g
         if energy_to_restore > 0 and user.energy < max_energy:
             new_energy = min(max_energy, user.energy + energy_to_restore)
             updated_minutes = recovery_interval * (new_energy - user.energy)
-
-            # если дошли до максимума — прижимаем метку к now,
-            # иначе сдвигаем на ровно "восстановленные" минуты
-            if new_energy == max_energy:
-                new_last_update = now
-            else:
-                new_last_update = last_update + timedelta(minutes=updated_minutes)
+            new_last_update = now if new_energy == max_energy else last_update + timedelta(minutes=updated_minutes)
         else:
             new_energy = user.energy
-            new_last_update = last_update      # 👈 НЕ трогаем метку, если прироста нет
+            new_last_update = last_update
     else:
         new_energy = user.energy
         new_last_update = now
 
     await crud_user.update_energy_and_time(session, telegram_id, new_energy, new_last_update)
-    user.energy = new_energy
-    user.lastEnergyUpdate = new_last_update
 
     if user.last_energy_refill and user.last_energy_refill.date() != now.date():
         user.energy_refill_count = 0
@@ -215,6 +266,9 @@ async def get_progress(data: dict = Body(...), session: AsyncSession = Depends(g
         await session.commit()
 
     energy_refills_left = max(0, ENERGY_REFILL_DAILY_LIMIT - (user.energy_refill_count or 0))
+
+    # читаем заново авторитетные значения
+    user = await crud_user.get_user(session, telegram_id)
 
     return {
         "energy": user.energy,
@@ -228,105 +282,22 @@ async def get_progress(data: dict = Body(...), session: AsyncSession = Depends(g
         "last_client_seq": user.last_client_seq or 0,
     }
 
-
-
-
-# @app.post("/api/game/save_progress")
-# async def save_progress(data: dict = Body(...), session: AsyncSession = Depends(get_async_session)):
-#     try:
-#         telegram_id = parse_telegram_user_id(data["init_data"])
-#         await crud_user.update_progress(
-#             session=session,
-#             telegram_id=telegram_id,
-#             energy=data["energy"],
-#             total_xp=data.get("total_xp", 0),
-#         )
-#         print(f"[SAVED] {telegram_id} → ENERGY: {data['energy']}")
-#         return {"status": "saved"}
-#     except Exception as e:
-#         return {"status": "error", "message": str(e)}
-
-# from math import ceil
-
-# @app.post("/api/game/click")
-# async def click(data: dict = Body(...), session: AsyncSession = Depends(get_async_session)):
-#     try:
-#         telegram_id = parse_telegram_user_id(data["init_data"])
-#         user = await crud_user.get_user(session, telegram_id)
-
-#         if user:
-#             click_value = (user.click_boost_level or 0) + 1
-
-#             # Обновляем опыт и энергию
-#             await crud_user.update_progress(
-#                 session=session,
-#                 telegram_id=telegram_id,
-#                 energy=user.energy,
-#                 total_xp=user.total_xp + click_value
-#             )
-
-#             # Обновляем прогресс задания
-#             if not user.daily_completed:
-#                 user.daily_progress += click_value
-#                 if user.daily_progress >= user.daily_target:
-#                     user.daily_progress = user.daily_target
-#                     user.daily_completed = True
-
-#                 await session.commit()
-#                 await session.refresh(user)
-
-#             # Проверяем, попадает ли сейчас в период турнира
-#             now = datetime.utcnow() + timedelta(hours=4)  # UTC+4
-#             if now.weekday() in range(6):  # ПН (0) — СБ (5)
-#                 await crud_user.increment_tournament_clicks(session, user.telegram_id, amount=click_value)
-
-#         return {"status": "clicked", "task_completed": user.daily_completed}
-
-#     except Exception as e:
-#         return {"status": "error", "message": str(e)}
-@app.exception_handler(RequestValidationError)
-async def validation_exception_handler(request: Request, exc: RequestValidationError):
-    logging.error("422 on %s: %s", request.url, exc.errors())
-    return JSONResponse(status_code=422, content={"detail": exc.errors()})
-
-
-
-class ClicksFlushIn(BaseModel):
-    init_data: str
-    delta_clicks: int = Field(ge=1, le=MAX_DELTA_PER_FLUSH)
-    client_seq: int = Field(ge=1)
-    session_id: str
-
-class ClicksFlushOut(BaseModel):
-    status: str
-    accepted_clicks: int
-    energy: int
-    total_xp: int
-    daily_progress: int
-    server_seq: int
-    task_completed: bool
-
 @app.post("/api/game/clicks/flush", response_model=ClicksFlushOut)
 async def clicks_flush(
     payload: ClicksFlushIn = Body(...),
     session: AsyncSession = Depends(get_async_session),
 ):
-    logger = logging.getLogger(__name__)
     try:
         telegram_id = parse_telegram_user_id(payload.init_data)
         now_utc = datetime.now(timezone.utc)
 
-        # всё внутри одной транзакции — без предварительных SELECT снаружи
         async with session.begin():
-            # 1) находим пользователя и сразу используем ту же транзакцию
             user = await crud_user.get_user(session, telegram_id)
             if not user:
                 raise HTTPException(status_code=404, detail="User not found")
 
-            # 2) блокируем строку
             db_user = await crud_user.get_user_for_update(session, user.id)
 
-            # 3) применяем пакет кликов (внутри корректное восстановление энергии)
             result = await crud_user.apply_clicks_flush(
                 session=session,
                 user=db_user,
@@ -335,20 +306,18 @@ async def clicks_flush(
                 now_utc=now_utc,
             )
 
-            # 4) ежедневная задача
             if not (db_user.daily_completed or False):
                 if (db_user.daily_progress or 0) >= (db_user.daily_target or 0) > 0:
                     db_user.daily_progress = db_user.daily_target
                     db_user.daily_completed = True
 
-            # 5) турнир ПН–СБ (UTC+4)
+            # Турнир ПН–СБ (UTC+4)
             now_az = datetime.utcnow() + timedelta(hours=4)
             if now_az.weekday() in range(6) and result["accepted_clicks"] > 0:
                 db_user.tournament_clicks = (db_user.tournament_clicks or 0) + result["accepted_clicks"]
 
             await session.flush()
 
-            # 6) собираем авторитетное состояние для ответа
             user_id = db_user.id
             task_completed = bool(db_user.daily_completed)
             energy = db_user.energy or 0
@@ -358,8 +327,8 @@ async def clicks_flush(
             accepted_clicks = int(result["accepted_clicks"])
 
         status = "ok" if accepted_clicks > 0 else "noop"
-        logger.info(
-            "FLUSH %s: user_id=%s tg=%s delta=%s accepted=%s seq=%s energy=%s xp=%s",
+        api_log.info(
+            "FLUSH %s | user_id=%s tg=%s delta=%s accepted=%s seq=%s energy=%s xp=%s",
             status, user_id, telegram_id, payload.delta_clicks, accepted_clicks, server_seq, energy, total_xp
         )
 
@@ -387,9 +356,6 @@ async def clicks_flush(
             task_completed=False,
         )
 
-
-
-
 @app.post("/api/daily/claim_reward")
 async def claim_daily_reward(data: dict = Body(...), session: AsyncSession = Depends(get_async_session)):
     try:
@@ -398,45 +364,30 @@ async def claim_daily_reward(data: dict = Body(...), session: AsyncSession = Dep
 
         if not user:
             raise HTTPException(status_code=404, detail="User not found")
-
         if not user.daily_completed:
             return {"status": "not_completed"}
-
         if user.daily_reward_claimed:
             return {"status": "already_claimed"}
 
-        # 🎁 Выдаём фиксированную награду
         reward = 50000
-        user.total_xp += reward
-
-        # 🔒 Отмечаем, что награда уже получена
+        user.total_xp = (user.total_xp or 0) + reward
         user.daily_reward_claimed = True
 
         session.add(user)
         await session.commit()
         await session.refresh(user)
 
-        return {
-            "status": "reward_claimed",
-            "reward": reward,
-            "total_xp": user.total_xp
-        }
+        return {"status": "reward_claimed", "reward": reward, "total_xp": user.total_xp}
 
     except Exception as e:
         return {"status": "error", "message": str(e)}
-
-
-
 
 @app.get("/api/game/leaderboard")
 async def leaderboard(session: AsyncSession = Depends(get_async_session)):
     users = await crud_user.get_leaderboard(session)
     return [
-        {
-            "id": u.id,
-            "username": u.username or u.first_name or f"user_{u.id}",
-            "total_xp": u.total_xp
-        } for u in users
+        {"id": u.id, "username": u.username or u.first_name or f"user_{u.id}", "total_xp": u.total_xp}
+        for u in users
     ]
 
 @app.post("/api/tournament/leaderboard")
@@ -455,15 +406,8 @@ async def get_tournament_leaderboard(
     end_utc = end_of_week - utc_offset
 
     stmt = (
-        select(
-            User.invited_by,
-            func.count(User.id).label("weekly_invites")
-        )
-        .where(
-            User.invited_at >= start_utc,
-            User.invited_at <= end_utc,
-            User.invited_by.isnot(None)
-        )
+        select(User.invited_by, func.count(User.id).label("weekly_invites"))
+        .where(User.invited_at >= start_utc, User.invited_at <= end_utc, User.invited_by.isnot(None))
         .group_by(User.invited_by)
         .order_by(func.count(User.id).desc())
     )
@@ -480,23 +424,20 @@ async def get_tournament_leaderboard(
         score = row.weekly_invites
 
         user_result = await session.execute(select(User).where(User.id == user_id))
-        user = user_result.scalar_one_or_none()
-
-        if not user:
+        u = user_result.scalar_one_or_none()
+        if not u:
             continue
 
-        entry = {
+        leaderboard.append({
             "rank": idx + 1,
-            "telegram_id": user.telegram_id,
-            "username": user.username,
-            "first_name": user.first_name,
-            "last_name": user.last_name,
+            "telegram_id": u.telegram_id,
+            "username": u.username,
+            "first_name": u.first_name,
+            "last_name": u.last_name,
             "score": score,
-        }
+        })
 
-        leaderboard.append(entry)
-
-        if user.telegram_id == telegram_id:
+        if u.telegram_id == telegram_id:
             my_rank = idx + 1
             my_score = score
 
@@ -509,11 +450,7 @@ async def get_tournament_leaderboard(
                 my_score = row.weekly_invites
                 break
 
-    return {
-        "top_10": top_10,
-        "my_rank": my_rank,
-        "my_score": my_score,
-    }
+    return {"top_10": top_10, "my_rank": my_rank, "my_score": my_score}
 
 @app.get("/")
 def root():
@@ -536,22 +473,16 @@ app.include_router(invites.router)
 app.include_router(tournament.router)
 app.include_router(stats.router)
 
-#async def reset_loop():
-#    while True:
-#        try:
-#            await reset_energy_flags()
-#       except Exception as e:
-#            print(f"[RESET ERROR] {e}")
-#        await asyncio.sleep(24 * 60 * 60)
+# ---------------- background ----------------
 
 async def run_bot_polling():
-    print("[BOT] Starting polling...")
+    api_log.info("[BOT] Starting polling…")
     await bot.infinity_polling()
 
 @app.on_event("startup")
 async def start_background_tasks():
     asyncio.create_task(notify_loop())
-    #asyncio.create_task(reset_loop())
+    # asyncio.create_task(reset_loop())
     asyncio.create_task(run_bot_polling())
 
 async def notify_loop():
@@ -561,8 +492,9 @@ async def notify_loop():
             try:
                 await notify_max_energy_users()
             except Exception as e:
-                print(f"[NOTIFY ERROR] {e}")
+                api_log.warning("[NOTIFY ERROR] %s", e)
         await asyncio.sleep(3600)
+
 
 
 
