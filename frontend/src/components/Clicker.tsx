@@ -219,12 +219,14 @@ const Clicker: React.FC = () => {
     initData: WebApp.initData,
     sessionId,
     onReconcile,
-    enabled: seqReady && !!telegramUser, // флашим только когда знаем стартовый seq
+    enabled: seqReady && !!telegramUser,
     flushEveryMs: 200,
-    threshold: 50,
+    threshold: 40,
     initialSeq: Math.max(serverSeq ?? 0, initialLocalSeq),
     maxBatch: 50,
-  });
+    lockKey: userId,            // ← общий ключ для всех вкладок этого юзера
+    seqStorageKey,              // ← кросс-вкладочная синхронизация lastSeq
+});
 
   const handleMultiClick = (x: number, y: number) => {
     if (!telegramUser || loading || energy <= 0) return;
