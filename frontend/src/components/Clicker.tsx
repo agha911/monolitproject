@@ -1,4 +1,3 @@
-// frontend/src/components/Clicker.tsx
 import React, { useState, useEffect, useMemo } from "react";
 import WebApp from "@twa-dev/sdk";
 import { useTranslation } from "react-i18next";
@@ -20,8 +19,8 @@ const Clicker: React.FC = () => {
 
   const [telegramUser, setTelegramUser] = useState<WebAppUser | null>(null);
   const [totalXp, setTotalXp] = useState(0);
-  const [energy, setEnergy] = useState(100);       // старт под бэк
-  const [maxEnergy, setMaxEnergy] = useState(100); // старт под бэк
+  const [energy, setEnergy] = useState(1000);
+  const [maxEnergy, setMaxEnergy] = useState(1000);
   const [lastEnergyUpdate, setLastEnergyUpdate] = useState<Date | null>(null);
   const [timeToFullEnergy, setTimeToFullEnergy] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -38,7 +37,22 @@ const Clicker: React.FC = () => {
   }, []);
 
   const userId = telegramUser?.id ? String(telegramUser.id) : "guest";
-  const sessionId = useMemo(() => `${userId}-${Date.now()}`, [userId]);
+
+  // СТАБИЛЬНЫЙ sessionId в рамках вкладки (не меняется при ремоунтах)
+  const sessionId = useMemo(() => {
+    if (typeof window === "undefined") return `srv-${Date.now()}`;
+    const key = `gappick:sid:${userId}`;
+    let sid = sessionStorage.getItem(key);
+    if (!sid) {
+      const rnd =
+        (crypto as any)?.randomUUID?.() ||
+        Math.random().toString(36).slice(2);
+      sid = `${userId}-${rnd}`;
+      sessionStorage.setItem(key, sid);
+    }
+    return sid;
+  }, [userId]);
+
   const seqStorageKey = useMemo(() => `gappick:lastSeq:${userId}`, [userId]);
 
   const initialLocalSeq = useMemo(() => {
@@ -62,18 +76,21 @@ const Clicker: React.FC = () => {
           body: JSON.stringify({ init_data: WebApp.initData }),
         });
 
-        // первичная прогрузка
+        // прогресс + last_client_seq
         const res = await fetch(`${API_BASE_URL}/api/game/progress`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ init_data: WebApp.initData }),
         });
+
         const data = await res.json();
 
         setEnergy(data.energy);
         setTotalXp(data.total_xp ?? 0);
-        setLastEnergyUpdate(data.lastEnergyUpdate ? new Date(data.lastEnergyUpdate) : null);
-        setMaxEnergy(data.max_energy ?? 100);
+        setLastEnergyUpdate(
+          data.lastEnergyUpdate ? new Date(data.lastEnergyUpdate) : null
+        );
+        setMaxEnergy(data.max_energy ?? 1000);
         setClickBoost((data.click_boost_level ?? 0) + 1);
 
         const s = Number(data.last_client_seq ?? 0);
@@ -83,20 +100,19 @@ const Clicker: React.FC = () => {
         } catch {}
 
         setSeqReady(true);
+        setLoading(false);
       } catch (error) {
         console.error("Ошибка инициализации пользователя:", error);
         setSeqReady(false);
-      } finally {
-        setLoading(false);
       }
     };
 
-    initializeUser();
+    void initializeUser();
   }, [telegramUser, seqStorageKey]);
 
-  // автоапдейт энергии
+  // периодически подтягиваем энергию (и seq на случай внешних апдейтов)
   useEffect(() => {
-    const interval = setInterval(async () => {
+    const interval = window.setInterval(async () => {
       if (!telegramUser || energy >= maxEnergy) return;
 
       try {
@@ -108,8 +124,10 @@ const Clicker: React.FC = () => {
 
         const data = await res.json();
         setEnergy(data.energy);
-        setLastEnergyUpdate(data.lastEnergyUpdate ? new Date(data.lastEnergyUpdate) : null);
-        setMaxEnergy(data.max_energy ?? 100);
+        setLastEnergyUpdate(
+          data.lastEnergyUpdate ? new Date(data.lastEnergyUpdate) : null
+        );
+        setMaxEnergy(data.max_energy ?? 1000);
         setClickBoost((data.click_boost_level ?? 0) + 1);
 
         const s = Number(data.last_client_seq ?? 0);
@@ -123,14 +141,14 @@ const Clicker: React.FC = () => {
       } catch (err) {
         console.error("Ошибка при автообновлении энергии:", err);
       }
-    }, 10_000);
+    }, 10000);
 
-    return () => clearInterval(interval);
+    return () => window.clearInterval(interval);
   }, [telegramUser, energy, maxEnergy, serverSeq, seqStorageKey]);
 
   // таймер до полного восстановления
   useEffect(() => {
-    const interval = setInterval(() => {
+    const interval = window.setInterval(() => {
       if (!lastEnergyUpdate || energy >= maxEnergy) {
         setTimeToFullEnergy(null);
         return;
@@ -141,7 +159,8 @@ const Clicker: React.FC = () => {
       const intervalMsPerUnit = (totalRecoveryMinutes / maxEnergy) * 60 * 1000;
       const remainingUnits = maxEnergy - energy;
       const msToNextUnit = intervalMsPerUnit - (msPassed % intervalMsPerUnit);
-      const msToFull = (remainingUnits - 1) * intervalMsPerUnit + msToNextUnit;
+      const msToFull =
+        (remainingUnits - 1) * intervalMsPerUnit + msToNextUnit;
       const totalSeconds = Math.max(0, Math.ceil(msToFull / 1000));
       const hours = Math.floor(totalSeconds / 3600);
       const minutes = Math.floor((totalSeconds % 3600) / 60);
@@ -152,50 +171,47 @@ const Clicker: React.FC = () => {
       setTimeToFullEnergy(`${hh}:${mm}:${ss}`);
     }, 1000);
 
-    return () => clearInterval(interval);
+    return () => window.clearInterval(interval);
   }, [lastEnergyUpdate, energy, maxEnergy]);
 
-  // сохраняем serverSeq локально при любых обновлениях
-  useEffect(() => {
-    if (serverSeq == null) return;
-    try {
-      localStorage.setItem(seqStorageKey, String(serverSeq));
-    } catch {}
-  }, [serverSeq, seqStorageKey]);
-
   const onReconcile = async (data: FlushResponse) => {
-    // и для ok, и для noop — обновляем энергию/XP/seq с сервера
-    if (data.status === "ok" || data.status === "noop") {
+    if (data.status === "ok") {
       setEnergy(data.energy);
       setTotalXp(data.total_xp);
-      const s = Number(data.server_seq ?? 0);
-      setServerSeq(s);
+      setServerSeq(Number(data.server_seq ?? 0));
       try {
-        localStorage.setItem(seqStorageKey, String(s));
+        localStorage.setItem(
+          seqStorageKey,
+          String(Number(data.server_seq ?? 0))
+        );
       } catch {}
+    } else if (data.status === "noop") {
+      // ничего — хук сам повторит с новым seq
       return;
-    }
-
-    // error — мягкая авторит. синхронизация
-    try {
-      const res = await fetch(`${API_BASE_URL}/api/game/progress`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ init_data: WebApp.initData }),
-      });
-      const p = await res.json();
-      setEnergy(p.energy);
-      setTotalXp(p.total_xp ?? 0);
-      setLastEnergyUpdate(p.lastEnergyUpdate ? new Date(p.lastEnergyUpdate) : null);
-      setMaxEnergy(p.max_energy ?? 100);
-      setClickBoost((p.click_boost_level ?? 0) + 1);
-      const s = Number(p.last_client_seq ?? 0);
-      setServerSeq(s);
+    } else {
+      // error — авторитетно обновим состояние
       try {
-        localStorage.setItem(seqStorageKey, String(s));
-      } catch {}
-    } catch (e) {
-      console.warn("refresh after error failed", e);
+        const res = await fetch(`${API_BASE_URL}/api/game/progress`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ init_data: WebApp.initData }),
+        });
+        const p = await res.json();
+        setEnergy(p.energy);
+        setTotalXp(p.total_xp ?? 0);
+        setLastEnergyUpdate(
+          p.lastEnergyUpdate ? new Date(p.lastEnergyUpdate) : null
+        );
+        setMaxEnergy(p.max_energy ?? 1000);
+        setClickBoost((p.click_boost_level ?? 0) + 1);
+        const s = Number(p.last_client_seq ?? 0);
+        setServerSeq(s);
+        try {
+          localStorage.setItem(seqStorageKey, String(s));
+        } catch {}
+      } catch (e) {
+        console.warn("refresh after error failed", e);
+      }
     }
   };
 
@@ -203,7 +219,7 @@ const Clicker: React.FC = () => {
     initData: WebApp.initData,
     sessionId,
     onReconcile,
-    enabled: seqReady && !!telegramUser,
+    enabled: seqReady && !!telegramUser, // флашим только когда знаем стартовый seq
     flushEveryMs: 200,
     threshold: 50,
     initialSeq: Math.max(serverSeq ?? 0, initialLocalSeq),
@@ -213,7 +229,6 @@ const Clicker: React.FC = () => {
   const handleMultiClick = (x: number, y: number) => {
     if (!telegramUser || loading || energy <= 0) return;
 
-    // тратим энергию = прибавляем монеты = столько же в буфер
     const spend = Math.min(clickBoost, energy);
     if (spend <= 0) return;
 
@@ -222,7 +237,7 @@ const Clicker: React.FC = () => {
 
     const id = Date.now() + Math.random();
     setFloatingTexts((prev) => [...prev, { id, value: spend, x, y }]);
-    setTimeout(() => {
+    window.setTimeout(() => {
       setFloatingTexts((prev) => prev.filter((t) => t.id !== id));
     }, 1000);
 
@@ -290,6 +305,7 @@ const Clicker: React.FC = () => {
 };
 
 export default Clicker;
+
 
 
 
