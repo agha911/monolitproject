@@ -1,3 +1,4 @@
+// frontend/src/hooks/useClickBuffer.ts
 import { useEffect, useRef, useState } from "react";
 import API_BASE_URL from "../components/config";
 
@@ -24,6 +25,8 @@ type Options = {
   lockKey?: string;
   /** ключ localStorage для хранения lastSeq (передаёте тот, что уже есть у вас) */
   seqStorageKey?: string;
+  /** НОВОЕ: можно мгновенно заглушить отправки (например, при energy<=0) */
+  canSend?: boolean;
 };
 
 export function useClickBuffer({
@@ -37,6 +40,7 @@ export function useClickBuffer({
   enabled = true,
   lockKey,
   seqStorageKey,
+  canSend = true, // NEW
 }: Options) {
   const [buffered, setBuffered] = useState(0);
 
@@ -44,6 +48,12 @@ export function useClickBuffer({
   const seqRef = useRef<number>(initialSeq);
   const currentBatch = useRef<{ seq: number; amount: number } | null>(null);
   const retryTimer = useRef<number | null>(null);
+  const enabledRef = useRef(enabled);
+  const canSendRef = useRef(canSend);
+  const destroyedRef = useRef(false);
+
+  useEffect(() => { enabledRef.current = enabled; }, [enabled]);
+  useEffect(() => { canSendRef.current = canSend; }, [canSend]);
 
   // подтягиваем initialSeq (если вдруг на старте пришёл более свежий)
   useEffect(() => {
@@ -90,9 +100,11 @@ export function useClickBuffer({
 
   const postBatch = async (seq: number, amount: number) => {
     const safeSeq = Math.max(1, Math.floor(seq));
-    const safeAmount = Math.max(1, Math.min(Math.floor(amount), maxBatch));
+    const safeAmount = Math.min(Math.floor(amount), maxBatch);
+    if (safeAmount <= 0) {
+      throw new Error("flush blocked: empty amount");
+    }
     const rawInit = resolveInitData();
-
     if (!rawInit || !sessionId) {
       throw new Error("flush blocked: missing init_data or session_id");
     }
@@ -119,6 +131,7 @@ export function useClickBuffer({
 
   const scheduleRetry = (ms = 120) => {
     if (retryTimer.current) window.clearTimeout(retryTimer.current);
+    if (!enabledRef.current || !canSendRef.current) return;
     retryTimer.current = window.setTimeout(() => {
       void flush();
     }, ms) as unknown as number;
@@ -130,7 +143,6 @@ export function useClickBuffer({
     if (!lockKey || !locks || !locks.request) {
       return fn();
     }
-    // ifAvailable — чтобы не блокировать на долго, а просто ретраить
     return locks.request(
       `gappick:flush:${lockKey}`,
       { mode: "exclusive", ifAvailable: true },
@@ -145,14 +157,16 @@ export function useClickBuffer({
   };
 
   const flushCore = async () => {
-    if (!enabled) return;
+    if (destroyedRef.current) return;
+    if (!enabledRef.current) return;
+    if (!canSendRef.current) return;
     if (inflight.current) return;
 
     if (!currentBatch.current) {
-      if (buffered <= 0) return;
+      if (buffered <= 0) return; // не создаём батч при пустом буфере
       currentBatch.current = {
         seq: seqRef.current + 1,
-        amount: Math.max(1, Math.min(buffered, maxBatch)),
+        amount: Math.min(buffered, maxBatch), // ровно min(buffered, maxBatch)
       };
     }
 
@@ -162,78 +176,91 @@ export function useClickBuffer({
     try {
       const data = await postBatch(seq, amount);
 
+      // выравниваем seq по серверу в любом случае, если прислал
+      const srv = Number(data.server_seq ?? 0);
+      if (!Number.isNaN(srv) && srv >= seqRef.current) {
+        seqRef.current = srv;
+        saveSeq(srv);
+      }
+
       if (data.status === "ok") {
         const accepted = Math.max(0, Math.min(amount, data.accepted_clicks | 0));
+        setBuffered((v) => Math.max(0, v - accepted));
 
-        if (accepted > 0) {
-          setBuffered((v) => Math.max(0, v - accepted));
-        }
-
-        const srv = Number(data.server_seq ?? seq);
-        const nextSeq = !Number.isNaN(srv) && srv >= seqRef.current ? srv : seq;
-        seqRef.current = nextSeq;
-        saveSeq(nextSeq);
-
-        currentBatch.current = null;
         inflight.current = false;
+        currentBatch.current = null;
 
-        onReconcile(data);
+        // наружный reconcile
+        try { onReconcile(data); } catch {}
 
-        // если приняли меньше или остался буфер — шлём дальше
-        if (accepted < amount || buffered > 0) {
+        // если ещё есть буфер — продолжим
+        if (buffered > 0 && canSendRef.current) {
           scheduleRetry(0);
         }
       } else if (data.status === "noop") {
-        // выравниваемся по серверу и повторяем тот же батч
-        const srv = Number(data.server_seq ?? 0);
-        if (!Number.isNaN(srv) && srv >= seqRef.current) {
-          seqRef.current = srv;
-          saveSeq(srv);
+        // дубликат/старый — просто сбрасываем батч и пробуем заново ТОЛЬКО если есть буфер
+        inflight.current = false;
+        currentBatch.current = null;
+        if (buffered > 0 && canSendRef.current) {
+          scheduleRetry(60);
         }
-        inflight.current = false;
-        currentBatch.current = { seq: seqRef.current + 1, amount };
-        scheduleRetry(60);
       } else {
+        // ошибка со стороны сервера (но HTTP 200) — отпускаем и ретраим, если есть смысл
         inflight.current = false;
-        scheduleRetry(300);
+        currentBatch.current = null;
+        if (buffered > 0 && canSendRef.current) {
+          scheduleRetry(300);
+        }
       }
     } catch {
       inflight.current = false;
-      scheduleRetry(400);
+      currentBatch.current = null;
+      if (buffered > 0 && canSendRef.current) {
+        scheduleRetry(400);
+      }
     }
   };
 
   const flush = async () => {
-    if (!enabled) return;
+    if (!enabledRef.current) return;
+    if (!canSendRef.current) return;
     await withLock(flushCore);
   };
 
-  // периодический флешер
+  // периодический флешер — только если что-то в буфере
   useEffect(() => {
     if (!enabled) return;
     const t = window.setInterval(() => {
-      if (!inflight.current && buffered > 0) void flush();
+      if (!inflight.current && buffered > 0 && canSendRef.current) {
+        void flush();
+      }
     }, flushEveryMs);
     return () => window.clearInterval(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [flushEveryMs, buffered, enabled]);
+  }, [flushEveryMs, buffered, enabled, canSend]);
 
   // пороговый триггер
   useEffect(() => {
     if (!enabled) return;
+    if (!canSend) return;
     if (buffered >= threshold && !inflight.current && !currentBatch.current) {
       void flush();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [buffered, threshold, enabled]);
+  }, [buffered, threshold, enabled, canSend]);
 
-  // ⛔️ УБРАН sendBeacon — он часто шлёт старые seq из фоновых вкладок и ломает порядок.
-  // Если очень нужен — включайте только при владении «мастерством» и под withLock.
+  useEffect(() => {
+    return () => {
+      destroyedRef.current = true;
+      if (retryTimer.current) window.clearTimeout(retryTimer.current);
+    };
+  }, []);
 
   const forceFlush = () => { void flush(); };
 
   return { addClicks, forceFlush, buffered, lastSeq: seqRef.current };
 }
+
 
 
 
