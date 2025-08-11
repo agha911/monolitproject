@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import API_BASE_URL from "../components/config";
 
 export type FlushResponse = {
@@ -19,7 +19,11 @@ type Options = {
   threshold?: number;
   initialSeq?: number;
   maxBatch?: number;
-  enabled?: boolean; // внешнее включение/выключение
+  enabled?: boolean;
+  /** общий ключ блокировки между вкладками (передавайте userId) */
+  lockKey?: string;
+  /** ключ localStorage для хранения lastSeq (передаёте тот, что уже есть у вас) */
+  seqStorageKey?: string;
 };
 
 export function useClickBuffer({
@@ -31,44 +35,48 @@ export function useClickBuffer({
   initialSeq = 0,
   maxBatch = 50,
   enabled = true,
+  lockKey,
+  seqStorageKey,
 }: Options) {
   const [buffered, setBuffered] = useState(0);
-
-  // флаги-предохранители
-  const [isMaster, setIsMaster] = useState(true);
-  const enabledLocal = enabled && isMaster;
 
   const inflight = useRef(false);
   const seqRef = useRef<number>(initialSeq);
   const currentBatch = useRef<{ seq: number; amount: number } | null>(null);
   const retryTimer = useRef<number | null>(null);
 
-  // подхватываем initialSeq, если он вырос (после /progress)
+  // подтягиваем initialSeq (если вдруг на старте пришёл более свежий)
   useEffect(() => {
     if (typeof initialSeq === "number" && initialSeq > seqRef.current) {
       seqRef.current = initialSeq;
     }
   }, [initialSeq]);
 
-  // единый «мастер»-флашер на вкладку (страховка от двойного монтирования)
+  // кросс-вкладочная синхронизация lastSeq через localStorage
   useEffect(() => {
-    const k = "__GAPPICK_FLUSH_MASTER__";
-    if (!(window as any)[k]) {
-      (window as any)[k] = true;
-      setIsMaster(true);
-      return () => {
-        delete (window as any)[k];
-      };
-    } else {
-      setIsMaster(false);
-      return;
-    }
-  }, []);
+    if (!seqStorageKey) return;
+    const onStorage = (e: StorageEvent) => {
+      if (e.key !== seqStorageKey) return;
+      const n = Number(e.newValue ?? "0");
+      if (!Number.isNaN(n) && n > seqRef.current) {
+        seqRef.current = n;
+      }
+    };
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+  }, [seqStorageKey]);
+
+  // helper: сохраняем seq в localStorage как «истину» для других вкладок
+  const saveSeq = (n: number) => {
+    try {
+      if (seqStorageKey) localStorage.setItem(seqStorageKey, String(n));
+    } catch {}
+  };
 
   const resolveInitData = () => {
     if (initData && initData.length > 0) return initData;
     if (typeof window !== "undefined") {
-      const w = window as any;
+      const w = (window as any);
       const raw = w?.Telegram?.WebApp?.initData;
       if (raw && typeof raw === "string" && raw.length > 0) return raw;
     }
@@ -99,7 +107,6 @@ export function useClickBuffer({
     const resp = await fetch(`${API_BASE_URL}/api/game/clicks/flush`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      credentials: "include",
       body: JSON.stringify(payload),
     });
 
@@ -113,22 +120,32 @@ export function useClickBuffer({
   const scheduleRetry = (ms = 120) => {
     if (retryTimer.current) window.clearTimeout(retryTimer.current);
     retryTimer.current = window.setTimeout(() => {
-      void runWithLock(flush);
+      void flush();
     }, ms) as unknown as number;
   };
 
-  // если есть Web Locks — используем для взаимоисключения даже между вкладками
-  const runWithLock = async (fn: () => Promise<void>) => {
-    const locks = (navigator as any)?.locks;
-    if (locks?.request) {
-      await locks.request("gappick-flush", { mode: "exclusive" }, fn);
-    } else {
-      await fn();
+  // универсальный раннер с Web Locks (серилизация между вкладками)
+  const withLock = async <T,>(fn: () => Promise<T>): Promise<T | undefined> => {
+    const locks = (navigator as any).locks;
+    if (!lockKey || !locks || !locks.request) {
+      return fn();
     }
+    // ifAvailable — чтобы не блокировать на долго, а просто ретраить
+    return locks.request(
+      `gappick:flush:${lockKey}`,
+      { mode: "exclusive", ifAvailable: true },
+      async (lock: any) => {
+        if (!lock) {
+          scheduleRetry(50);
+          return undefined;
+        }
+        return fn();
+      }
+    );
   };
 
-  const flush = async () => {
-    if (!enabledLocal) return;
+  const flushCore = async () => {
+    if (!enabled) return;
     if (inflight.current) return;
 
     if (!currentBatch.current) {
@@ -153,32 +170,30 @@ export function useClickBuffer({
         }
 
         const srv = Number(data.server_seq ?? seq);
-        if (!Number.isNaN(srv) && srv >= seqRef.current) {
-          seqRef.current = srv;
-        } else {
-          seqRef.current = seq;
-        }
+        const nextSeq = !Number.isNaN(srv) && srv >= seqRef.current ? srv : seq;
+        seqRef.current = nextSeq;
+        saveSeq(nextSeq);
 
         currentBatch.current = null;
         inflight.current = false;
 
         onReconcile(data);
 
-        // если что-то осталось — отправим следующую пачку
+        // если приняли меньше или остался буфер — шлём дальше
         if (accepted < amount || buffered > 0) {
           scheduleRetry(0);
         }
       } else if (data.status === "noop") {
-        // не трогаем буфер, поднимаем seq и повторяем ту же пачку
+        // выравниваемся по серверу и повторяем тот же батч
         const srv = Number(data.server_seq ?? 0);
         if (!Number.isNaN(srv) && srv >= seqRef.current) {
           seqRef.current = srv;
+          saveSeq(srv);
         }
         inflight.current = false;
         currentBatch.current = { seq: seqRef.current + 1, amount };
-        scheduleRetry(50);
+        scheduleRetry(60);
       } else {
-        // error — мягкий ретрай
         inflight.current = false;
         scheduleRetry(300);
       }
@@ -188,73 +203,38 @@ export function useClickBuffer({
     }
   };
 
-  // периодический флаш
+  const flush = async () => {
+    if (!enabled) return;
+    await withLock(flushCore);
+  };
+
+  // периодический флешер
   useEffect(() => {
-    if (!enabledLocal) return;
+    if (!enabled) return;
     const t = window.setInterval(() => {
-      if (!inflight.current && buffered > 0) void runWithLock(flush);
+      if (!inflight.current && buffered > 0) void flush();
     }, flushEveryMs);
     return () => window.clearInterval(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [flushEveryMs, buffered, enabledLocal]);
+  }, [flushEveryMs, buffered, enabled]);
 
-  // триггер при пороге
+  // пороговый триггер
   useEffect(() => {
-    if (!enabledLocal) return;
+    if (!enabled) return;
     if (buffered >= threshold && !inflight.current && !currentBatch.current) {
-      void runWithLock(flush);
+      void flush();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [buffered, threshold, enabledLocal]);
+  }, [buffered, threshold, enabled]);
 
-  // best-effort отправка при закрытии вкладки
-  useEffect(() => {
-    if (!enabledLocal) return;
+  // ⛔️ УБРАН sendBeacon — он часто шлёт старые seq из фоновых вкладок и ломает порядок.
+  // Если очень нужен — включайте только при владении «мастерством» и под withLock.
 
-    const handler = () => {
-      if (buffered <= 0) return;
-      if (inflight.current) return;
-
-      const rawInit = resolveInitData();
-      if (!rawInit || !sessionId) return;
-
-      const amount = Math.max(1, Math.min(buffered, maxBatch));
-      const beacon = {
-        init_data: rawInit,
-        delta_clicks: amount,
-        client_seq: seqRef.current + 1,
-        session_id: sessionId,
-      };
-
-      try {
-        navigator.sendBeacon(
-          `${API_BASE_URL}/api/game/clicks/flush`,
-          new Blob([JSON.stringify(beacon)], { type: "application/json" })
-        );
-      } catch {
-        // ignore
-      }
-    };
-
-    const visibilityHandler = () => {
-      if (document.visibilityState === "hidden") handler();
-    };
-
-    window.addEventListener("beforeunload", handler);
-    document.addEventListener("visibilitychange", visibilityHandler);
-
-    return () => {
-      window.removeEventListener("beforeunload", handler);
-      document.removeEventListener("visibilitychange", visibilityHandler);
-    };
-  }, [buffered, sessionId, maxBatch, initData, enabledLocal]);
-
-  const forceFlush = () => {
-    void runWithLock(flush);
-  };
+  const forceFlush = () => { void flush(); };
 
   return { addClicks, forceFlush, buffered, lastSeq: seqRef.current };
 }
+
 
 
 
