@@ -2,7 +2,7 @@ import logging
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy import update  # для reset_tournament_data
-from typing import Optional, Dict
+from typing import Optional, Dict, Union
 from datetime import datetime, timedelta, timezone
 from app.models.user import User
 from app.models.app_stats import AppStats
@@ -408,7 +408,7 @@ async def apply_clicks_flush(
     delta_clicks: int,
     client_seq: int,
     now_utc: Optional[datetime] = None
-) -> Dict[str, int]:
+) -> Dict[str, Union[int, str]]:
     """
     Мягкий порядок + идемпотентность:
     - принимаем любой client_seq > last_client_seq;
@@ -437,14 +437,18 @@ async def apply_clicks_flush(
     )
     _log(clicks_log, "info", "clicks.flush.start", **base)
 
+    # дубликат/старый пакет — ничего не меняем
     if cur_seq <= last_seq:
-        _log(clicks_log, "info", "clicks.noop.duplicate_or_old", **base)
+        expected_next = last_seq + 1
+        _log(clicks_log, "info", "clicks.noop.duplicate_or_old", **base, expected_next_seq=expected_next)
         return {
             "accepted_clicks": 0,
             "energy": int(user.energy or 0),
             "total_xp": int(user.total_xp or 0),
             "daily_progress": int(user.daily_progress or 0),
             "server_seq": last_seq,
+            "reason": "duplicate_or_old",
+            "expected_next_seq": expected_next,
         }
 
     accepted = min(requested, available)
@@ -469,20 +473,25 @@ async def apply_clicks_flush(
              total_after=int(user.total_xp or 0),
              daily_after=int(user.daily_progress or 0),
              tournament_after=int(getattr(user, "tournament_clicks", 0) or 0))
+        reason = "ok"
     else:
         _log(clicks_log, "info", "clicks.apply.zero", **base)
+        reason = "no_energy"
 
+    # продвинем последовательность
     setattr(user, "last_client_seq", cur_seq)
     await session.flush()
 
+    server_seq = int(getattr(user, "last_client_seq", 0) or 0)
     result = {
         "accepted_clicks": int(accepted),
         "energy": int(user.energy or 0),
         "total_xp": int(user.total_xp or 0),
         "daily_progress": int(user.daily_progress or 0),
-        "server_seq": int(getattr(user, "last_client_seq", 0) or 0),
+        "server_seq": server_seq,
+        "reason": reason,
+        "expected_next_seq": server_seq + 1,
     }
     _log(clicks_log, "info", "clicks.flush.done", **{**base, **result})
     return result
-
 
