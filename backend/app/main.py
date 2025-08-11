@@ -536,13 +536,13 @@ app.include_router(invites.router)
 app.include_router(tournament.router)
 app.include_router(stats.router)
 
-async def reset_loop():
-    while True:
-        try:
-            await reset_energy_flags()
-        except Exception as e:
-            print(f"[RESET ERROR] {e}")
-        await asyncio.sleep(24 * 60 * 60)
+#async def reset_loop():
+#    while True:
+#        try:
+#            await reset_energy_flags()
+#       except Exception as e:
+#            print(f"[RESET ERROR] {e}")
+#        await asyncio.sleep(24 * 60 * 60)
 
 async def run_bot_polling():
     print("[BOT] Starting polling...")
@@ -551,7 +551,7 @@ async def run_bot_polling():
 @app.on_event("startup")
 async def start_background_tasks():
     asyncio.create_task(notify_loop())
-    asyncio.create_task(reset_loop())
+    #asyncio.create_task(reset_loop())
     asyncio.create_task(run_bot_polling())
 
 async def notify_loop():
