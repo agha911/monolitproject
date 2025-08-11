@@ -2,7 +2,7 @@ import logging
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy import update  # для reset_tournament_data
-from typing import Optional, Tuple, Dict
+from typing import Optional, Dict
 from datetime import datetime, timedelta, timezone
 from app.models.user import User
 from app.models.app_stats import AppStats
@@ -11,7 +11,6 @@ from math import ceil
 
 # ------- простые хелперы логирования (без extra) -------
 def _kv(d: dict) -> str:
-    # безопасная сборка k=v, без кавычек и с приведением к str
     return " ".join(f"{k}={v}" for k, v in d.items())
 
 def _log(logger: logging.Logger, level: str, event: str, **fields):
@@ -27,7 +26,6 @@ def _log(logger: logging.Logger, level: str, event: str, **fields):
     else:
         logger.info(line)
 
-log = logging.getLogger("app")
 clicks_log = logging.getLogger("app.clicks")
 energy_log = logging.getLogger("app.energy")
 tournament_log = logging.getLogger("app.tournament")
@@ -35,7 +33,7 @@ daily_log = logging.getLogger("app.daily")
 users_log = logging.getLogger("app.users")
 stats_log = logging.getLogger("app.stats")
 
-# --- НОВОЕ: безопасное получение пользователя для атомарных операций ---
+# --- безопасное получение пользователя ---
 async def get_user_for_update(session: AsyncSession, user_id: int) -> User:
     _log(users_log, "debug", "users.get_user_for_update.start", user_id=user_id)
     result = await session.execute(
@@ -49,7 +47,7 @@ async def get_user(session: AsyncSession, telegram_id: int):
     _log(users_log, "debug", "users.get_user.start", telegram_id=telegram_id)
     result = await session.execute(select(User).where(User.telegram_id == telegram_id))
     user = result.scalar_one_or_none()
-    _log(users_log, "info", "users.get_user." + ("found" if user else "none"),
+    _log(users_log, "info", f"users.get_user.{ 'found' if user else 'none' }",
          telegram_id=telegram_id, found=bool(user))
     return user
 
@@ -117,7 +115,6 @@ async def update_energy_and_time(
         return dt.astimezone(timezone.utc).replace(tzinfo=None)
 
     time = _as_naive_utc(time)
-
     _log(users_log, "info", "users.update_energy_and_time.start",
          telegram_id=telegram_id, energy=energy, time=str(time))
     result = await session.execute(
@@ -251,7 +248,6 @@ async def increment_tournament_clicks(session: AsyncSession, telegram_id: int, a
     else:
         _log(tournament_log, "warning", "tournament.increment_clicks.not_found", telegram_id=telegram_id)
 
-# 2. Получение топа по лиге
 async def get_tournament_leaderboard(session: AsyncSession, league: str):
     if league == "bronze":
         min_energy, max_energy = 5000, 15000
@@ -274,7 +270,6 @@ async def get_tournament_leaderboard(session: AsyncSession, league: str):
     _log(tournament_log, "info", "tournament.leaderboard.ok", league=league, count=len(rows))
     return rows
 
-# 3. Получение информации пользователя в турнире
 async def get_user_tournament_info(session: AsyncSession, telegram_id: int):
     _log(tournament_log, "debug", "tournament.user_info.start", telegram_id=telegram_id)
     result = await session.execute(
@@ -297,11 +292,7 @@ async def get_user_tournament_info(session: AsyncSession, telegram_id: int):
         min_e, max_e = 5000, 15000
     else:
         _log(tournament_log, "info", "tournament.user_info.no_league", telegram_id=telegram_id, max_energy=user.max_energy)
-        return {
-            "league": None,
-            "rank": None,
-            "clicks": 0
-        }
+        return {"league": None, "rank": None, "clicks": 0}
 
     result = await session.execute(
         select(User)
@@ -314,18 +305,12 @@ async def get_user_tournament_info(session: AsyncSession, telegram_id: int):
     _log(tournament_log, "info", "tournament.user_info.ok",
          telegram_id=telegram_id, league=league, rank=rank, clicks=int(user.tournament_clicks or 0))
 
-    return {
-        "league": league,
-        "rank": rank,
-        "clicks": user.tournament_clicks
-    }
+    return {"league": league, "rank": rank, "clicks": user.tournament_clicks}
 
-# 4. Сброс всех турнирных кликов (раз в неделю)
 async def reset_tournament_data(session: AsyncSession):
     _log(tournament_log, "warning", "tournament.reset.start", ts=str(datetime.utcnow()))
     result = await session.execute(
-        update(User)
-        .values(tournament_clicks=0, tournament_updated_at=datetime.utcnow())
+        update(User).values(tournament_clicks=0, tournament_updated_at=datetime.utcnow())
     )
     affected = getattr(result, "rowcount", None)
     await session.commit()
@@ -357,7 +342,6 @@ async def get_total_spent(session: AsyncSession) -> int:
 # ЛОГИКА ДЛЯ БАТЧ-КЛИКОВ
 # =========================
 
-# --- унификация времени к naive UTC ---
 def _as_naive_utc(dt: Optional[datetime]) -> Optional[datetime]:
     if dt is None:
         return None
@@ -377,7 +361,6 @@ def _set_last_energy_update(user: User, value: datetime) -> None:
     else:
         setattr(user, "last_energy_update", value)
 
-# --- energy recovery ---------------------------------------------------------
 def recover_energy_inplace(user: User, now_utc: datetime) -> None:
     max_energy = int(user.max_energy or 100)
     if max_energy <= 0:
@@ -419,7 +402,6 @@ def recover_energy_inplace(user: User, now_utc: datetime) -> None:
     _log(energy_log, "info", "energy.recover.apply",
          user_id=user.id, units=units, before=before, after=after, max_energy=max_energy)
 
-# --- clicks flush (soft-order, idempotent) -----------------------------------
 async def apply_clicks_flush(
     session: AsyncSession,
     user: User,
@@ -428,14 +410,12 @@ async def apply_clicks_flush(
     now_utc: Optional[datetime] = None
 ) -> Dict[str, int]:
     """
-    Мягкий порядок + идемпотентность.
-    Принимаем любой client_seq > last_client_seq.
-    Дубликаты/старые (<=) — NOOP.
-    Новее — двигаем seq даже если accepted=0 (чтобы не залипнуть).
-    delta_clicks — «энергия к списанию», XP/ежедневка/турнир += accepted.
+    Мягкий порядок + идемпотентность:
+    - принимаем любой client_seq > last_client_seq;
+    - дубликаты/старые (<=) — NOOP;
+    - новее — двигаем seq даже если accepted=0.
     """
     now_utc = _as_naive_utc(now_utc) if now_utc else datetime.utcnow()
-
     recover_energy_inplace(user, now_utc)
 
     last_seq = int(getattr(user, "last_client_seq", 0) or 0)
@@ -467,7 +447,7 @@ async def apply_clicks_flush(
             "server_seq": last_seq,
         }
 
-    accepted  = min(requested, available)
+    accepted = min(requested, available)
     energy_before = int(user.energy or 0)
     total_before  = int(user.total_xp or 0)
     daily_before  = int(user.daily_progress or 0)
@@ -504,4 +484,5 @@ async def apply_clicks_flush(
     }
     _log(clicks_log, "info", "clicks.flush.done", **{**base, **result})
     return result
+
 
