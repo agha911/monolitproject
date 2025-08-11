@@ -1,78 +1,92 @@
-// frontend/src/hooks/useAnimatedInt.ts
 import { useEffect, useRef, useState } from "react";
 
-type Opts = {
-  /** мс на 1 единицу изменения (динамическая длительность) */
+type Options = {
+  /** миллисекунд на 1 единицу дельты (чем больше — тем медленнее) */
   speedPerUnit?: number;
-  /** максимум длительности анимации, мс */
-  maxDuration?: number;
-  /** минимум длительности анимации, мс */
+  /** минимальная длительность анимации, мс */
   minDuration?: number;
-  /** функция сглаживания 0..1 -> 0..1 */
-  easing?: (t: number) => number;
+  /** максимальная длительность анимации, мс */
+  maxDuration?: number;
 };
 
-const easeOutCubic = (t: number) => 1 - Math.pow(1 - t, 3);
+const clamp = (v: number, a: number, b: number) => Math.min(b, Math.max(a, v));
 
-export function useAnimatedInt(target: number, opts: Opts = {}) {
+/**
+ * Сглаживает целевое число target. ВАЖНО: новая анимация
+ * всегда стартует от текущего визуального значения.
+ */
+export function useAnimatedInt(target: number, opts: Options = {}) {
   const {
     speedPerUnit = 8,
-    maxDuration = 600,
     minDuration = 120,
-    easing = easeOutCubic,
+    maxDuration = 600,
   } = opts;
 
+  // Визуальное значение
   const [value, setValue] = useState<number>(target);
 
-  const raf = useRef<number | null>(null);
+  // Рефы для стабильной анимации
+  const rafId = useRef<number | null>(null);
+  const startTsRef = useRef<number>(0);
   const fromRef = useRef<number>(target);
   const toRef = useRef<number>(target);
-  const startRef = useRef<number>(0);
   const durRef = useRef<number>(0);
+  const valueRef = useRef<number>(target); // текущее отрисованное (источник правды для рестартов)
+
+  // синхронизация ref со state
+  useEffect(() => {
+    valueRef.current = value;
+  }, [value]);
 
   useEffect(() => {
-    // отменим прошлую анимацию
-    if (raf.current) cancelAnimationFrame(raf.current);
+    // если цель не менялась — ничего не делаем
+    if (toRef.current === target) return;
 
-    const from = value;
-    const to = Math.round(target);
-    if (from === to) return;
-
+    // стартуем НОВУЮ анимацию от текущего визуального значения
+    const from = valueRef.current;
+    const to = target;
     fromRef.current = from;
     toRef.current = to;
 
-    const delta = Math.abs(to - from);
-    const duration = Math.min(
-      maxDuration,
-      Math.max(minDuration, delta * speedPerUnit)
-    );
+    const distance = Math.abs(to - from);
+    const duration = clamp(distance * speedPerUnit, minDuration, maxDuration);
     durRef.current = duration;
-    startRef.current = performance.now();
+    startTsRef.current = 0;
 
-    const tick = (now: number) => {
-      const elapsed = now - startRef.current;
-      const t = Math.max(0, Math.min(1, elapsed / durRef.current));
-      const k = easing(t);
-      const next = Math.round(fromRef.current + (toRef.current - fromRef.current) * k);
-      if (next !== value) setValue(next);
+    if (rafId.current) cancelAnimationFrame(rafId.current);
 
-      if (t < 1) {
-        raf.current = requestAnimationFrame(tick);
+    const easeOutCubic = (t: number) => 1 - Math.pow(1 - t, 3);
+
+    const step = (ts: number) => {
+      if (!startTsRef.current) startTsRef.current = ts;
+      const t = durRef.current > 0 ? clamp((ts - startTsRef.current) / durRef.current, 0, 1) : 1;
+
+      const curFrom = fromRef.current;
+      const curTo = toRef.current;
+      const next = curFrom + (curTo - curFrom) * easeOutCubic(t);
+
+      setValue(next);
+
+      // если цель не достигли и цель не поменялась — продолжаем
+      if (t < 1 && toRef.current === curTo) {
+        rafId.current = requestAnimationFrame(step);
       } else {
-        // финальное прилипание к цели
-        if (value !== toRef.current) setValue(toRef.current);
-        raf.current = null;
+        // защёлкиваемся точно в цель
+        setValue(toRef.current);
+        valueRef.current = toRef.current;
+        fromRef.current = toRef.current;
+        rafId.current = null;
       }
     };
 
-    raf.current = requestAnimationFrame(tick);
-    return () => {
-      if (raf.current) cancelAnimationFrame(raf.current);
-      raf.current = null;
-    };
-    // важно: зависим от target, но не от value (иначе зациклится)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [target, speedPerUnit, maxDuration, minDuration, easing]);
+    rafId.current = requestAnimationFrame(step);
 
+    return () => {
+      if (rafId.current) cancelAnimationFrame(rafId.current);
+      rafId.current = null;
+    };
+  }, [target, speedPerUnit, minDuration, maxDuration]);
+
+  // на самом первом рендере не дёргаем — уже инициализировали state таргетом
   return value;
 }
