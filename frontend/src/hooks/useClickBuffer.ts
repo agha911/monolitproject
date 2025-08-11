@@ -19,7 +19,7 @@ type Options = {
   threshold?: number;
   initialSeq?: number;
   maxBatch?: number;
-  enabled?: boolean; // включение/выключение автофлаша
+  enabled?: boolean;
 };
 
 export function useClickBuffer({
@@ -38,7 +38,14 @@ export function useClickBuffer({
   const seqRef = useRef<number>(initialSeq);
   const currentBatch = useRef<{ seq: number; amount: number } | null>(null);
   const retryTimer = useRef<number | null>(null);
+  const bufferedRef = useRef(0);
 
+  // держим актуальное значение буфера в ref для интервала
+  useEffect(() => {
+    bufferedRef.current = buffered;
+  }, [buffered]);
+
+  // если initialSeq подрос — подтягиваем локальный
   useEffect(() => {
     if (typeof initialSeq === "number" && initialSeq > seqRef.current) {
       seqRef.current = initialSeq;
@@ -48,7 +55,7 @@ export function useClickBuffer({
   const resolveInitData = () => {
     if (initData && initData.length > 0) return initData;
     if (typeof window !== "undefined") {
-      const w = (window as any);
+      const w = window as any;
       const raw = w?.Telegram?.WebApp?.initData;
       if (raw && typeof raw === "string" && raw.length > 0) return raw;
     }
@@ -64,7 +71,6 @@ export function useClickBuffer({
     const safeSeq = Math.max(1, Math.floor(seq));
     const safeAmount = Math.max(1, Math.min(Math.floor(amount), maxBatch));
     const rawInit = resolveInitData();
-
     if (!rawInit || !sessionId) {
       throw new Error("flush blocked: missing init_data or session_id");
     }
@@ -90,8 +96,15 @@ export function useClickBuffer({
     return (await resp.json()) as FlushResponse;
   };
 
+  const clearRetry = () => {
+    if (retryTimer.current) {
+      window.clearTimeout(retryTimer.current);
+      retryTimer.current = null;
+    }
+  };
+
   const scheduleRetry = (ms = 120) => {
-    if (retryTimer.current) window.clearTimeout(retryTimer.current);
+    clearRetry();
     retryTimer.current = window.setTimeout(() => {
       void flush();
     }, ms) as unknown as number;
@@ -101,12 +114,11 @@ export function useClickBuffer({
     if (!enabled) return;
     if (inflight.current) return;
 
+    // сформировать батч из актуального буфера
     if (!currentBatch.current) {
-      if (buffered <= 0) return;
-      currentBatch.current = {
-        seq: seqRef.current + 1,
-        amount: Math.max(1, Math.min(buffered, maxBatch)),
-      };
+      const amount = Math.max(1, Math.min(bufferedRef.current, maxBatch));
+      if (amount <= 0) return;
+      currentBatch.current = { seq: seqRef.current + 1, amount };
     }
 
     const { seq, amount } = currentBatch.current;
@@ -115,49 +127,42 @@ export function useClickBuffer({
     try {
       const data = await postBatch(seq, amount);
 
-      // ВАЖНО:
-      //  - при "ok" вычитаем из буфера ИМЕННО accepted_clicks
-      //  - при "noop" ничего не трогаем, выравниваем seq и сразу ретрай
-      if (data.status === "ok") {
-        const accepted = Math.max(0, Math.min(amount, data.accepted_clicks | 0));
+      // серверный seq — истина в последней инстанции
+      const srvSeq = Number(data.server_seq ?? seq);
+      if (!Number.isNaN(srvSeq) && srvSeq >= seqRef.current) {
+        seqRef.current = srvSeq;
+      }
 
-        // уменьшаем буфер только на реально принятые клики
+      if (data.status === "ok") {
+        const accepted = Math.max(0, Math.min(amount, Number(data.accepted_clicks) || 0));
+
+        // уменьшаем буфер только на действительно принятые клики
         if (accepted > 0) {
           setBuffered((v) => Math.max(0, v - accepted));
         }
 
-        // серверный seq — источник истины
-        const srv = Number(data.server_seq ?? seq);
-        if (!Number.isNaN(srv) && srv >= seqRef.current) {
-          seqRef.current = srv;
-        } else {
-          seqRef.current = seq; // fallback
-        }
+        // отдать состояние наверх (важно даже при accepted=0)
+        onReconcile(data);
 
         currentBatch.current = null;
         inflight.current = false;
 
-        onReconcile(data);
-
-        // если сервер принял меньше, остаток останется в буфере => пульнём следующий батч
-        if (accepted < amount || buffered > 0) {
-          scheduleRetry(0);
+        // если энергии нет или ничего не приняли — не долбим сразу
+        if ((Number(data.energy) || 0) === 0 || accepted === 0) {
+          scheduleRetry(600); // мягкий бэкофф при пустом принятии/нулевой энергии
+        } else if (bufferedRef.current > 0) {
+          scheduleRetry(0); // есть ещё буфер — шлём сразу
         }
       } else if (data.status === "noop") {
-        // НИЧЕГО не списываем из буфера, НЕ трогаем текущий батч —
-        // переинициализируем seq и повторяем ту же попытку
-        const srv = Number(data.server_seq ?? 0);
-        if (!Number.isNaN(srv) && srv >= seqRef.current) {
-          seqRef.current = srv;
-        }
+        // noop: не трогаем буфер, но пробрасываем наверх (могла восстановиться энергия)
+        onReconcile(data);
 
         inflight.current = false;
-        // не сбрасываем currentBatch: повторим её же, но с новым seq
+        // повторим тот же amount, но с новым seq
         currentBatch.current = { seq: seqRef.current + 1, amount };
-
-        scheduleRetry(50);
+        scheduleRetry(80);
       } else {
-        // статус error — мягкий ретрай без потери буфера
+        // любой другой статус — мягкий ретрай без изменений
         inflight.current = false;
         scheduleRetry(300);
       }
@@ -167,15 +172,17 @@ export function useClickBuffer({
     }
   };
 
+  // периодический пульс — не завязываем на buffered, читаем bufferedRef
   useEffect(() => {
     if (!enabled) return;
     const t = window.setInterval(() => {
-      if (!inflight.current && buffered > 0) void flush();
+      if (!inflight.current && bufferedRef.current > 0) void flush();
     }, flushEveryMs);
     return () => window.clearInterval(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [flushEveryMs, buffered, enabled]);
+  }, [flushEveryMs, enabled, maxBatch]);
 
+  // моментальный старт при достижении порога
   useEffect(() => {
     if (!enabled) return;
     if (buffered >= threshold && !inflight.current && !currentBatch.current) {
@@ -184,19 +191,18 @@ export function useClickBuffer({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [buffered, threshold, enabled]);
 
+  // beacons на скрытие/уход со страницы
   useEffect(() => {
     if (!enabled) return;
 
     const handler = () => {
-      if (buffered <= 0) return;
-
-      // чтобы не ломать порядок — не шлём beacon, если есть инфлайт
-      if (inflight.current) return;
+      if (bufferedRef.current <= 0) return;
+      if (inflight.current) return; // не нарушаем порядок
 
       const rawInit = resolveInitData();
       if (!rawInit || !sessionId) return;
 
-      const amount = Math.max(1, Math.min(buffered, maxBatch));
+      const amount = Math.max(1, Math.min(bufferedRef.current, maxBatch));
       const beacon = {
         init_data: rawInit,
         delta_clicks: amount,
@@ -209,8 +215,7 @@ export function useClickBuffer({
           `${API_BASE_URL}/api/game/clicks/flush`,
           new Blob([JSON.stringify(beacon)], { type: "application/json" })
         );
-        // ВАЖНО: тут НИЧЕГО НЕ уменьшаем локально.
-        // Дождёмся ответа через обычный fetch-поток при повторном запуске приложения.
+        // локально буфер не трогаем — доживём до следующего запуска
       } catch {
         // ignore
       }
@@ -222,17 +227,21 @@ export function useClickBuffer({
 
     window.addEventListener("beforeunload", handler);
     document.addEventListener("visibilitychange", visibilityHandler);
-
     return () => {
       window.removeEventListener("beforeunload", handler);
       document.removeEventListener("visibilitychange", visibilityHandler);
     };
-  }, [buffered, sessionId, maxBatch, initData, enabled]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionId, maxBatch, initData, enabled]);
+
+  // общий cleanup ретраев
+  useEffect(() => () => clearRetry(), []);
 
   const forceFlush = () => { void flush(); };
 
   return { addClicks, forceFlush, buffered, lastSeq: seqRef.current };
 }
+
 
 
 
