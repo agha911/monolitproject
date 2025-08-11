@@ -10,7 +10,7 @@ import asyncio
 from telebot import types
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo
 
-from app.database import get_async_session
+from app.database import get_async_session, async_session_maker  # ← добавили async_session_maker
 from app.crud import user as crud_user
 from app.routers import task, shop, invites, tournament, stats
 from sqlalchemy.future import select
@@ -479,11 +479,46 @@ async def run_bot_polling():
     api_log.info("[BOT] Starting polling…")
     await bot.infinity_polling()
 
+# --- еженедельный сброс турнира (воскресенье по AZ, UTC+4) ---
+_last_tournament_reset_az = None  # хранит az-date последнего сброса
+
+async def tournament_reset_loop():
+    global _last_tournament_reset_az
+    while True:
+        try:
+            now_az = datetime.utcnow() + timedelta(hours=4)
+            # Вс = 6 (Пн=0)
+            if now_az.weekday() == 6:
+                if _last_tournament_reset_az != now_az.date():
+                    api_log.warning("[TOURNAMENT] Weekly reset: start | az_date=%s", now_az.date())
+                    async with async_session_maker() as session:
+                        await crud_user.reset_tournament_data(session)
+                    _last_tournament_reset_az = now_az.date()
+                    api_log.warning("[TOURNAMENT] Weekly reset: done | az_date=%s", now_az.date())
+            else:
+                # чтобы в следующее воскресенье сработало снова
+                if _last_tournament_reset_az is not None:
+                    _last_tournament_reset_az = None
+        except Exception as e:
+            api_log.exception("[TOURNAMENT] Weekly reset error: %s", e)
+
+        await asyncio.sleep(600)  # проверка каждые 10 минут
+
+async def reset_loop():
+    while True:
+        try:
+            await reset_energy_flags()
+        except Exception as e:
+            print(f"[RESET ERROR] {e}")
+        await asyncio.sleep(24 * 60 * 60)
+
+
 @app.on_event("startup")
 async def start_background_tasks():
     asyncio.create_task(notify_loop())
-    # asyncio.create_task(reset_loop())
+    asyncio.create_task(reset_loop())
     asyncio.create_task(run_bot_polling())
+    asyncio.create_task(tournament_reset_loop())  # ← добавили
 
 async def notify_loop():
     while True:
@@ -494,6 +529,7 @@ async def notify_loop():
             except Exception as e:
                 api_log.warning("[NOTIFY ERROR] %s", e)
         await asyncio.sleep(3600)
+
 
 
 
