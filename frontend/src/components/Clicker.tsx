@@ -187,7 +187,8 @@ const Clicker: React.FC = () => {
     initialSeq: Math.max(serverSeq ?? 0, initialLocalSeq),
     maxBatch: 50,
     lockKey: userId,
-    seqStorageKey,
+    seqStorageKey: seqStorageKey as any,
+    canSend: energy > 0
   });
 
   const handleMultiClick = (x: number, y: number) => {
