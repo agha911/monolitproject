@@ -1,10 +1,11 @@
 // frontend/src/components/Clicker.tsx
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import WebApp from '@twa-dev/sdk';
 import { useTranslation } from 'react-i18next';
 import MainButton from './MainButton';
 import API_BASE_URL from './config';
 import { useClickBuffer, FlushResponse } from '../hooks/useClickBuffer';
+import { useAnimatedInt } from '../hooks/useAnimatedInt';
 
 interface FloatingText {
   id: number;
@@ -21,8 +22,12 @@ const Clicker: React.FC = () => {
   const [telegramUser, setTelegramUser] = useState<WebAppUser | null>(null);
   const [totalXp, setTotalXp] = useState(0);
 
-  const [energy, setEnergy] = useState(1000);             // authoritative
-  const [displayEnergy, setDisplayEnergy] = useState(1000); // NEW: smooth UI value
+  const [energy, setEnergy] = useState(1000); // authoritative серверное значение
+  const smoothEnergy = useAnimatedInt(energy, {
+    speedPerUnit: 8,
+    minDuration: 120,
+    maxDuration: 600,
+  });
 
   const [maxEnergy, setMaxEnergy] = useState(1000);
   const [lastEnergyUpdate, setLastEnergyUpdate] = useState<Date | null>(null);
@@ -73,7 +78,6 @@ const Clicker: React.FC = () => {
         const data = await res.json();
 
         setEnergy(data.energy);
-        setDisplayEnergy(data.energy); // NEW: синхронизируем визуал с фактом на старте
         setTotalXp(data.total_xp ?? 0);
         setLastEnergyUpdate(data.lastEnergyUpdate ? new Date(data.lastEnergyUpdate) : null);
         setMaxEnergy(data.max_energy ?? 1000);
@@ -107,7 +111,6 @@ const Clicker: React.FC = () => {
 
         const data = await res.json();
         setEnergy(data.energy);
-        // displayEnergy подтянется плавно эффектом ниже
         setLastEnergyUpdate(data.lastEnergyUpdate ? new Date(data.lastEnergyUpdate) : null);
         setMaxEnergy(data.max_energy ?? 1000);
         setClickBoost((data.click_boost_level ?? 0) + 1);
@@ -125,41 +128,6 @@ const Clicker: React.FC = () => {
 
     return () => clearInterval(interval);
   }, [telegramUser, energy, maxEnergy, serverSeq, seqStorageKey]);
-
-  // NEW: плавная анимация числа/прогресс-бара энергии к актуальному значению
-  const animRef = useRef<number | null>(null);
-  useEffect(() => {
-    if (displayEnergy === energy) return;
-
-    if (animRef.current) cancelAnimationFrame(animRef.current);
-
-    const from = displayEnergy;
-    const to = energy;
-
-    // длительность зависит от дельты: большие скачки — чуть дольше, но в разумных пределах
-    const duration = Math.min(450, Math.max(120, Math.abs(from - to) * 3));
-    const start = performance.now();
-
-    const easeOutCubic = (t: number) => 1 - Math.pow(1 - t, 3);
-
-    const step = (now: number) => {
-      const t = Math.min(1, (now - start) / duration);
-      const val = from + (to - from) * easeOutCubic(t);
-      setDisplayEnergy(val);
-      if (t < 1) {
-        animRef.current = requestAnimationFrame(step);
-      } else {
-        animRef.current = null;
-        setDisplayEnergy(to); // защёлкнуть точно в целевое
-      }
-    };
-
-    animRef.current = requestAnimationFrame(step);
-    return () => {
-      if (animRef.current) cancelAnimationFrame(animRef.current);
-      animRef.current = null;
-    };
-  }, [energy, displayEnergy]);
 
   // таймер до полного восстановления
   useEffect(() => {
@@ -190,7 +158,7 @@ const Clicker: React.FC = () => {
 
   const onReconcile = async (data: FlushResponse) => {
     if (data.status === "ok") {
-      setEnergy(data.energy);     // displayEnergy плавно догонит
+      setEnergy(data.energy);
       setTotalXp(data.total_xp);
       setServerSeq(Number(data.server_seq ?? 0));
     } else if (data.status === "noop") {
@@ -224,9 +192,10 @@ const Clicker: React.FC = () => {
     threshold: 50,
     initialSeq: Math.max(serverSeq ?? 0, initialLocalSeq),
     maxBatch: 50,
-    lockKey: userId,
-    seqStorageKey,
-  });
+    // Если ваш useClickBuffer поддерживает эти поля — оставьте:
+    lockKey: userId as any,
+    seqStorageKey: seqStorageKey as any,
+  } as any);
 
   const handleMultiClick = (x: number, y: number) => {
     if (!telegramUser || loading || energy <= 0) return;
@@ -235,7 +204,7 @@ const Clicker: React.FC = () => {
     if (spend <= 0) return;
 
     setTotalXp((prev) => prev + spend);
-    setEnergy((prev) => Math.max(0, prev - spend)); // displayEnergy плавно уйдёт вниз
+    setEnergy((prev) => Math.max(0, prev - spend));
 
     const id = Date.now() + Math.random();
     setFloatingTexts((prev) => [...prev, { id, value: spend, x, y }]);
@@ -246,9 +215,9 @@ const Clicker: React.FC = () => {
     addClicks(spend);
   };
 
-  // UI считает прогресс от плавного displayEnergy
-  const energyInt = Math.floor(displayEnergy); // NEW: убираем дроби в отображении
-  const energyProgress = Math.min((displayEnergy / maxEnergy) * 100, 100);
+  // UI считает прогресс от плавного значения
+  const energyInt = Math.floor(smoothEnergy);
+  const energyProgress = Math.min((smoothEnergy / maxEnergy) * 100, 100);
 
   return (
     <div className="w-full min-h-screen bg-[#131f2f] text-center flex flex-col items-center justify-start pt-8 px-4 text-[#00f0ff]">
@@ -261,7 +230,7 @@ const Clicker: React.FC = () => {
         </label>
         <div className="w-full h-4 bg-[#0d273d] rounded overflow-hidden shadow-inner">
           <div
-            className="h-full bg-gradient-to-r from-[#7af9ff] to-[#00f0ff] transition-[width] duration-200" // чуть мягче
+            className="h-full bg-gradient-to-r from-[#7af9ff] to-[#00f0ff] transition-[width] duration-200"
             style={{ width: `${energyProgress}%` }}
           />
         </div>
