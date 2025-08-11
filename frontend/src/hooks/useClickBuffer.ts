@@ -21,11 +21,9 @@ type Options = {
   initialSeq?: number;
   maxBatch?: number;
   enabled?: boolean;
-  /** общий ключ блокировки между вкладками (передавайте userId) */
   lockKey?: string;
-  /** ключ localStorage для хранения lastSeq (передаёте тот, что уже есть у вас) */
   seqStorageKey?: string;
-  /** НОВОЕ: можно мгновенно заглушить отправки (например, при energy<=0) */
+  /** стоп-кран: можно мгновенно запретить отправки (например при energy<=0) */
   canSend?: boolean;
 };
 
@@ -40,7 +38,7 @@ export function useClickBuffer({
   enabled = true,
   lockKey,
   seqStorageKey,
-  canSend = true, // NEW
+  canSend = true,
 }: Options) {
   const [buffered, setBuffered] = useState(0);
 
@@ -48,80 +46,68 @@ export function useClickBuffer({
   const seqRef = useRef<number>(initialSeq);
   const currentBatch = useRef<{ seq: number; amount: number } | null>(null);
   const retryTimer = useRef<number | null>(null);
-  const enabledRef = useRef(enabled);
-  const canSendRef = useRef(canSend);
   const destroyedRef = useRef(false);
 
+  const enabledRef = useRef(enabled);
+  const canSendRef = useRef(canSend);
   useEffect(() => { enabledRef.current = enabled; }, [enabled]);
   useEffect(() => { canSendRef.current = canSend; }, [canSend]);
 
-  // подтягиваем initialSeq (если вдруг на старте пришёл более свежий)
+  // Счётчик добавленных кликов и «последней попытки».
+  // Если попытка закончилась без приёма (accepted=0), мы не ретраим,
+  // пока не появятся НОВЫЕ клики (addedTotal > lastTriedAdded).
+  const addedTotalRef = useRef(0);
+  const lastTriedAddedRef = useRef(0);
+
   useEffect(() => {
     if (typeof initialSeq === "number" && initialSeq > seqRef.current) {
       seqRef.current = initialSeq;
     }
   }, [initialSeq]);
 
-  // кросс-вкладочная синхронизация lastSeq через localStorage
   useEffect(() => {
     if (!seqStorageKey) return;
     const onStorage = (e: StorageEvent) => {
       if (e.key !== seqStorageKey) return;
       const n = Number(e.newValue ?? "0");
-      if (!Number.isNaN(n) && n > seqRef.current) {
-        seqRef.current = n;
-      }
+      if (!Number.isNaN(n) && n > seqRef.current) seqRef.current = n;
     };
     window.addEventListener("storage", onStorage);
     return () => window.removeEventListener("storage", onStorage);
   }, [seqStorageKey]);
 
-  // helper: сохраняем seq в localStorage как «истину» для других вкладок
   const saveSeq = (n: number) => {
-    try {
-      if (seqStorageKey) localStorage.setItem(seqStorageKey, String(n));
-    } catch {}
+    try { if (seqStorageKey) localStorage.setItem(seqStorageKey, String(n)); } catch {}
   };
 
   const resolveInitData = () => {
     if (initData && initData.length > 0) return initData;
-    if (typeof window !== "undefined") {
-      const w = (window as any);
-      const raw = w?.Telegram?.WebApp?.initData;
-      if (raw && typeof raw === "string" && raw.length > 0) return raw;
-    }
-    return "";
+    const raw = (window as any)?.Telegram?.WebApp?.initData;
+    return typeof raw === "string" ? raw : "";
   };
 
   const addClicks = (n = 1) => {
     if (n <= 0) return;
+    addedTotalRef.current += n;         // отметим, что появились новые клики
     setBuffered((v) => v + n);
   };
 
   const postBatch = async (seq: number, amount: number) => {
     const safeSeq = Math.max(1, Math.floor(seq));
-    const safeAmount = Math.min(Math.floor(amount), maxBatch);
-    if (safeAmount <= 0) {
-      throw new Error("flush blocked: empty amount");
-    }
+    const safeAmount = Math.min(Math.max(1, Math.floor(amount)), maxBatch);
     const rawInit = resolveInitData();
-    if (!rawInit || !sessionId) {
-      throw new Error("flush blocked: missing init_data or session_id");
-    }
-
-    const payload = {
-      init_data: rawInit,
-      delta_clicks: safeAmount,
-      client_seq: safeSeq,
-      session_id: sessionId,
-    };
+    if (!rawInit || !sessionId) throw new Error("flush blocked: missing init_data or session_id");
 
     const resp = await fetch(`${API_BASE_URL}/api/game/clicks/flush`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
+      body: JSON.stringify({
+        init_data: rawInit,
+        delta_clicks: safeAmount,
+        client_seq: safeSeq,
+        session_id: sessionId,
+      }),
     });
-
     if (!resp.ok) {
       const text = await resp.text().catch(() => "");
       throw new Error(`flush failed ${resp.status}: ${text}`);
@@ -132,106 +118,91 @@ export function useClickBuffer({
   const scheduleRetry = (ms = 120) => {
     if (retryTimer.current) window.clearTimeout(retryTimer.current);
     if (!enabledRef.current || !canSendRef.current) return;
-    retryTimer.current = window.setTimeout(() => {
-      void flush();
-    }, ms) as unknown as number;
+    retryTimer.current = window.setTimeout(() => { void flush(); }, ms) as unknown as number;
   };
 
-  // универсальный раннер с Web Locks (серилизация между вкладками)
   const withLock = async <T,>(fn: () => Promise<T>): Promise<T | undefined> => {
     const locks = (navigator as any).locks;
-    if (!lockKey || !locks || !locks.request) {
-      return fn();
-    }
+    if (!lockKey || !locks?.request) return fn();
     return locks.request(
       `gappick:flush:${lockKey}`,
       { mode: "exclusive", ifAvailable: true },
-      async (lock: any) => {
-        if (!lock) {
-          scheduleRetry(50);
-          return undefined;
-        }
-        return fn();
-      }
+      async (lock: any) => (!lock ? undefined : fn())
     );
   };
 
   const flushCore = async () => {
     if (destroyedRef.current) return;
-    if (!enabledRef.current) return;
-    if (!canSendRef.current) return;
+    if (!enabledRef.current || !canSendRef.current) return;
     if (inflight.current) return;
 
+    // если прошлую попытку ничего не приняли, ждём новых кликов
+    if (buffered > 0 && addedTotalRef.current <= lastTriedAddedRef.current) return;
+
     if (!currentBatch.current) {
-      if (buffered <= 0) return; // не создаём батч при пустом буфере
+      if (buffered <= 0) return;
       currentBatch.current = {
         seq: seqRef.current + 1,
-        amount: Math.min(buffered, maxBatch), // ровно min(buffered, maxBatch)
+        amount: Math.min(buffered, maxBatch),
       };
     }
 
     const { seq, amount } = currentBatch.current;
     inflight.current = true;
 
+    // фиксируем «на каком количестве добавленных кликов мы пробовали»
+    const snapshotAdded = addedTotalRef.current;
+
     try {
       const data = await postBatch(seq, amount);
 
-      // выравниваем seq по серверу в любом случае, если прислал
       const srv = Number(data.server_seq ?? 0);
       if (!Number.isNaN(srv) && srv >= seqRef.current) {
         seqRef.current = srv;
         saveSeq(srv);
       }
 
-      if (data.status === "ok") {
-        const accepted = Math.max(0, Math.min(amount, data.accepted_clicks | 0));
-        setBuffered((v) => Math.max(0, v - accepted));
+      const accepted = Math.max(0, Math.min(amount, data.accepted_clicks | 0));
 
+      if (data.status === "ok" && accepted > 0) {
+        setBuffered((v) => Math.max(0, v - accepted));
+        lastTriedAddedRef.current = snapshotAdded; // попытка удачная
         inflight.current = false;
         currentBatch.current = null;
 
-        // наружный reconcile
         try { onReconcile(data); } catch {}
 
-        // если ещё есть буфер — продолжим
-        if (buffered > 0 && canSendRef.current) {
-          scheduleRetry(0);
-        }
-      } else if (data.status === "noop") {
-        // дубликат/старый — просто сбрасываем батч и пробуем заново ТОЛЬКО если есть буфер
-        inflight.current = false;
-        currentBatch.current = null;
-        if (buffered > 0 && canSendRef.current) {
-          scheduleRetry(60);
-        }
+        if (buffered > 0 && canSendRef.current) scheduleRetry(0); // продолжаем дожёвывать
       } else {
-        // ошибка со стороны сервера (но HTTP 200) — отпускаем и ретраим, если есть смысл
+        // noop/ошибка или ok с 0 принятых — НЕ ретраим автоматически
+        // до появления новых кликов
+        lastTriedAddedRef.current = snapshotAdded;
         inflight.current = false;
         currentBatch.current = null;
-        if (buffered > 0 && canSendRef.current) {
-          scheduleRetry(300);
-        }
+        // onReconcile всё равно дернём — пусть UI синхронизируется
+        try { onReconcile(data); } catch {}
       }
     } catch {
+      // сеть/исключение — тоже ждём новых кликов
+      lastTriedAddedRef.current = snapshotAdded;
       inflight.current = false;
       currentBatch.current = null;
-      if (buffered > 0 && canSendRef.current) {
-        scheduleRetry(400);
-      }
     }
   };
 
   const flush = async () => {
-    if (!enabledRef.current) return;
-    if (!canSendRef.current) return;
+    if (!enabledRef.current || !canSendRef.current) return;
     await withLock(flushCore);
   };
 
-  // периодический флешер — только если что-то в буфере
+  // периодический флеш — только если есть новые клики с момента последней неуспешной попытки
   useEffect(() => {
     if (!enabled) return;
     const t = window.setInterval(() => {
-      if (!inflight.current && buffered > 0 && canSendRef.current) {
+      if (!inflight.current &&
+          buffered > 0 &&
+          canSendRef.current &&
+          addedTotalRef.current > lastTriedAddedRef.current) {
         void flush();
       }
     }, flushEveryMs);
@@ -241,9 +212,11 @@ export function useClickBuffer({
 
   // пороговый триггер
   useEffect(() => {
-    if (!enabled) return;
-    if (!canSend) return;
-    if (buffered >= threshold && !inflight.current && !currentBatch.current) {
+    if (!enabled || !canSend) return;
+    if (buffered >= threshold &&
+        !inflight.current &&
+        !currentBatch.current &&
+        addedTotalRef.current > lastTriedAddedRef.current) {
       void flush();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -260,6 +233,7 @@ export function useClickBuffer({
 
   return { addClicks, forceFlush, buffered, lastSeq: seqRef.current };
 }
+
 
 
 
