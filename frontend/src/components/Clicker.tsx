@@ -1,4 +1,5 @@
-// frontend/src/components/Clicker.tsx
+// выдержка: меняем только то, что важно для стабильности
+
 import React, { useState, useEffect, useMemo } from 'react';
 import WebApp from '@twa-dev/sdk';
 import { useTranslation } from 'react-i18next';
@@ -7,22 +8,16 @@ import API_BASE_URL from './config';
 import { useClickBuffer, FlushResponse } from '../hooks/useClickBuffer';
 import { useAnimatedInt } from '../hooks/useAnimatedInt';
 
-interface FloatingText {
-  id: number;
-  value: number;
-  x: number;
-  y: number;
-}
-
-type WebAppUser = any;
-
 const Clicker: React.FC = () => {
   const { t } = useTranslation();
 
-  const [telegramUser, setTelegramUser] = useState<WebAppUser | null>(null);
+  const [telegramUser, setTelegramUser] = useState<any | null>(null);
   const [totalXp, setTotalXp] = useState(0);
 
-  const [energy, setEnergy] = useState(1000); // authoritative серверное значение
+  // авторитетная энергия (факт), из фронта и из onReconcile
+  const [energy, setEnergy] = useState(1000);
+
+  // плавное отрисовываемое значение
   const smoothEnergy = useAnimatedInt(energy, {
     speedPerUnit: 8,
     minDuration: 120,
@@ -34,7 +29,7 @@ const Clicker: React.FC = () => {
   const [timeToFullEnergy, setTimeToFullEnergy] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [clickBoost, setClickBoost] = useState(1);
-  const [floatingTexts, setFloatingTexts] = useState<FloatingText[]>([]);
+  const [floatingTexts, setFloatingTexts] = useState<any[]>([]);
   const [serverSeq, setServerSeq] = useState<number | null>(null);
   const [seqReady, setSeqReady] = useState(false);
 
@@ -61,7 +56,7 @@ const Clicker: React.FC = () => {
   useEffect(() => {
     if (!telegramUser) return;
 
-    const initializeUser = async () => {
+    (async () => {
       try {
         await fetch(`${API_BASE_URL}/api/user/register`, {
           method: 'POST',
@@ -93,15 +88,13 @@ const Clicker: React.FC = () => {
         console.error('Ошибка инициализации пользователя:', error);
         setSeqReady(false);
       }
-    };
-
-    initializeUser();
+    })();
   }, [telegramUser, seqStorageKey]);
 
+  // мягкое автообновление энергии с сервера
   useEffect(() => {
     const interval = setInterval(async () => {
       if (!telegramUser || energy >= maxEnergy) return;
-
       try {
         const res = await fetch(`${API_BASE_URL}/api/game/progress`, {
           method: 'POST',
@@ -110,6 +103,7 @@ const Clicker: React.FC = () => {
         });
 
         const data = await res.json();
+        // просто двигаем target — useAnimatedInt сам плавно подтянет визуал
         setEnergy(data.energy);
         setLastEnergyUpdate(data.lastEnergyUpdate ? new Date(data.lastEnergyUpdate) : null);
         setMaxEnergy(data.max_energy ?? 1000);
@@ -158,7 +152,7 @@ const Clicker: React.FC = () => {
 
   const onReconcile = async (data: FlushResponse) => {
     if (data.status === "ok") {
-      setEnergy(data.energy);
+      setEnergy(data.energy);          // таргет обновился — визуал плавно догонит
       setTotalXp(data.total_xp);
       setServerSeq(Number(data.server_seq ?? 0));
     } else if (data.status === "noop") {
@@ -192,10 +186,9 @@ const Clicker: React.FC = () => {
     threshold: 50,
     initialSeq: Math.max(serverSeq ?? 0, initialLocalSeq),
     maxBatch: 50,
-    // Если ваш useClickBuffer поддерживает эти поля — оставьте:
-    lockKey: userId as any,
-    seqStorageKey: seqStorageKey as any,
-  } as any);
+    lockKey: userId,
+    seqStorageKey,
+  });
 
   const handleMultiClick = (x: number, y: number) => {
     if (!telegramUser || loading || energy <= 0) return;
@@ -204,7 +197,7 @@ const Clicker: React.FC = () => {
     if (spend <= 0) return;
 
     setTotalXp((prev) => prev + spend);
-    setEnergy((prev) => Math.max(0, prev - spend));
+    setEnergy((prev) => Math.max(0, prev - spend)); // меняем ТАРГЕТ — визуал уйдёт плавно
 
     const id = Date.now() + Math.random();
     setFloatingTexts((prev) => [...prev, { id, value: spend, x, y }]);
@@ -215,7 +208,6 @@ const Clicker: React.FC = () => {
     addClicks(spend);
   };
 
-  // UI считает прогресс от плавного значения
   const energyInt = Math.floor(smoothEnergy);
   const energyProgress = Math.min((smoothEnergy / maxEnergy) * 100, 100);
 
@@ -230,8 +222,9 @@ const Clicker: React.FC = () => {
         </label>
         <div className="w-full h-4 bg-[#0d273d] rounded overflow-hidden shadow-inner">
           <div
-            className="h-full bg-gradient-to-r from-[#7af9ff] to-[#00f0ff] transition-[width] duration-200"
-            style={{ width: `${energyProgress}%` }}
+            // убрали css-транзишн по ширине, чтобы не было двойного сглаживания
+            className="h-full bg-gradient-to-r from-[#7af9ff] to-[#00f0ff]"
+            style={{ width: `${energyProgress}%`, transition: "none" }}
           />
         </div>
         {energy < maxEnergy && timeToFullEnergy && (
@@ -269,15 +262,12 @@ const Clicker: React.FC = () => {
           }
         `}</style>
       </div>
-
-      {/* <button onClick={forceFlush} className="mt-4 px-3 py-2 rounded bg-[#0d273d] text-[#7ee9ff]">
-        Sync now
-      </button> */}
     </div>
   );
 };
 
 export default Clicker;
+
 
 
 
