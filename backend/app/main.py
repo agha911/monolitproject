@@ -1,13 +1,14 @@
 from fastapi import FastAPI, Depends, HTTPException, Body
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse  # если не нужен — можно убрать
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text, func
 from datetime import datetime, timedelta, timezone
 import requests
 from pydantic import BaseModel, Field
-from typing import Optional
 import os, sys, time, logging
+import asyncio
+from telebot import types
+from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo
 
 from app.database import get_async_session
 from app.crud import user as crud_user
@@ -18,12 +19,8 @@ from app.utils import parse_telegram_user_id
 from app.core.referral_cache import referral_cache
 from app.bot_instance import bot
 from app.config import TELEGRAM_BOT_TOKEN
-from telebot.apihelper import ApiTelegramException
 from app.notifications.notify_energy import notify_max_energy_users
-import asyncio
-from telebot import types
-from app.notifications.reset_energy_notified import reset_energy_flags
-from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo
+# from app.notifications.reset_energy_notified import reset_energy_flags  # не используем
 
 # ---------------- logging setup ----------------
 
@@ -52,7 +49,7 @@ def setup_app_logging(level: str = None):
     app_logger.setLevel(lvl)
     app_logger.propagate = False
     app_logger.handlers.clear()
-    app_logger.addHandler(handler)  # ВАЖНО: свой хендлер, иначе ничего не видно
+    app_logger.addHandler(handler)  # свой хендлер
 
     # дочерние — поднимаются к "app"
     for name in ("app.api", "app.clicks", "app.energy", "app.tournament",
@@ -68,7 +65,6 @@ def setup_app_logging(level: str = None):
 
 # применяем сразу при импорте
 setup_app_logging()
-
 api_log = logging.getLogger("app.api")
 
 # ---------------- constants ----------------
@@ -291,6 +287,12 @@ async def clicks_flush(
         telegram_id = parse_telegram_user_id(payload.init_data)
         now_utc = datetime.now(timezone.utc)
 
+        # входной лог запроса
+        api_log.info(
+            "FLUSH req | tg=%s session=%s delta=%s seq=%s",
+            telegram_id, payload.session_id, payload.delta_clicks, payload.client_seq
+        )
+
         async with session.begin():
             user = await crud_user.get_user(session, telegram_id)
             if not user:
@@ -306,16 +308,14 @@ async def clicks_flush(
                 now_utc=now_utc,
             )
 
+            # ежедневка (добиваем до completed если надо)
             if not (db_user.daily_completed or False):
                 if (db_user.daily_progress or 0) >= (db_user.daily_target or 0) > 0:
                     db_user.daily_progress = db_user.daily_target
                     db_user.daily_completed = True
 
-            # Турнир ПН–СБ (UTC+4)
-            now_az = datetime.utcnow() + timedelta(hours=4)
-            if now_az.weekday() in range(6) and result["accepted_clicks"] > 0:
-                db_user.tournament_clicks = (db_user.tournament_clicks or 0) + result["accepted_clicks"]
-
+            # ВАЖНО: турнир инкремент уже делает CRUD внутри apply_clicks_flush.
+            # Здесь повторно НЕ инкрементим, чтобы не удваивать.
             await session.flush()
 
             user_id = db_user.id
@@ -345,7 +345,7 @@ async def clicks_flush(
     except HTTPException:
         raise
     except Exception as e:
-        logging.exception("FLUSH error")
+        api_log.exception("FLUSH error")
         return ClicksFlushOut(
             status=f"error: {str(e)}",
             accepted_clicks=0,
@@ -494,6 +494,7 @@ async def notify_loop():
             except Exception as e:
                 api_log.warning("[NOTIFY ERROR] %s", e)
         await asyncio.sleep(3600)
+
 
 
 
