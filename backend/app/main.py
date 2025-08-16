@@ -502,7 +502,7 @@ async def tournament_reset_loop():
 
     # Хелпер для безопасного вызова ресета
     async def _do_reset(tag: str):
-        nonlocal _last_tournament_reset_az
+        global _last_tournament_reset_az
         az_now = now_az()
         api_log.warning("[TOURNAMENT] Reset (%s): start | az_now=%s", tag, az_now.isoformat())
         async with async_session_maker() as session:
@@ -515,18 +515,11 @@ async def tournament_reset_loop():
             az_now = now_az()
 
             # --- Ресет в начале турнира ---
-            # Сработает:
-            # 1) точно в момент старта;
-            # 2) если приложение было оффлайн и запустилось уже ПОСЛЕ старта (до конца турнира),
-            #    и ресет ещё не делали в этот период.
             if az_now >= START_AZ and az_now <= END_AZ:
                 if _last_tournament_reset_az != START_AZ.date():
                     await _do_reset("tournament_start")
 
             # --- Ресет в конце турнира ---
-            # Сработает:
-            # 1) точно в момент завершения;
-            # 2) если приложение проснулось уже ПОСЛЕ конца — выполнит сразу при первой проверке.
             if az_now >= END_AZ and _last_tournament_reset_az != END_AZ.date():
                 await _do_reset("tournament_end")
 
@@ -540,6 +533,7 @@ async def tournament_reset_loop():
 
         # Проверяем раз в 10 минут (как и раньше)
         await asyncio.sleep(600)
+
 
 async def reset_loop():
     while True:
