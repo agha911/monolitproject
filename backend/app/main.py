@@ -483,26 +483,63 @@ async def run_bot_polling():
 _last_tournament_reset_az = None  # хранит az-date последнего сброса
 
 async def tournament_reset_loop():
+    """
+    Ресеты турнира только два раза:
+    - старт турнира:   2025-08-18 00:00:00 (UTC+4, Баку)
+    - конец турнира:   2025-09-01 23:59:59 (UTC+4, Баку)
+    После финального ресета цикл останавливается.
+    """
     global _last_tournament_reset_az
+
+    # Локальные (AZ, UTC+4) границы турнира
+    START_AZ = datetime(2025, 8, 18, 0, 0, 0)       # 18 авг 00:00
+    END_AZ   = datetime(2025, 9, 1, 23, 59, 59)     # 1 сен 23:59:59
+    AZ_OFFSET = timedelta(hours=4)
+
+    # Утилита: получить «сейчас» в AZ (наивный datetime, как и раньше)
+    def now_az():
+        return datetime.utcnow() + AZ_OFFSET
+
+    # Хелпер для безопасного вызова ресета
+    async def _do_reset(tag: str):
+        nonlocal _last_tournament_reset_az
+        az_now = now_az()
+        api_log.warning("[TOURNAMENT] Reset (%s): start | az_now=%s", tag, az_now.isoformat())
+        async with async_session_maker() as session:
+            await crud_user.reset_tournament_data(session)
+        _last_tournament_reset_az = az_now.date()
+        api_log.warning("[TOURNAMENT] Reset (%s): done  | az_now=%s", tag, az_now.isoformat())
+
     while True:
         try:
-            now_az = datetime.utcnow() + timedelta(hours=4)
-            # Вс = 6 (Пн=0)
-            if now_az.weekday() == 6:
-                if _last_tournament_reset_az != now_az.date():
-                    api_log.warning("[TOURNAMENT] Weekly reset: start | az_date=%s", now_az.date())
-                    async with async_session_maker() as session:
-                        await crud_user.reset_tournament_data(session)
-                    _last_tournament_reset_az = now_az.date()
-                    api_log.warning("[TOURNAMENT] Weekly reset: done | az_date=%s", now_az.date())
-            else:
-                # чтобы в следующее воскресенье сработало снова
-                if _last_tournament_reset_az is not None:
-                    _last_tournament_reset_az = None
-        except Exception as e:
-            api_log.exception("[TOURNAMENT] Weekly reset error: %s", e)
+            az_now = now_az()
 
-        await asyncio.sleep(600)  # проверка каждые 10 минут
+            # --- Ресет в начале турнира ---
+            # Сработает:
+            # 1) точно в момент старта;
+            # 2) если приложение было оффлайн и запустилось уже ПОСЛЕ старта (до конца турнира),
+            #    и ресет ещё не делали в этот период.
+            if az_now >= START_AZ and az_now <= END_AZ:
+                if _last_tournament_reset_az != START_AZ.date():
+                    await _do_reset("tournament_start")
+
+            # --- Ресет в конце турнира ---
+            # Сработает:
+            # 1) точно в момент завершения;
+            # 2) если приложение проснулось уже ПОСЛЕ конца — выполнит сразу при первой проверке.
+            if az_now >= END_AZ and _last_tournament_reset_az != END_AZ.date():
+                await _do_reset("tournament_end")
+
+            # Если турнир завершён и финальный ресет уже выполнен — выходим из цикла
+            if az_now.date() > END_AZ.date() and _last_tournament_reset_az == END_AZ.date():
+                api_log.warning("[TOURNAMENT] Period finished. Loop is shutting down.")
+                return
+
+        except Exception as e:
+            api_log.exception("[TOURNAMENT] Fixed-period reset error: %s", e)
+
+        # Проверяем раз в 10 минут (как и раньше)
+        await asyncio.sleep(600)
 
 async def reset_loop():
     while True:
