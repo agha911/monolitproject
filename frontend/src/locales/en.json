@@ -77,5 +77,20 @@
   "click": "Click",
   "max_energy_reached": "Maximum energy reached",
   "refill_limit_reached": "Refill limit reached for today",
-  "not_enough_gap": "Not enough $GAP"
+  "not_enough_gap": "Not enough $GAP",
+  "partner_new": "New",
+  "partner_learn_more": "Learn more",
+  "partner_card_subtitle": "Get to know our partner — then subscribe on Instagram.",
+  "partner_reward_label": "Reward",
+  "partner_done": "Completed",
+  "partner_progress": "0/1",
+
+  "slides_close": "Close",
+  "slides_next": "Next",
+  "slides_subscribe": "Subscribe (@{{username}})",
+  "slides_claiming": "Please wait…",
+  "slides_award_received": "+{{amount}} GAP credited!",
+  "slides_already_claimed": "Already claimed",
+  "slides_error": "Something went wrong",
+  "slides_network_error": "Network error"
 }
