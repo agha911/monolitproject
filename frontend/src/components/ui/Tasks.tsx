@@ -21,6 +21,7 @@ const PartnerSlidesModal: React.FC<{
   task: PartnerTask;
   onClaimSuccess: () => void;
 }> = ({ onClose, task, onClaimSuccess }) => {
+  const { t } = useTranslation();
   const [i, setI] = useState(0);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
@@ -41,15 +42,19 @@ const PartnerSlidesModal: React.FC<{
         body: JSON.stringify({ init_data: initData }),
       });
       const data = await res.json();
-      if (data.status === 'ok' || data.status === 'already_claimed') {
-        setMsg(data.status === 'ok' ? `+${task.reward.toLocaleString()} GAP` : 'Artıq qəbul olunub');
+      if (data.status === 'ok') {
+        setMsg(t('slides_award_received', { amount: task.reward.toLocaleString() }));
+        onClaimSuccess();
+        setTimeout(onClose, 900);
+      } else if (data.status === 'already_claimed') {
+        setMsg(t('slides_already_claimed'));
         onClaimSuccess();
         setTimeout(onClose, 900);
       } else {
-        setMsg('Xəta baş verdi');
+        setMsg(t('slides_error'));
       }
     } catch {
-      setMsg('Şəbəkə xətası');
+      setMsg(t('slides_network_error'));
     } finally {
       setBusy(false);
     }
@@ -61,7 +66,7 @@ const PartnerSlidesModal: React.FC<{
         {/* Header */}
         <div className="flex items-center justify-between p-3 border-b border-[#00f0ff20]">
           <div className="text-xs opacity-80">{i + 1}/{task.slides.length}</div>
-          <button onClick={onClose} className="text-xs opacity-80 hover:opacity-100">Bağla</button>
+          <button onClick={onClose} className="text-xs opacity-80 hover:opacity-100">{t('slides_close')}</button>
         </div>
 
         {/* Slide content */}
@@ -95,7 +100,7 @@ const PartnerSlidesModal: React.FC<{
               className="w-full py-2 rounded-xl bg-[#00f0ff] text-[#0e1a2b]"
               onClick={next}
             >
-              Daha
+              {t('slides_next')}
             </button>
           ) : (
             <button
@@ -103,7 +108,7 @@ const PartnerSlidesModal: React.FC<{
               onClick={claim}
               disabled={busy}
             >
-              {busy ? 'Gözləyin...' : `Abunə ol (@${task.ig_username})`}
+              {busy ? t('slides_claiming') : t('slides_subscribe', { username: task.ig_username })}
             </button>
           )}
           {msg && <div className="text-center text-xs mt-2 opacity-90">{msg}</div>}
@@ -205,7 +210,7 @@ const Tasks: React.FC = () => {
     loadPartnerTask();
   }, []);
 
-  /** ---------- Old Instagram task (keep as-is) ---------- */
+  /** ---------- Old Instagram task (kept) ---------- */
   const handleInstagramClick = () => {
     window.open('https://www.instagram.com/gap_pick', '_blank');
     setOpenedInstagram(true);
@@ -218,7 +223,7 @@ const Tasks: React.FC = () => {
 
   const handleComplete = async (task_id: string, setter: any, msgSetter: any) => {
     if (!telegramUserId) {
-      msgSetter('Ошибка: пользователь не определён');
+      msgSetter(t('error_user_unknown'));
       return;
     }
 
@@ -239,14 +244,14 @@ const Tasks: React.FC = () => {
       } else {
         msgSetter(t('error'));
       }
-    } catch (error) {
+    } catch {
       msgSetter(t('error'));
     }
   };
 
   const handleCheckIn = async () => {
     if (!telegramUserId) {
-      setCheckinMessage('Ошибка: пользователь не определён');
+      setCheckinMessage(t('error_user_unknown'));
       return;
     }
 
@@ -257,7 +262,176 @@ const Tasks: React.FC = () => {
         body: JSON.stringify({ user_id: telegramUserId }),
       });
 
-      const da
+      const data = await res.json();
+
+      if (data.status === 'success') {
+        setStreak(data.day);
+        setReward(data.reward);
+        setCheckedIn(true);
+        setCheckinMessage(`🎉 ${t('reward_received', { amount: data.reward })}`);
+      } else if (data.status === 'already_checked_in') {
+        setStreak(data.day);
+        setReward(data.reward);
+        setCheckedIn(true);
+        setCheckinMessage(`✅ ${t('checkin_already')}`);
+      } else {
+        setCheckinMessage(t('error'));
+      }
+    } catch {
+      setCheckinMessage(t('error'));
+    }
+  };
+
+  const handleClaimReward = async () => {
+    if (!telegramUserId) return;
+
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/daily/claim_reward`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ init_data: WebApp.initData }),
+      });
+
+      const data = await res.json();
+      if (data.status === 'reward_claimed') {
+        setRewardClaimed(true);
+        setRewardMessage(`🎁 ${t('reward_received', { amount: data.reward })}`);
+      } else if (data.status === 'already_claimed') {
+        setRewardClaimed(true);
+        setRewardMessage(`✅ ${t('already_claimed')}`);
+      } else if (data.status === 'not_completed') {
+        setRewardMessage(t('not_completed'));
+      } else {
+        setRewardMessage(t('error'));
+      }
+    } catch {
+      setRewardMessage(t('error'));
+    }
+  };
+
+  return (
+    <div className="p-4 bg-[#131f2f] min-h-screen text-[#00f0ff] space-y-6">
+      <h2 className="text-xl font-bold text-center drop-shadow-md">📋 {t('title_tasks')}</h2>
+
+      {/* Partner task card */}
+      {partnerTask && (
+        <div className="bg-[#0e1a2b] border border-[#00f0ff40] p-4 rounded-xl shadow text-center flex items-center gap-3">
+          <div className="flex-1 text-left">
+            <div className="flex items-center gap-2">
+              <h3 className="text-lg font-semibold text-[#7ee9ff]">{partnerTask.partner_name}</h3>
+              <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-200/20 text-emerald-300 border border-emerald-300/30">
+                {t('partner_new')}
+              </span>
+            </div>
+            <p className="text-xs text-[#a0f6ff] mt-1">
+              {t('partner_card_subtitle')}
+            </p>
+            <div className="mt-2 flex items-center justify-between text-sm">
+              <div className="opacity-90">
+                {t('partner_reward_label')}: <span className="font-semibold">{partnerTask.reward.toLocaleString()} GAP</span>
+              </div>
+              <div>
+                {partnerDone ? (
+                  <span className="text-emerald-400 font-medium">{t('partner_done')}</span>
+                ) : (
+                  <span className="opacity-70">{t('partner_progress')}</span>
+                )}
+              </div>
+            </div>
+          </div>
+          <button
+            className="ml-2 px-4 py-2 rounded-xl bg-[#00f0ff] text-[#0e1a2b] disabled:opacity-50"
+            onClick={() => setPartnerOpen(true)}
+            disabled={partnerDone}
+          >
+            {t('partner_learn_more')}
+          </button>
+        </div>
+      )}
+
+      {/* Instagram (старое задание — оставлено как было) */}
+      <div className="bg-[#0e1a2b] border border-[#00f0ff40] p-4 rounded-xl shadow text-center">
+        <h3 className="text-lg font-semibold text-[#7ee9ff]">{t('subscribe_instagram')}</h3>
+        <p className="text-sm text-[#a0f6ff]">{t('reward_received', { amount: 150000 })}</p>
+        {!openedInstagram ? (
+          <button onClick={handleInstagramClick} className="mt-2 bg-[#00f0ff] text-[#0e1a2b] px-4 py-2 rounded">{t('go_to_instagram')}</button>
+        ) : (
+          <button onClick={() => handleComplete('follow_instagram', setCompleted, setMessage)} disabled={completed}
+            className="mt-2 bg-[#00f0ff] text-[#0e1a2b] px-4 py-2 rounded disabled:opacity-50">
+            {completed ? t('already_done') : t('i_subscribed')}
+          </button>
+        )}
+        {message && <p className="text-sm mt-2 text-[#a0f6ff]">{message}</p>}
+      </div>
+
+      {/* Telegram group */}
+      <div className="bg-[#0e1a2b] border border-[#00f0ff40] p-4 rounded-xl shadow text-center">
+        <h3 className="text-lg font-semibold text-[#7ee9ff]">{t('join_community')}</h3>
+        <p className="text-sm text-[#a0f6ff]">{t('reward_received', { amount: 150000 })}</p>
+        {!openedGroup ? (
+          <button onClick={handleGroupClick} className="mt-2 bg-[#00f0ff] text-[#0e1a2b] px-4 py-2 rounded">{t('go_to_group')}</button>
+        ) : (
+          <button onClick={() => handleComplete('join_group', setJoined, setGroupMessage)} disabled={joined}
+            className="mt-2 bg-[#00f0ff] text-[#0e1a2b] px-4 py-2 rounded disabled:opacity-50">
+            {joined ? t('already_done') : t('i_joined')}
+          </button>
+        )}
+        {groupMessage && <p className="text-sm mt-2 text-[#a0f6ff]">{groupMessage}</p>}
+      </div>
+
+      {/* Check-in */}
+      <div className="bg-[#0e1a2b] border border-[#00f0ff40] p-4 rounded-xl shadow text-center">
+        <h3 className="text-lg font-semibold text-[#7ee9ff]">{t('daily_checkin')}</h3>
+        <p className="text-sm text-[#a0f6ff]">{t('checkin_get')}</p>
+        <div className="flex justify-center gap-2 mt-2">
+          {rewards.map((r, index) => (
+            <div key={index} className={`w-8 h-8 flex items-center justify-center rounded-full text-xs font-bold ${streak && index < streak ? 'bg-[#00f0ff] text-[#0e1a2b]' : 'bg-[#1e2e3d] text-[#7ee9ff]'}`}>
+              {formatNumber(r)}
+            </div>
+          ))}
+        </div>
+        <button onClick={handleCheckIn} disabled={checkedIn}
+          className="mt-4 bg-[#00f0ff] text-[#0e1a2b] px-4 py-2 rounded disabled:opacity-50">
+          {checkedIn ? t('checkin_already') : t('checkin_get')}
+        </button>
+        {checkinMessage && <p className="text-sm mt-2 text-[#a0f6ff]">{checkinMessage}</p>}
+      </div>
+
+      {/* Daily click task */}
+      {dailyTarget !== null && dailyProgress !== null && (
+        <div className="bg-[#0e1a2b] border border-[#00f0ff40] p-4 rounded-xl shadow text-center">
+          <h3 className="text-lg font-semibold text-[#7ee9ff]">{t('daily_task_clicker')}</h3>
+          <div className="w-full h-4 bg-[#1e2e3d] rounded-full overflow-hidden">
+            <div className="h-full bg-[#00f0ff]" style={{ width: `${Math.min((dailyProgress / dailyTarget) * 100, 100)}%` }}></div>
+          </div>
+          <p className="text-sm text-[#a0f6ff]">{t('daily_task_goal')}: {dailyProgress} / {dailyTarget}</p>
+          {dailyCompleted ? (
+            <>
+              <p className="text-green-400 text-sm font-semibold">{t('task_completed')}</p>
+              <button onClick={handleClaimReward} disabled={rewardClaimed} className="mt-2 bg-[#00f0ff] text-[#0e1a2b] px-4 py-2 rounded disabled:opacity-50">
+                {rewardClaimed ? t('reward_received_short') : t('claim_reward')}
+              </button>
+              {rewardMessage && <p className="text-sm mt-2 text-[#a0f6ff]">{rewardMessage}</p>}
+            </>
+          ) : (
+            <p className="text-[#7ee9ff] text-xs">{t('keep_going')}</p>
+          )}
+        </div>
+      )}
+
+      {/* Modal mount */}
+      {partnerTask && partnerOpen && (
+        <PartnerSlidesModal
+          onClose={() => setPartnerOpen(false)}
+          task={partnerTask}
+          onClaimSuccess={() => setPartnerDone(true)}
+        />
+      )}
+    </div>
+  );
+};
+
+export default Tasks;
 
 
 
