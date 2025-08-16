@@ -38,6 +38,7 @@ class User(Base):
     last_client_seq = Column(Integer, nullable=False, server_default="0")
     energy_upgrade_count = Column(Integer, default=0)
     last_energy_upgrade = Column(DateTime, nullable=True)
+    partner_task_claimed_id = Column(String(64), nullable=True, index=True)
     
     
 
