@@ -28,7 +28,7 @@ const PartnerSlidesModal: React.FC<{
   const last = i >= task.slides.length - 1;
   const slide = task.slides[i];
   const initData = WebApp.initData || '';
-  const igUrl = task.ig_url || `https://instagram.com/${task.ig_username}`;
+  const igUrl = task.ig_url || `https://www.instagram.com/promo_express_az?igsh=MTdtZWFpbWNlMG9hcw==`;
 
   const next = () => setI((x) => Math.min(x + 1, task.slides.length - 1));
 
