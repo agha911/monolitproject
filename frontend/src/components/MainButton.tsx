@@ -78,7 +78,7 @@ const MainButton: React.FC<MainButtonProps> = ({ onMultiClick, energy }) => {
         }`}
     >
       <img
-        src="./logo_2.png"
+        src="./logo.png"
         alt="Main Coin"
         className="w-full h-full object-cover pointer-events-none select-none"
         draggable={false}
