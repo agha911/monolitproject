@@ -76,6 +76,23 @@
   "click": "Клик",
   "max_energy_reached": "Достигнут максимум энергии",
   "refill_limit_reached": "Лимит восполнений на сегодня исчерпан",
-  "not_enough_gap": "Недостаточно $GAP"
+  "not_enough_gap": "Недостаточно $GAP",
+  "partner_new": "Новое",
+  "partner_learn_more": "Узнать больше",
+  "partner_card_subtitle": "Познакомься с партнёром — затем подпишись в Instagram.",
+  "partner_reward_label": "Награда",
+  "partner_done": "Выполнено",
+  "partner_progress": "0/1",
+
+  "slides_close": "Закрыть",
+  "slides_next": "Далее",
+  "slides_subscribe": "Подписаться (@{{username}})",
+  "slides_claiming": "Подождите...",
+  "slides_award_received": "+{{amount}} GAP начислено!",
+  "slides_already_claimed": "Награда уже получена",
+  "slides_error": "Что-то пошло не так",
+  "slides_network_error": "Ошибка сети",
+
+  "error_user_unknown": "Ошибка: пользователь не определён"
 
 }
