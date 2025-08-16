@@ -1,4 +1,5 @@
 # app/routers/partner_task.py
+import os
 from fastapi import APIRouter, Body, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
@@ -11,30 +12,43 @@ from app.utils import parse_telegram_user_id
 
 router = APIRouter(prefix="/api/partner", tags=["partner"])
 
+# База для ассетов слайдов: можно указать CDN в env, иначе используем относительные пути фронта.
+# Примеры:
+#   PARTNER_ASSET_BASE=https://cdn.example.com/partners/promoexpress
+#   PARTNER_ASSET_BASE=/img/partners/promoexpress
+ASSET_BASE = os.getenv("PARTNER_ASSET_BASE", "/img/partners/promoexpress")
+
+def _img(name: str) -> str:
+    """Собирает URL картинки. Если name уже абсолютный (http/https), возвращаем как есть."""
+    if name.startswith("http://") or name.startswith("https://"):
+        return name
+    # иначе приклеиваем к базе
+    base = ASSET_BASE.rstrip("/")
+    return f"{base}/{name.lstrip('/')}"
+
 # === ТЕКУЩЕЕ АКТИВНОЕ ЗАДАНИЕ (можно редактировать без деплоя БД) ===
-# Если понадобится несколько задач — вынесем в таблицу partners и user_partner_tasks.
 PARTNER_TASK = {
-    "id": "promo_express_2025_08",               # <= важен для единовременной выдачи
+    "id": "promo_express_2025_08",  # важно для единовременной выдачи
     "partner_name": "Promo Express",
     "ig_username": "promoexpress_azerbaijan",
     "ig_url": "https://instagram.com/promoexpress_azerbaijan",
     "reward": 500_000,
-    # Короткая презентация — 2–3 слайда. Можно добавить/убрать изображения.
+    # Короткая презентация — 2–3 слайда с изображениями.
     "slides": [
         {
             "title": "Promo Express nədir?",
             "text": "Promo Express — Azərbaycanın aparıcı promo məhsul istehsalçısıdır.",
-            "image": "https://your-cdn.example/partners/promoexpress/slide1.png",
+            "image": _img("slide1.webp"),  # положи файл: frontend/public/img/partners/promoexpress/slide1.webp
         },
         {
             "title": "Onlar nə edirlər?",
             "text": "Brand geyim, suvenir və POS materialları hazırlayırlar.",
-            "image": "https://your-cdn.example/partners/promoexpress/slide2.png",
+            "image": _img("slide2.webp"),
         },
         {
             "title": "Niyə vacibdir?",
             "text": "Promo məhsullar tədbirlər, reklam və hədiyyələr üçün idealdır.",
-            "image": "https://your-cdn.example/partners/promoexpress/slide3.png",
+            "image": _img("slide3.webp"),
         },
     ],
 }
@@ -66,7 +80,6 @@ async def get_partner_task(
         if user and getattr(user, "partner_task_claimed_id", None) == PARTNER_TASK["id"]:
             claimed = True
 
-    # Отдаём всё, что нужно фронту для модалки со слайдами
     return {
         "id": PARTNER_TASK["id"],
         "partner_name": PARTNER_TASK["partner_name"],
@@ -98,7 +111,6 @@ async def claim_partner_reward(
     if getattr(user, "partner_task_claimed_id", None) == PARTNER_TASK["id"]:
         return {"status": "already_claimed"}
 
-    # начисляем
     before = int(user.total_xp or 0)
     user.total_xp = before + int(PARTNER_TASK["reward"])
     user.partner_task_claimed_id = PARTNER_TASK["id"]
@@ -111,3 +123,4 @@ async def claim_partner_reward(
         "reward": int(PARTNER_TASK["reward"]),
         "total_xp_after": int(user.total_xp or 0),
     }
+
