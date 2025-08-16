@@ -77,6 +77,23 @@
   "click": "Klik",
   "max_energy_reached": "Maksimum enerji həddinə çatıldı",
   "refill_limit_reached": "Bugünkü doldurma limiti çatıb",
-  "not_enough_gap": "Kifayət qədər $GAP yoxdur"
+  "not_enough_gap": "Kifayət qədər $GAP yoxdur",
+  "partner_new": "Yeni",
+  "partner_learn_more": "Daha çox öyrən",
+  "partner_card_subtitle": "Partnyorumuzu tanı — sonra Instagram-da abunə ol.",
+  "partner_reward_label": "Mükafat",
+  "partner_done": "Tamamlandı",
+  "partner_progress": "0/1",
+
+  "slides_close": "Bağla",
+  "slides_next": "Daha",
+  "slides_subscribe": "Abunə ol (@{{username}})",
+  "slides_claiming": "Gözləyin...",
+  "slides_award_received": "+{{amount}} GAP hesablandı!",
+  "slides_already_claimed": "Artıq qəbul olunub",
+  "slides_error": "Xəta baş verdi",
+  "slides_network_error": "Şəbəkə xətası",
+
+  "error_user_unknown": "Xəta: istifadəçi müəyyən edilmədi"
 
 }
