@@ -19,15 +19,12 @@ const MainButton: React.FC<MainButtonProps> = ({ onMultiClick, energy }) => {
   const handlePointerDown = (e: React.PointerEvent<HTMLButtonElement>) => {
     if (energy <= 0) return;
 
-    // Отменяем жесты браузера (зум, скролл при тапе и т.п.)
     e.preventDefault();
 
-    // Мультитач: каждый новый pointerId — отдельный клик
     const id = e.pointerId;
     if (activePointers.current.has(id)) return;
     activePointers.current.add(id);
 
-    // Захватываем указатель, чтобы гарантированно получить up/cancel
     try {
       (e.currentTarget as any).setPointerCapture?.(id);
     } catch {
@@ -57,7 +54,6 @@ const MainButton: React.FC<MainButtonProps> = ({ onMultiClick, energy }) => {
   };
 
   const handleContextMenu = (e: React.MouseEvent) => {
-    // Убираем системное меню при долгом тапе на мобильных
     e.preventDefault();
   };
 
@@ -68,9 +64,8 @@ const MainButton: React.FC<MainButtonProps> = ({ onMultiClick, energy }) => {
       onPointerCancel={handlePointerCancel}
       onContextMenu={handleContextMenu}
       disabled={energy <= 0}
-      // отключаем браузерные жесты и выделение, чтобы мультитач был чище
       className={`w-72 h-72 rounded-full overflow-hidden border-4 transition-transform duration-150 ease-out
-        touch-none select-none active:scale-95
+        touch-none select-none active:scale-95 flex items-center justify-center
         ${
           energy > 0
             ? 'border-[#00f0ff] bg-[#0e1a2b] shadow-[0_0_25px_#00f0ff]'
@@ -80,7 +75,7 @@ const MainButton: React.FC<MainButtonProps> = ({ onMultiClick, energy }) => {
       <img
         src="./logo_2.png"
         alt="Main Coin"
-        className="w-full h-full object-cover pointer-events-none select-none"
+        className="max-w-full max-h-full object-contain pointer-events-none select-none"
         draggable={false}
       />
     </button>
@@ -88,6 +83,7 @@ const MainButton: React.FC<MainButtonProps> = ({ onMultiClick, energy }) => {
 };
 
 export default MainButton;
+
 
 
 
