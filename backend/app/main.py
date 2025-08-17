@@ -550,7 +550,7 @@ async def start_background_tasks():
     asyncio.create_task(notify_loop())
     asyncio.create_task(reset_loop())
     asyncio.create_task(run_bot_polling())
-    asyncio.create_task(tournament_reset_loop())  # ← добавили
+    #asyncio.create_task(tournament_reset_loop())  # ← добавили
 
 async def notify_loop():
     while True:
