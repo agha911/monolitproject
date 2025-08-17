@@ -30,7 +30,7 @@ def _img(name: str) -> str:
 PARTNER_TASK = {
     "id": "promo_express_2025_08",  # важно для единовременной выдачи
     "partner_name": "Promo Express",
-    "ig_username": "promoexpress_azerbaijan",
+    "ig_username": "promo_express_az",
     "ig_url": "https://instagram.com/promoexpress_azerbaijan",
     "reward": 500_000,
     # Короткая презентация — 2–3 слайда с изображениями.
