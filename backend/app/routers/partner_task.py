@@ -36,18 +36,18 @@ PARTNER_TASK = {
     # Короткая презентация — 2–3 слайда с изображениями.
     "slides": [
         {
-            "title": "Promo Express nədir?",
-            "text": "Promo Express — Azərbaycanın aparıcı promo məhsul istehsalçısıdır.",
+            "title": "Promo Express",
+            "text": "Sənin biznesinə ilk dəstək nöqtəsi.",
             "image": _img("slide1.webp"),  # положи файл: frontend/public/img/partners/promoexpress/slide1.webp
         },
         {
-            "title": "Onlar nə edirlər?",
-            "text": "Brand geyim, suvenir və POS materialları hazırlayırlar.",
+            "title": "200+ növ promo məhsul",
+            "text": "Vizit kart, buklet, flayer, vinil, banner, stiker, poster, fincan, termos, T-shirt, qələm, dəftər və daha çox.",
             "image": _img("slide2.webp"),
         },
         {
-            "title": "Niyə vacibdir?",
-            "text": "Promo məhsullar tədbirlər, reklam və hədiyyələr üçün idealdır.",
+            "title": "Startap və ya uzun illərin biznesi — fərqi yoxdur.",
+            "text": "Promo Express hər addımda sənin ilk dəstəyindir.",
             "image": _img("slide3.webp"),
         },
     ],
