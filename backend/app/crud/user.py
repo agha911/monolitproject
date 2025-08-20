@@ -250,9 +250,9 @@ async def increment_tournament_clicks(session: AsyncSession, telegram_id: int, a
 
 async def get_tournament_leaderboard(session: AsyncSession, league: str):
     if league == "bronze":
-        min_energy, max_energy = 5000, 15000
+        min_energy, max_energy = 5000, 14999
     elif league == "silver":
-        min_energy, max_energy = 15000, 25000
+        min_energy, max_energy = 15000, 24999
     elif league == "gold":
         min_energy, max_energy = 25000, 30000
     else:
