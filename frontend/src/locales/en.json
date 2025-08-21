@@ -10,7 +10,7 @@
   "error": "An error occurred",
   "checkin_get": "Claim reward",
   "checkin_already": "Already claimed today",
-  "energy_upgrade": "Maximal energy +100",
+  "energy_upgrade": "Maximal energy +1000",
   "buy": "Buy",
   "shop_success": "Max energy increased to {{value}}",
   "shop_error": "Not enough $GAP",
