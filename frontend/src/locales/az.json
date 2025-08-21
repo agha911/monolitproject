@@ -10,7 +10,7 @@
   "error": "Xəta baş verdi",
   "checkin_get": "Mükafatı götür",
   "checkin_already": "Bugünkü mükafat götürülüb",
-  "energy_upgrade": "Maksimal enerji +100",
+  "energy_upgrade": "Maksimal enerji +1000",
   "buy": "Al",
   "shop_success": "Maksimum enerji {{value}}-ə artırıldı",
   "shop_error": "Yetersiz $GAP",
