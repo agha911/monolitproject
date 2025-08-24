@@ -56,19 +56,20 @@ const Clicker: React.FC = () => {
   const [watchRewardJustGot, setWatchRewardJustGot] = useState<number | null>(null);
   const [answerResult, setAnswerResult] = useState<{is_correct:boolean; reward_answer:number; codeword?:string|null} | null>(null);
 
-  // новое: прогресс и финал
+  // прогресс и финал
   const [correctCount, setCorrectCount] = useState(0);
   const [finalReady, setFinalReady] = useState(false);
   const [showFinalModal, setShowFinalModal] = useState(false);
   const [finalKeywords, setFinalKeywords] = useState<string[]>(['','','','','']);
   const [finalSubmitState, setFinalSubmitState] = useState<{status:'idle'|'loading'|'success'|'error'; message?:string; reward?:number}>({status:'idle'});
+  const [copied, setCopied] = useState(false);
   // ========================
 
   useEffect(() => {
     WebApp.ready();
     const user = WebApp.initDataUnsafe?.user;
     if (user) setTelegramUser(user);
-    else alert('Ошибка: не удалось получить данные Telegram-пользователя.');
+    else alert('Xəta: Telegram istifadəçi məlumatlarını almaq mümkün olmadı.');
   }, []);
 
   const userId = telegramUser?.id ? String(telegramUser.id) : 'guest';
@@ -116,13 +117,13 @@ const Clicker: React.FC = () => {
         setSeqReady(true);
         setLoading(false);
       } catch (error) {
-        console.error('Ошибка инициализации пользователя:', error);
+        console.error('İstifadəçinin ilkinləşdirilməsində xəta:', error);
         setSeqReady(false);
       }
     })();
   }, [telegramUser, seqStorageKey]);
 
-  // мягкое автообновление энергии с сервера
+  // yumşaq auto-refresh enerji
   useEffect(() => {
     const interval = setInterval(async () => {
       if (!telegramUser || energy >= maxEnergy) return;
@@ -146,14 +147,14 @@ const Clicker: React.FC = () => {
           setSeqReady(true);
         }
       } catch (err) {
-        console.error('Ошибка при автообновлении энергии:', err);
+        console.error('Auto yeniləmədə xəta:', err);
       }
     }, 10000);
 
     return () => clearInterval(interval);
   }, [telegramUser, energy, maxEnergy, serverSeq, seqStorageKey]);
 
-  // таймер до полного восстановления
+  // tam bərpaya qədər taymer
   useEffect(() => {
     const interval = setInterval(() => {
       if (!lastEnergyUpdate || energy >= maxEnergy) {
@@ -202,7 +203,7 @@ const Clicker: React.FC = () => {
         setClickBoost((p.click_boost_level ?? 0) + 1);
         setServerSeq(Number(p.last_client_seq ?? 0));
       } catch (e) {
-        console.warn("refresh after error failed", e);
+        console.warn("Xəta sonrası yeniləmə alınmadı", e);
       }
     }
   };
@@ -238,7 +239,7 @@ const Clicker: React.FC = () => {
     addClicks(spend);
   };
 
-  // === challenge: загрузка конфига/прогресса и выбор текущего дня ===
+  // === challenge: yükləmə və cari gün seçimi ===
   useEffect(() => {
     if (!telegramUser) return;
 
@@ -255,12 +256,12 @@ const Clicker: React.FC = () => {
         setChallengeEnabled(!!cfg.enabled);
         setChallengeDays(Array.isArray(cfg.days) ? cfg.days : []);
 
-        // посчитаем, сколько верных ответов уже есть
+        // neçə düzgün cavab var
         const correct = (prg.days || []).filter((d: any) => d.is_correct === true).length;
         setCorrectCount(correct);
         setFinalReady(!!prg.final_ready);
 
-        // выберем первый активный день, где нет answered=true
+        // cavab verilməmiş ilk aktiv gün
         const answeredMap: Record<number, boolean> = {};
         (prg.days || []).forEach((d: any) => { answeredMap[d.day_index] = !!d.answered; });
 
@@ -286,7 +287,7 @@ const Clicker: React.FC = () => {
   const energyInt = Math.floor(smoothEnergy);
   const energyProgress = Math.min((smoothEnergy / maxEnergy) * 100, 100);
 
-  // === challenge: действия ===
+  // === challenge: əməliyyatlar ===
   const handleWatch = async () => {
     if (!telegramUser || !currentDayIndex) return;
     try {
@@ -306,7 +307,7 @@ const Clicker: React.FC = () => {
   };
 
   const handleAnswer = async () => {
-    if (!telegramUser || !currentDayIndex || !selectedOption) return;
+    if (!telegramUser || !currentDayIndex || !selectedOption || answerResult) return;
     try {
       const res = await fetch(`${API_BASE_URL}/api/challenge/answer`, {
         method: 'POST',
@@ -327,7 +328,7 @@ const Clicker: React.FC = () => {
         setTotalXp(prev => prev + Number(data.reward_answer));
       }
 
-      // локально: после ответа обновим correctCount/finalReady из /progress
+      // yenidən progress götürək (final üçün)
       try {
         const prgRes = await fetch(`${API_BASE_URL}/api/challenge/progress?telegram_id=${telegramUser.id}`);
         const prg = await prgRes.json();
@@ -335,22 +336,16 @@ const Clicker: React.FC = () => {
         setCorrectCount(correct);
         setFinalReady(!!prg.final_ready);
       } catch {}
-
-      // спрячем модалку и сбросим локальные флаги
-      setShowChallenge(false);
-      setSelectedOption(null);
-      setWatchRewardJustGot(null);
-      setCurrentDayIndex(null);
     } catch (e) {
       console.warn('answer failed', e);
     }
   };
 
-  // === финальное задание ===
+  // === final tapşırıq ===
   const submitFinal = async () => {
     if (!telegramUser) return;
     if (finalKeywords.some(k => !k.trim())) {
-      setFinalSubmitState({status:'error', message:'Заполните все 5 полей'});
+      setFinalSubmitState({status:'error', message:'Bütün 5 xanı doldurun'});
       return;
     }
     try {
@@ -364,12 +359,12 @@ const Clicker: React.FC = () => {
       if (data?.success) {
         const reward = Number(data?.reward ?? 0);
         if (reward > 0) setTotalXp(prev => prev + reward);
-        setFinalSubmitState({status:'success', message:'Готово! Награда начислена.', reward});
+        setFinalSubmitState({status:'success', message:'Uğurlu! Mükafat verildi.', reward});
       } else {
-        setFinalSubmitState({status:'error', message:'Неверный набор слов. Попробуйте ещё раз.'});
+        setFinalSubmitState({status:'error', message:'Sözlər düzgün deyil. Yenidən cəhd edin.'});
       }
     } catch (e) {
-      setFinalSubmitState({status:'error', message:'Ошибка отправки. Повторите позже.'});
+      setFinalSubmitState({status:'error', message:'Göndərmə xətası. Bir az sonra yenidən cəhd edin.'});
     }
   };
   // ==========================
@@ -425,40 +420,40 @@ const Clicker: React.FC = () => {
         `}</style>
       </div>
 
-      {/* === challenge: лоудер/состояние */}
+      {/* loader */}
       {challengeLoading && (
-        <div className="mt-3 text-xs text-[#89dfff] animate-pulse">Загрузка задания…</div>
+        <div className="mt-3 text-xs text-[#89dfff] animate-pulse">Tapşırıq yüklənir…</div>
       )}
 
-      {/* === challenge: маленькая кнопка под основной + бейдж прогресса */}
+      {/* button under clicker */}
       {challengeEnabled && !challengeLoading && currentDayIndex && (
         <button
           className="mt-4 px-4 py-2 rounded-xl bg-[#0d273d] text-[#7ee9ff] border border-[#1f3b57] shadow relative"
-          onClick={() => { setShowChallenge(true); setAnswerResult(null); setWatchRewardJustGot(null); }}
+          onClick={() => { setShowChallenge(true); setAnswerResult(null); setWatchRewardJustGot(null); setCopied(false); }}
         >
-          🎥 Задание дня
+          🎥 Günün tapşırığı
           <span className="ml-2 text-[11px] px-2 py-0.5 rounded-full bg-[#10263d] border border-[#1f3b57] text-[#89dfff] align-middle">
             {correctCount}/5
           </span>
         </button>
       )}
 
-      {/* === challenge: кнопка финального задания (когда готово) */}
+      {/* final button */}
       {challengeEnabled && !challengeLoading && finalReady && (
         <button
           className="mt-2 px-4 py-2 rounded-xl bg-[#00f0ff] text-[#0b1a28] font-semibold shadow"
           onClick={() => { setShowFinalModal(true); setFinalSubmitState({status:'idle'}); }}
         >
-          ⭐ Финальное задание
+          ⭐ Final tapşırıq
         </button>
       )}
 
-      {/* === challenge modal (дневное) === */}
+      {/* daily modal */}
       {showChallenge && currentDay && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
           <div className="w-[92%] max-w-md bg-[#0e1b2a] text-[#c9f6ff] rounded-2xl p-4 shadow-2xl">
             <div className="flex items-center justify-between mb-2">
-              <h3 className="text-lg font-bold">Задание дня — День {currentDay.day_index}</h3>
+              <h3 className="text-lg font-bold">Günün tapşırığı — Gün {currentDay.day_index}</h3>
               <button
                 className="text-[#89dfff] hover:text-white"
                 onClick={() => setShowChallenge(false)}
@@ -473,19 +468,20 @@ const Clicker: React.FC = () => {
               target="_blank"
               rel="noopener noreferrer"
             >
-              Открыть видео в TikTok
+              TikTok videosunu aç
             </a>
 
             <div className="mb-3">
               <button
                 className="px-3 py-2 rounded-lg bg-[#10263d] border border-[#1f3b57]"
                 onClick={handleWatch}
+                disabled={watchRewardJustGot !== null}
               >
-                Я посмотрел видео
+                Videoya baxdım
               </button>
               {watchRewardJustGot !== null && (
                 <div className="text-xs mt-1 text-[#7ee9ff]">
-                  Награда за просмотр: +{watchRewardJustGot} GAP
+                  Baxış mükafatı: +{watchRewardJustGot} GAP
                 </div>
               )}
             </div>
@@ -506,6 +502,7 @@ const Clicker: React.FC = () => {
                       value={k}
                       checked={selectedOption === k}
                       onChange={() => setSelectedOption(k)}
+                      disabled={!!answerResult}
                     />
                     <span>{label}</span>
                   </label>
@@ -517,44 +514,78 @@ const Clicker: React.FC = () => {
               <button
                 className="flex-1 px-3 py-2 rounded-lg bg-[#00f0ff] text-[#0b1a28] font-semibold disabled:opacity-50"
                 onClick={handleAnswer}
-                disabled={!selectedOption}
+                disabled={!selectedOption || !!answerResult}
               >
-                Ответить
+                Cavab ver
               </button>
-              <button
-                className="px-3 py-2 rounded-lg bg-[#10263d] border border-[#1f3b57]"
-                onClick={() => { setShowChallenge(false); }}
-              >
-                Позже
-              </button>
+              {!answerResult && (
+                <button
+                  className="px-3 py-2 rounded-lg bg-[#10263d] border border-[#1f3b57]"
+                  onClick={() => { setShowChallenge(false); }}
+                >
+                  Sonra
+                </button>
+              )}
             </div>
 
             {answerResult && (
               <div className="mt-3 text-sm">
                 <div className={answerResult.is_correct ? 'text-green-400' : 'text-red-300'}>
-                  {answerResult.is_correct ? 'Верно!' : 'Неверно'}
+                  {answerResult.is_correct ? 'Doğru!' : 'Səhv'}
                 </div>
                 <div className="text-[#7ee9ff]">
-                  Награда за ответ: +{answerResult.reward_answer} GAP
+                  Cavab üçün mükafat: +{answerResult.reward_answer} GAP
                 </div>
+
                 {answerResult.codeword && (
-                  <div className="mt-1">
-                    Кодовое слово: <span className="font-bold">{answerResult.codeword}</span>
+                  <div className="mt-2">
+                    Şifrə sözü: <span className="font-bold">{answerResult.codeword}</span>
                   </div>
                 )}
+
+                <div className="mt-3 flex gap-2">
+                  {answerResult.codeword && (
+                    <button
+                      className="px-3 py-2 rounded-lg bg-[#10263d] border border-[#1f3b57]"
+                      onClick={async () => {
+                        try {
+                          await navigator.clipboard.writeText(answerResult.codeword as string);
+                          setCopied(true);
+                          setTimeout(() => setCopied(false), 1500);
+                        } catch {}
+                      }}
+                    >
+                      {copied ? 'Kopyalandı!' : 'Kopyala'}
+                    </button>
+                  )}
+
+                  <button
+                    className="flex-1 px-3 py-2 rounded-lg bg-[#00f0ff] text-[#0b1a28] font-semibold"
+                    onClick={() => {
+                      setShowChallenge(false);
+                      setSelectedOption(null);
+                      setWatchRewardJustGot(null);
+                      setAnswerResult(null);
+                      setCopied(false);
+                      setCurrentDayIndex(null); // növbəti günə qədər gizlə
+                    }}
+                  >
+                    Bağla
+                  </button>
+                </div>
               </div>
             )}
           </div>
         </div>
       )}
-      {/* === end challenge modal === */}
+      {/* end daily modal */}
 
-      {/* === final modal === */}
+      {/* final modal */}
       {showFinalModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
           <div className="w-[92%] max-w-md bg-[#0e1b2a] text-[#c9f6ff] rounded-2xl p-4 shadow-2xl">
             <div className="flex items-center justify-between mb-3">
-              <h3 className="text-lg font-bold">Финальное задание</h3>
+              <h3 className="text-lg font-bold">Final tapşırıq</h3>
               <button
                 className="text-[#89dfff] hover:text-white"
                 onClick={() => setShowFinalModal(false)}
@@ -564,7 +595,7 @@ const Clicker: React.FC = () => {
             </div>
 
             <p className="text-sm text-[#89dfff] mb-3">
-              Введите 5 кодовых слов по порядку (День 1 → День 5).
+              5 şifrə sözünü ardıcıllıqla daxil edin (Gün 1 → Gün 5).
             </p>
 
             <div className="grid grid-cols-1 gap-2">
@@ -578,7 +609,7 @@ const Clicker: React.FC = () => {
                     next[i] = e.target.value;
                     setFinalKeywords(next);
                   }}
-                  placeholder={`Слово ${i+1}`}
+                  placeholder={`Söz ${i+1}`}
                   className="w-full px-3 py-2 rounded-lg bg-[#0d273d] border border-[#1f3b57] outline-none"
                 />
               ))}
@@ -590,13 +621,13 @@ const Clicker: React.FC = () => {
                 onClick={submitFinal}
                 disabled={finalSubmitState.status === 'loading'}
               >
-                {finalSubmitState.status === 'loading' ? 'Проверяем…' : 'Отправить'}
+                {finalSubmitState.status === 'loading' ? 'Yoxlanılır…' : 'Göndər'}
               </button>
               <button
                 className="px-3 py-2 rounded-lg bg-[#10263d] border border-[#1f3b57]"
                 onClick={() => setShowFinalModal(false)}
               >
-                Позже
+                Sonra
               </button>
             </div>
 
@@ -609,7 +640,7 @@ const Clicker: React.FC = () => {
                 )}
                 {finalSubmitState.status === 'error' && (
                   <div className="text-red-300">
-                    {finalSubmitState.message || 'Ошибка.'}
+                    {finalSubmitState.message || 'Xəta.'}
                   </div>
                 )}
               </div>
@@ -617,12 +648,13 @@ const Clicker: React.FC = () => {
           </div>
         </div>
       )}
-      {/* === end final modal === */}
+      {/* end final modal */}
     </div>
   );
 };
 
 export default Clicker;
+
 
 
 
