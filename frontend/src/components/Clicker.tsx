@@ -8,6 +8,19 @@ import API_BASE_URL from './config';
 import { useClickBuffer, FlushResponse } from '../hooks/useClickBuffer';
 import { useAnimatedInt } from '../hooks/useAnimatedInt';
 
+type ChallengeDay = {
+  day_index: number;
+  tiktok_url: string;
+  question: string;
+  option_a: string;
+  option_b: string;
+  option_c: string;
+  option_d: string;
+  reward_watch: number;
+  reward_answer: number;
+  is_active: boolean;
+};
+
 const Clicker: React.FC = () => {
   const { t } = useTranslation();
 
@@ -32,6 +45,24 @@ const Clicker: React.FC = () => {
   const [floatingTexts, setFloatingTexts] = useState<any[]>([]);
   const [serverSeq, setServerSeq] = useState<number | null>(null);
   const [seqReady, setSeqReady] = useState(false);
+
+  // === challenge state ===
+  const [challengeEnabled, setChallengeEnabled] = useState(false);
+  const [challengeDays, setChallengeDays] = useState<ChallengeDay[]>([]);
+  const [challengeLoading, setChallengeLoading] = useState(false);
+  const [showChallenge, setShowChallenge] = useState(false);
+  const [currentDayIndex, setCurrentDayIndex] = useState<number | null>(null);
+  const [selectedOption, setSelectedOption] = useState<'A'|'B'|'C'|'D'|null>(null);
+  const [watchRewardJustGot, setWatchRewardJustGot] = useState<number | null>(null);
+  const [answerResult, setAnswerResult] = useState<{is_correct:boolean; reward_answer:number; codeword?:string|null} | null>(null);
+
+  // новое: прогресс и финал
+  const [correctCount, setCorrectCount] = useState(0);
+  const [finalReady, setFinalReady] = useState(false);
+  const [showFinalModal, setShowFinalModal] = useState(false);
+  const [finalKeywords, setFinalKeywords] = useState<string[]>(['','','','','']);
+  const [finalSubmitState, setFinalSubmitState] = useState<{status:'idle'|'loading'|'success'|'error'; message?:string; reward?:number}>({status:'idle'});
+  // ========================
 
   useEffect(() => {
     WebApp.ready();
@@ -103,7 +134,6 @@ const Clicker: React.FC = () => {
         });
 
         const data = await res.json();
-        // просто двигаем target — useAnimatedInt сам плавно подтянет визуал
         setEnergy(data.energy);
         setLastEnergyUpdate(data.lastEnergyUpdate ? new Date(data.lastEnergyUpdate) : null);
         setMaxEnergy(data.max_energy ?? 1000);
@@ -152,7 +182,7 @@ const Clicker: React.FC = () => {
 
   const onReconcile = async (data: FlushResponse) => {
     if (data.status === "ok") {
-      setEnergy(data.energy);          // таргет обновился — визуал плавно догонит
+      setEnergy(data.energy);
       setTotalXp(data.total_xp);
       setServerSeq(Number(data.server_seq ?? 0));
     } else if (data.status === "noop") {
@@ -177,7 +207,7 @@ const Clicker: React.FC = () => {
     }
   };
 
-  const { addClicks /*, forceFlush*/ } = useClickBuffer({
+  const { addClicks } = useClickBuffer({
     initData: WebApp.initData,
     sessionId,
     onReconcile,
@@ -193,12 +223,11 @@ const Clicker: React.FC = () => {
 
   const handleMultiClick = (x: number, y: number) => {
     if (!telegramUser || loading || energy <= 0) return;
-
     const spend = Math.min(clickBoost, energy);
     if (spend <= 0) return;
 
     setTotalXp((prev) => prev + spend);
-    setEnergy((prev) => Math.max(0, prev - spend)); // меняем ТАРГЕТ — визуал уйдёт плавно
+    setEnergy((prev) => Math.max(0, prev - spend));
 
     const id = Date.now() + Math.random();
     setFloatingTexts((prev) => [...prev, { id, value: spend, x, y }]);
@@ -209,8 +238,141 @@ const Clicker: React.FC = () => {
     addClicks(spend);
   };
 
+  // === challenge: загрузка конфига/прогресса и выбор текущего дня ===
+  useEffect(() => {
+    if (!telegramUser) return;
+
+    (async () => {
+      try {
+        setChallengeLoading(true);
+        const [cfgRes, prgRes] = await Promise.all([
+          fetch(`${API_BASE_URL}/api/challenge/config`),
+          fetch(`${API_BASE_URL}/api/challenge/progress?telegram_id=${telegramUser.id}`)
+        ]);
+        const cfg = await cfgRes.json();
+        const prg = await prgRes.json();
+
+        setChallengeEnabled(!!cfg.enabled);
+        setChallengeDays(Array.isArray(cfg.days) ? cfg.days : []);
+
+        // посчитаем, сколько верных ответов уже есть
+        const correct = (prg.days || []).filter((d: any) => d.is_correct === true).length;
+        setCorrectCount(correct);
+        setFinalReady(!!prg.final_ready);
+
+        // выберем первый активный день, где нет answered=true
+        const answeredMap: Record<number, boolean> = {};
+        (prg.days || []).forEach((d: any) => { answeredMap[d.day_index] = !!d.answered; });
+
+        const next = (cfg.days || [])
+          .filter((d: ChallengeDay) => d.is_active)
+          .map((d: ChallengeDay) => d.day_index)
+          .find((idx: number) => !answeredMap[idx]);
+
+        setCurrentDayIndex(next ?? null);
+      } catch (e) {
+        console.warn('challenge init failed', e);
+      } finally {
+        setChallengeLoading(false);
+      }
+    })();
+  }, [telegramUser]);
+
+  const currentDay: ChallengeDay | null = useMemo(() => {
+    if (!currentDayIndex) return null;
+    return challengeDays.find(d => d.day_index === currentDayIndex) || null;
+  }, [currentDayIndex, challengeDays]);
+
   const energyInt = Math.floor(smoothEnergy);
   const energyProgress = Math.min((smoothEnergy / maxEnergy) * 100, 100);
+
+  // === challenge: действия ===
+  const handleWatch = async () => {
+    if (!telegramUser || !currentDayIndex) return;
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/challenge/watch`, {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ telegram_id: telegramUser.id, day_index: currentDayIndex })
+      });
+      const data = await res.json();
+      setWatchRewardJustGot(data?.reward_watch ?? 0);
+      if (typeof data?.reward_watch === 'number' && data.reward_watch > 0) {
+        setTotalXp(prev => prev + data.reward_watch);
+      }
+    } catch (e) {
+      console.warn('watch failed', e);
+    }
+  };
+
+  const handleAnswer = async () => {
+    if (!telegramUser || !currentDayIndex || !selectedOption) return;
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/challenge/answer`, {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({
+          telegram_id: telegramUser.id,
+          day_index: currentDayIndex,
+          selected_option: selectedOption
+        })
+      });
+      const data = await res.json();
+      setAnswerResult({
+        is_correct: !!data?.is_correct,
+        reward_answer: Number(data?.reward_answer ?? 0),
+        codeword: data?.codeword ?? null
+      });
+      if (Number(data?.reward_answer ?? 0) > 0) {
+        setTotalXp(prev => prev + Number(data.reward_answer));
+      }
+
+      // локально: после ответа обновим correctCount/finalReady из /progress
+      try {
+        const prgRes = await fetch(`${API_BASE_URL}/api/challenge/progress?telegram_id=${telegramUser.id}`);
+        const prg = await prgRes.json();
+        const correct = (prg.days || []).filter((d: any) => d.is_correct === true).length;
+        setCorrectCount(correct);
+        setFinalReady(!!prg.final_ready);
+      } catch {}
+
+      // спрячем модалку и сбросим локальные флаги
+      setShowChallenge(false);
+      setSelectedOption(null);
+      setWatchRewardJustGot(null);
+      setCurrentDayIndex(null);
+    } catch (e) {
+      console.warn('answer failed', e);
+    }
+  };
+
+  // === финальное задание ===
+  const submitFinal = async () => {
+    if (!telegramUser) return;
+    if (finalKeywords.some(k => !k.trim())) {
+      setFinalSubmitState({status:'error', message:'Заполните все 5 полей'});
+      return;
+    }
+    try {
+      setFinalSubmitState({status:'loading'});
+      const res = await fetch(`${API_BASE_URL}/api/challenge/final/submit`, {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ telegram_id: telegramUser.id, keywords: finalKeywords })
+      });
+      const data = await res.json();
+      if (data?.success) {
+        const reward = Number(data?.reward ?? 0);
+        if (reward > 0) setTotalXp(prev => prev + reward);
+        setFinalSubmitState({status:'success', message:'Готово! Награда начислена.', reward});
+      } else {
+        setFinalSubmitState({status:'error', message:'Неверный набор слов. Попробуйте ещё раз.'});
+      }
+    } catch (e) {
+      setFinalSubmitState({status:'error', message:'Ошибка отправки. Повторите позже.'});
+    }
+  };
+  // ==========================
 
   return (
     <div className="w-full min-h-screen bg-[#131f2f] text-center flex flex-col items-center justify-start pt-8 px-4 text-[#00f0ff]">
@@ -223,7 +385,6 @@ const Clicker: React.FC = () => {
         </label>
         <div className="w-full h-4 bg-[#0d273d] rounded overflow-hidden shadow-inner">
           <div
-            // убрали css-транзишн по ширине, чтобы не было двойного сглаживания
             className="h-full bg-gradient-to-r from-[#7af9ff] to-[#00f0ff]"
             style={{ width: `${energyProgress}%`, transition: "none" }}
           />
@@ -263,11 +424,206 @@ const Clicker: React.FC = () => {
           }
         `}</style>
       </div>
+
+      {/* === challenge: лоудер/состояние */}
+      {challengeLoading && (
+        <div className="mt-3 text-xs text-[#89dfff] animate-pulse">Загрузка задания…</div>
+      )}
+
+      {/* === challenge: маленькая кнопка под основной + бейдж прогресса */}
+      {challengeEnabled && !challengeLoading && currentDayIndex && (
+        <button
+          className="mt-4 px-4 py-2 rounded-xl bg-[#0d273d] text-[#7ee9ff] border border-[#1f3b57] shadow relative"
+          onClick={() => { setShowChallenge(true); setAnswerResult(null); setWatchRewardJustGot(null); }}
+        >
+          🎥 Задание дня
+          <span className="ml-2 text-[11px] px-2 py-0.5 rounded-full bg-[#10263d] border border-[#1f3b57] text-[#89dfff] align-middle">
+            {correctCount}/5
+          </span>
+        </button>
+      )}
+
+      {/* === challenge: кнопка финального задания (когда готово) */}
+      {challengeEnabled && !challengeLoading && finalReady && (
+        <button
+          className="mt-2 px-4 py-2 rounded-xl bg-[#00f0ff] text-[#0b1a28] font-semibold shadow"
+          onClick={() => { setShowFinalModal(true); setFinalSubmitState({status:'idle'}); }}
+        >
+          ⭐ Финальное задание
+        </button>
+      )}
+
+      {/* === challenge modal (дневное) === */}
+      {showChallenge && currentDay && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
+          <div className="w-[92%] max-w-md bg-[#0e1b2a] text-[#c9f6ff] rounded-2xl p-4 shadow-2xl">
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="text-lg font-bold">Задание дня — День {currentDay.day_index}</h3>
+              <button
+                className="text-[#89dfff] hover:text-white"
+                onClick={() => setShowChallenge(false)}
+              >
+                ✖
+              </button>
+            </div>
+
+            <a
+              className="inline-block mb-3 text-[#00f0ff] underline"
+              href={currentDay.tiktok_url}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              Открыть видео в TikTok
+            </a>
+
+            <div className="mb-3">
+              <button
+                className="px-3 py-2 rounded-lg bg-[#10263d] border border-[#1f3b57]"
+                onClick={handleWatch}
+              >
+                Я посмотрел видео
+              </button>
+              {watchRewardJustGot !== null && (
+                <div className="text-xs mt-1 text-[#7ee9ff]">
+                  Награда за просмотр: +{watchRewardJustGot} GAP
+                </div>
+              )}
+            </div>
+
+            <div className="text-left">
+              <div className="font-semibold mb-2">{currentDay.question}</div>
+              {(['A','B','C','D'] as const).map((k) => {
+                const label =
+                  k === 'A' ? currentDay.option_a :
+                  k === 'B' ? currentDay.option_b :
+                  k === 'C' ? currentDay.option_c :
+                               currentDay.option_d;
+                return (
+                  <label key={k} className="flex items-center gap-2 mb-2 cursor-pointer">
+                    <input
+                      type="radio"
+                      name="challenge_option"
+                      value={k}
+                      checked={selectedOption === k}
+                      onChange={() => setSelectedOption(k)}
+                    />
+                    <span>{label}</span>
+                  </label>
+                );
+              })}
+            </div>
+
+            <div className="mt-3 flex gap-2">
+              <button
+                className="flex-1 px-3 py-2 rounded-lg bg-[#00f0ff] text-[#0b1a28] font-semibold disabled:opacity-50"
+                onClick={handleAnswer}
+                disabled={!selectedOption}
+              >
+                Ответить
+              </button>
+              <button
+                className="px-3 py-2 rounded-lg bg-[#10263d] border border-[#1f3b57]"
+                onClick={() => { setShowChallenge(false); }}
+              >
+                Позже
+              </button>
+            </div>
+
+            {answerResult && (
+              <div className="mt-3 text-sm">
+                <div className={answerResult.is_correct ? 'text-green-400' : 'text-red-300'}>
+                  {answerResult.is_correct ? 'Верно!' : 'Неверно'}
+                </div>
+                <div className="text-[#7ee9ff]">
+                  Награда за ответ: +{answerResult.reward_answer} GAP
+                </div>
+                {answerResult.codeword && (
+                  <div className="mt-1">
+                    Кодовое слово: <span className="font-bold">{answerResult.codeword}</span>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+      {/* === end challenge modal === */}
+
+      {/* === final modal === */}
+      {showFinalModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
+          <div className="w-[92%] max-w-md bg-[#0e1b2a] text-[#c9f6ff] rounded-2xl p-4 shadow-2xl">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-lg font-bold">Финальное задание</h3>
+              <button
+                className="text-[#89dfff] hover:text-white"
+                onClick={() => setShowFinalModal(false)}
+              >
+                ✖
+              </button>
+            </div>
+
+            <p className="text-sm text-[#89dfff] mb-3">
+              Введите 5 кодовых слов по порядку (День 1 → День 5).
+            </p>
+
+            <div className="grid grid-cols-1 gap-2">
+              {finalKeywords.map((val, i) => (
+                <input
+                  key={i}
+                  type="text"
+                  value={val}
+                  onChange={(e) => {
+                    const next = [...finalKeywords];
+                    next[i] = e.target.value;
+                    setFinalKeywords(next);
+                  }}
+                  placeholder={`Слово ${i+1}`}
+                  className="w-full px-3 py-2 rounded-lg bg-[#0d273d] border border-[#1f3b57] outline-none"
+                />
+              ))}
+            </div>
+
+            <div className="mt-3 flex gap-2">
+              <button
+                className="flex-1 px-3 py-2 rounded-lg bg-[#00f0ff] text-[#0b1a28] font-semibold disabled:opacity-50"
+                onClick={submitFinal}
+                disabled={finalSubmitState.status === 'loading'}
+              >
+                {finalSubmitState.status === 'loading' ? 'Проверяем…' : 'Отправить'}
+              </button>
+              <button
+                className="px-3 py-2 rounded-lg bg-[#10263d] border border-[#1f3b57]"
+                onClick={() => setShowFinalModal(false)}
+              >
+                Позже
+              </button>
+            </div>
+
+            {finalSubmitState.status !== 'idle' && (
+              <div className="mt-3 text-sm">
+                {finalSubmitState.status === 'success' && (
+                  <div className="text-green-400">
+                    {finalSubmitState.message} {finalSubmitState.reward ? `( +${finalSubmitState.reward} GAP )` : null}
+                  </div>
+                )}
+                {finalSubmitState.status === 'error' && (
+                  <div className="text-red-300">
+                    {finalSubmitState.message || 'Ошибка.'}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+      {/* === end final modal === */}
     </div>
   );
 };
 
 export default Clicker;
+
 
 
 
