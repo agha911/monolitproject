@@ -1,7 +1,9 @@
 # app/db_challenge.py (или рядом с остальными таблицами)
 from sqlalchemy import Table, Column, BigInteger, Integer, Boolean, CHAR, TIMESTAMP, MetaData
 from sqlalchemy.dialects.postgresql import BIGINT
-from app.core.db import metadata  # используй общий metadata проекта
+from app.database import Base
+
+metadata = Base.metadata
 
 challenge_user_progress = Table(
     "challenge_user_progress",
