@@ -1,4 +1,4 @@
-# app/db_challenge.py (или рядом с остальными таблицами)
+# app/models/db_challenge.py
 from sqlalchemy import Table, Column, BigInteger, Integer, Boolean, CHAR, TIMESTAMP, MetaData
 from sqlalchemy.dialects.postgresql import BIGINT
 from app.database import Base
@@ -32,4 +32,6 @@ challenge_user_final = Table(
     Column("reward_granted", Boolean, nullable=False),
     Column("submitted_at", TIMESTAMP),
     Column("updated_at", TIMESTAMP, nullable=False),
+    Column("started_at", TIMESTAMP),  # 🔹 новое поле, соответствует миграции
 )
+
