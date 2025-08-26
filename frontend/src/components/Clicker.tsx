@@ -359,7 +359,6 @@ const Clicker: React.FC = () => {
           const prg = await prgRes.json();
           const nx = Number(prg.next_required_day ?? 0) || null;
           setNextRequiredDay(nx);
-          setCurrentDayIndex(nx);
           setSecondsToNext(typeof prg.seconds_to_next_day === 'number' ? prg.seconds_to_next_day : null);
         } catch {}
         return;
@@ -575,14 +574,6 @@ const Clicker: React.FC = () => {
               >
                 Cavab ver
               </button>
-              {!answerResult && (
-                <button
-                  className="px-3 py-2 rounded-lg bg-[#10263d] border border-[#1f3b57]"
-                  onClick={() => { setShowChallenge(false); }}
-                >
-                  Sonra
-                </button>
-              )}
             </div>
 
             {answerResult && (
@@ -719,6 +710,7 @@ const Clicker: React.FC = () => {
 };
 
 export default Clicker;
+
 
 
 
