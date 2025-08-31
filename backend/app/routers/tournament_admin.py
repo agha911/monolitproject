@@ -2,7 +2,7 @@ from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db import get_async_session
+from app.database import get_async_session
 from app.crud.crud_tournament_winner import finalize_tournament_winners
 
 router = APIRouter(prefix="/api/tournament", tags=["tournament-admin"])
