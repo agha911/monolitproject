@@ -21,7 +21,7 @@ from app.bot_instance import bot
 from app.config import TELEGRAM_BOT_TOKEN
 from app.notifications.notify_energy import notify_max_energy_users
 from app.notifications.reset_energy_notified import reset_energy_flags  # не используем
-from app.routers.tournament_admin import router as tournament_admin_router
+from app.oneoff.finalize_clicks_aug18_sep1 import register_oneoff_finalize_task
 
 # ---------------- logging setup ----------------
 
@@ -475,7 +475,7 @@ app.include_router(tournament.router)
 app.include_router(stats.router)
 app.include_router(partner_task.router)
 app.include_router(challenge.router)
-app.include_router(tournament_admin_router)
+
 
 # ---------------- background ----------------
 
@@ -553,7 +553,8 @@ async def start_background_tasks():
     asyncio.create_task(notify_loop())
     #asyncio.create_task(reset_loop())
     asyncio.create_task(run_bot_polling())
-    #asyncio.create_task(tournament_reset_loop())  # ← добавили
+    #asyncio.create_task(tournament_reset_loop())# ← добавили
+    register_oneoff_finalize_task()
 
 async def notify_loop():
     while True:
