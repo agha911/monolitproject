@@ -9,8 +9,8 @@ from sqlalchemy import (
 from sqlalchemy.orm import relationship
 from sqlalchemy.dialects.postgresql import ENUM as PGEnum
 
-from app.models.db_base import Base        # поправь путь под свой проект
-from app.models.db_user import User        # поправь путь под свой проект
+from app.database import Base        # поправь путь под свой проект
+from app.models.user import User        # поправь путь под свой проект
 
 LeagueEnum = PGEnum('bronze', 'silver', 'gold', name='league_enum', create_type=False)
 
