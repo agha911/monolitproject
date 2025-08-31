@@ -22,6 +22,7 @@ from app.config import TELEGRAM_BOT_TOKEN
 from app.notifications.notify_energy import notify_max_energy_users
 from app.notifications.reset_energy_notified import reset_energy_flags  # не используем
 from app.oneoff.finalize_clicks_aug18_sep1 import register_oneoff_finalize_task
+from app.notifications.winners_handlers import register_winners_handlers
 
 # ---------------- logging setup ----------------
 
@@ -552,6 +553,7 @@ async def reset_loop():
 async def start_background_tasks():
     asyncio.create_task(notify_loop())
     #asyncio.create_task(reset_loop())
+    register_winners_handlers(bot)
     asyncio.create_task(run_bot_polling())
     #asyncio.create_task(tournament_reset_loop())# ← добавили
     register_oneoff_finalize_task()
