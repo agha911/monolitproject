@@ -7,8 +7,8 @@ from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
 
 from app.models.db_tournament_winner import TournamentWinner
-from app.models.db_user import User
-from app.crud.crud_user import get_tournament_leaderboard  # твоя функция
+from app.models.user import User
+from app.crud.user import get_tournament_leaderboard  # твоя функция
 
 League = Literal["bronze", "silver", "gold"]
 
