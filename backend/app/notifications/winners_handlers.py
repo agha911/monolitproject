@@ -11,7 +11,6 @@ import requests
 from telebot.async_telebot import AsyncTeleBot
 from telebot import types
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_async_session
 from app.models.db_tournament_winner import TournamentWinner
@@ -23,7 +22,8 @@ USDT_REWARD: Dict[Tuple[str, int], int] = {
 }
 
 PRIZES = {"thermos": "Termos", "powerbank": "Powerbank", "tshirt": "Futbolka"}
-SIZES  = {"XS","S","M","L","XL","XXL"}
+SIZES  = {"XS", "S", "M", "L", "XL", "XXL"}
+LEAGUE_AZ = {"gold": "Qızıl", "silver": "Gümüş", "bronze": "Bürünc"}
 
 _TRON_RE = re.compile(r"^T[1-9A-HJ-NP-Za-km-z]{25,49}$")
 def looks_like_trc20(addr: str) -> bool:
@@ -57,7 +57,7 @@ def kb_prizes(winner_id: int) -> types.InlineKeyboardMarkup:
 def kb_sizes(winner_id: int) -> types.InlineKeyboardMarkup:
     kb = types.InlineKeyboardMarkup()
     row: list[types.InlineKeyboardButton] = []
-    for s in ["XS","S","M","L","XL","XXL"]:
+    for s in ["XS", "S", "M", "L", "XL", "XXL"]:
         row.append(types.InlineKeyboardButton(s, callback_data=f"size:{winner_id}:{s}"))
         if len(row) == 3:
             kb.row(*row); row = []
@@ -73,7 +73,7 @@ def kb_confirm(winner_id: int) -> types.InlineKeyboardMarkup:
 def summarize_az(st: WinnerState) -> str:
     lines = [
         "🎉 Yekun:",
-        f"• Liqa: {st.league.capitalize()}",
+        f"• Liqa: {LEAGUE_AZ.get(st.league, st.league)}",
         f"• Yer: {st.rank}",
         f"• Kliklər: {st.clicks}",
         f"• Tərəfdaş hədiyyəsi: {PRIZES.get(st.gift_choice,'—')}",
@@ -101,6 +101,7 @@ async def _ensure_state(chat_id: int, winner_id: int) -> Optional[WinnerState]:
     if chat_id in STATE and STATE[chat_id].winner_id == winner_id:
         return STATE[chat_id]
 
+    ret: Optional[WinnerState] = None
     async for session in get_async_session():
         # winner по id
         q = await session.execute(
@@ -110,20 +111,23 @@ async def _ensure_state(chat_id: int, winner_id: int) -> Optional[WinnerState]:
         )
         row = q.first()
         if not row:
-            return None
-        w, u = row
-        # безопасность: нажимать кнопки может только сам победитель
-        if not getattr(u, "telegram_id", None) or int(u.telegram_id) != int(chat_id):
-            return None
-        st = WinnerState(
-            winner_id=int(w.id),
-            league=w.league,
-            rank=int(w.rank_in_league),
-            clicks=int(w.clicks_snapshot),
-        )
-        STATE[chat_id] = st
-        return st
-    return None
+            ret = None
+        else:
+            w, u = row
+            # безопасность: нажимать кнопки может только сам победитель
+            if not getattr(u, "telegram_id", None) or int(u.telegram_id) != int(chat_id):
+                ret = None
+            else:
+                st = WinnerState(
+                    winner_id=int(w.id),
+                    league=w.league,
+                    rank=int(w.rank_in_league),
+                    clicks=int(w.clicks_snapshot),
+                )
+                STATE[chat_id] = st
+                ret = st
+        break  # закрываем сессию, т.к. get_async_session — генератор
+    return ret
 
 def register_winners_handlers(bot: AsyncTeleBot):
     @bot.callback_query_handler(func=lambda c: True)
@@ -173,7 +177,7 @@ def register_winners_handlers(bot: AsyncTeleBot):
                 await bot.answer_callback_query(c.id, "Xəta"); return
 
             st = await _ensure_state(chat_id, winner_id)
-            if not st or st.stage not in {"choose_size","choose_prize"}:
+            if not st or st.stage not in {"choose_size", "choose_prize"}:
                 await bot.answer_callback_query(c.id, "Sessiya tapılmadı"); return
             if size not in SIZES:
                 await bot.answer_callback_query(c.id, "Ölçü düzgün deyil"); return
@@ -201,6 +205,14 @@ def register_winners_handlers(bot: AsyncTeleBot):
             st = await _ensure_state(chat_id, winner_id)
             if not st or st.stage != "confirm":
                 await bot.answer_callback_query(c.id, "Sessiya tapılmadı"); return
+
+            # обязательные проверки
+            if not st.gift_choice:
+                await bot.answer_callback_query(c.id, "Hədiyyəni seçməlisən"); return
+            if st.gift_choice == "tshirt" and not st.tshirt_size:
+                await bot.answer_callback_query(c.id, "Futbolka ölçüsünü seçməlisən"); return
+            if (st.league, st.rank) in USDT_REWARD and not st.trc20_address:
+                await bot.answer_callback_query(c.id, "TRC20 ünvanını göndərməlisən"); return
 
             payload = {"gift_choice": st.gift_choice, "tshirt_size": st.tshirt_size}
             if (st.league, st.rank) in USDT_REWARD:
@@ -246,3 +258,4 @@ def register_winners_handlers(bot: AsyncTeleBot):
         st.trc20_address = addr
         st.stage = "confirm"
         await bot.send_message(chat_id, summarize_az(st), reply_markup=kb_confirm(st.winner_id))
+
