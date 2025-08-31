@@ -549,7 +549,7 @@ async def reset_loop():
 @app.on_event("startup")
 async def start_background_tasks():
     asyncio.create_task(notify_loop())
-    asyncio.create_task(reset_loop())
+    #asyncio.create_task(reset_loop())
     asyncio.create_task(run_bot_polling())
     #asyncio.create_task(tournament_reset_loop())  # ← добавили
 
