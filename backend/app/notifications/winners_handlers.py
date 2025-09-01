@@ -8,10 +8,9 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Dict, Optional, Tuple, List
 
-import requests
 from telebot.async_telebot import AsyncTeleBot
 from telebot import types
-from sqlalchemy import select
+from sqlalchemy import select, update
 
 from app.database import get_async_session
 from app.models.db_tournament_winner import TournamentWinner
@@ -33,9 +32,6 @@ LEAGUE_AZ = {"gold": "Qızıl", "silver": "Gümüş", "bronze": "Bürünc"}
 _TRON_RE = re.compile(r"^T[1-9A-HJ-NP-Za-km-z]{25,49}$")
 def looks_like_trc20(addr: str) -> bool:
     return bool(_TRON_RE.fullmatch((addr or "").strip()))
-
-API_BASE_URL  = os.getenv("API_BASE_URL", "https://monolitproject.onrender.com")
-PATCH_URL_TPL = f"{API_BASE_URL}/api/tournament/winners/{{winner_id}}"
 
 @dataclass
 class WinnerState:
@@ -90,16 +86,6 @@ def summarize_az(st: WinnerState) -> str:
         lines.append(f"• Pul mükafatı: {reward} USDT (TRC20)")
         lines.append(f"• TRC20 ünvanı: {st.trc20_address or '—'}")
     return "\n".join(lines)
-
-async def _patch_winner_async(winner_id: int, payload: dict) -> bool:
-    loop = asyncio.get_running_loop()
-    def _do():
-        try:
-            r = requests.patch(PATCH_URL_TPL.format(winner_id=winner_id), json=payload, timeout=20)
-            return r.status_code == 200
-        except Exception:
-            return False
-    return await loop.run_in_executor(None, _do)
 
 async def _ensure_state(chat_id: int, winner_id: int) -> Optional[WinnerState]:
     """Если STATE отсутствует (рассылка пришла из другого процесса), восстановим по БД."""
@@ -245,14 +231,20 @@ def register_winners_handlers(bot: AsyncTeleBot):
             await bot.answer_callback_query(c.id)
             return
 
-        # confirm:<winner_id>
+        # confirm:<winner_id>  ИЛИ просто confirm (старый формат)
         if kind == "confirm":
-            try:
-                winner_id = int(rest)
-            except Exception:
-                await bot.answer_callback_query(c.id, "Xəta"); return
+            if rest.strip():
+                try:
+                    winner_id = int(rest)
+                except Exception:
+                    await bot.answer_callback_query(c.id, "Xəta"); return
+                st = await _ensure_state(chat_id, winner_id)
+            else:
+                st = STATE.get(chat_id) or await _ensure_state_by_chat(chat_id)
+                if not st:
+                    await bot.answer_callback_query(c.id, "Sessiya tapılmadı"); return
+                winner_id = st.winner_id
 
-            st = await _ensure_state(chat_id, winner_id)
             if not st or st.stage != "confirm":
                 await bot.answer_callback_query(c.id, "Sessiya tapılmadı"); return
 
@@ -264,13 +256,33 @@ def register_winners_handlers(bot: AsyncTeleBot):
             if (st.league, st.rank) in USDT_REWARD and not st.trc20_address:
                 await bot.answer_callback_query(c.id, "TRC20 ünvanını göndərməlisən"); return
 
-            payload = {"gift_choice": st.gift_choice, "tshirt_size": st.tshirt_size}
-            if (st.league, st.rank) in USDT_REWARD:
-                payload["trc20_address"] = st.trc20_address
+            # 💾 Сохраняем напрямую в БД
+            updated = False
+            async for session in get_async_session():
+                try:
+                    stmt = (
+                        update(TournamentWinner)
+                        .where(TournamentWinner.id == st.winner_id)
+                        .values(
+                            gift_choice=st.gift_choice,
+                            tshirt_size=st.tshirt_size,
+                            trc20_address=st.trc20_address,
+                            updated_at=datetime.utcnow(),
+                        )
+                    )
+                    await session.execute(stmt)
+                    await session.commit()
+                    updated = True
+                except Exception:
+                    updated = False
+                finally:
+                    break
 
-            ok = await _patch_winner_async(st.winner_id, payload)
-            if ok:
-                await bot.edit_message_text("✅ Məlumat qeydə alındı. Çatdırılma/ödəniş üçün əlaqə saxlayacağıq.", chat_id, c.message.message_id)
+            if updated:
+                await bot.edit_message_text(
+                    "✅ Məlumat qeydə alındı. Çatdırılma/ödəniş üçün əlaqə saxlayacağıq.",
+                    chat_id, c.message.message_id
+                )
                 STATE.pop(chat_id, None)
             else:
                 await bot.answer_callback_query(c.id, "Server xətası, yenidən cəhd et.")
@@ -308,5 +320,6 @@ def register_winners_handlers(bot: AsyncTeleBot):
         st.trc20_address = addr
         st.stage = "confirm"
         await bot.send_message(chat_id, summarize_az(st), reply_markup=kb_confirm(st.winner_id))
+
 
 
