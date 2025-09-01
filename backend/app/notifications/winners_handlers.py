@@ -5,7 +5,8 @@ import asyncio
 import os
 import re
 from dataclasses import dataclass
-from typing import Dict, Optional, Tuple
+from datetime import datetime
+from typing import Dict, Optional, Tuple, List
 
 import requests
 from telebot.async_telebot import AsyncTeleBot
@@ -15,6 +16,10 @@ from sqlalchemy import select
 from app.database import get_async_session
 from app.models.db_tournament_winner import TournamentWinner
 from app.models.user import User  # поправь импорт, если модель в другом месте
+
+# --- финальный период турнира (UTC naive в БД) ---
+PERIOD_START = datetime(2025, 8, 17, 20, 0, 0)  # 18.08 00:00 AZ
+PERIOD_END   = datetime(2025, 9,  1, 19, 59, 0)  # 01.09 23:59 AZ
 
 USDT_REWARD: Dict[Tuple[str, int], int] = {
     ("gold",   1): 30, ("gold",   2): 20, ("gold",   3): 10,
@@ -56,7 +61,7 @@ def kb_prizes(winner_id: int) -> types.InlineKeyboardMarkup:
 
 def kb_sizes(winner_id: int) -> types.InlineKeyboardMarkup:
     kb = types.InlineKeyboardMarkup()
-    row: list[types.InlineKeyboardButton] = []
+    row: List[types.InlineKeyboardButton] = []
     for s in ["XS", "S", "M", "L", "XL", "XXL"]:
         row.append(types.InlineKeyboardButton(s, callback_data=f"size:{winner_id}:{s}"))
         if len(row) == 3:
@@ -103,21 +108,56 @@ async def _ensure_state(chat_id: int, winner_id: int) -> Optional[WinnerState]:
 
     ret: Optional[WinnerState] = None
     async for session in get_async_session():
-        # winner по id
-        q = await session.execute(
-            select(TournamentWinner, User)
-            .join(User, User.id == TournamentWinner.user_id)
-            .where(TournamentWinner.id == winner_id)
-        )
-        row = q.first()
-        if not row:
-            ret = None
-        else:
-            w, u = row
-            # безопасность: нажимать кнопки может только сам победитель
-            if not getattr(u, "telegram_id", None) or int(u.telegram_id) != int(chat_id):
+        try:
+            q = await session.execute(
+                select(TournamentWinner, User)
+                .join(User, User.id == TournamentWinner.user_id)
+                .where(TournamentWinner.id == winner_id)
+            )
+            row = q.first()
+            if not row:
                 ret = None
             else:
+                w, u = row
+                if not getattr(u, "telegram_id", None) or int(u.telegram_id) != int(chat_id):
+                    ret = None
+                else:
+                    st = WinnerState(
+                        winner_id=int(w.id),
+                        league=w.league,
+                        rank=int(w.rank_in_league),
+                        clicks=int(w.clicks_snapshot),
+                    )
+                    STATE[chat_id] = st
+                    ret = st
+        finally:
+            break
+    return ret
+
+async def _ensure_state_by_chat(chat_id: int) -> Optional[WinnerState]:
+    """Fallback для старых кнопок без winner_id: найдём победителя по chat_id за финальный период."""
+    if chat_id in STATE:
+        return STATE[chat_id]
+
+    ret: Optional[WinnerState] = None
+    async for session in get_async_session():
+        try:
+            q = await session.execute(
+                select(TournamentWinner, User)
+                .join(User, User.id == TournamentWinner.user_id)
+                .where(
+                    User.telegram_id == chat_id,
+                    TournamentWinner.period_start == PERIOD_START,
+                    TournamentWinner.period_end == PERIOD_END,
+                    TournamentWinner.rank_in_league <= 3,
+                )
+                .order_by(TournamentWinner.created_at.desc())
+            )
+            row = q.first()
+            if not row:
+                ret = None
+            else:
+                w, _u = row
                 st = WinnerState(
                     winner_id=int(w.id),
                     league=w.league,
@@ -126,7 +166,8 @@ async def _ensure_state(chat_id: int, winner_id: int) -> Optional[WinnerState]:
                 )
                 STATE[chat_id] = st
                 ret = st
-        break  # закрываем сессию, т.к. get_async_session — генератор
+        finally:
+            break
     return ret
 
 def register_winners_handlers(bot: AsyncTeleBot):
@@ -139,18 +180,27 @@ def register_winners_handlers(bot: AsyncTeleBot):
         except ValueError:
             await bot.answer_callback_query(c.id); return
 
-        # prize:<winner_id>:<key>
+        # prize:<winner_id>:<choice>  ИЛИ  prize:<choice> (fallback)
         if kind == "prize":
-            try:
-                winner_id_str, choice = rest.split(":", 1)
-                winner_id = int(winner_id_str)
-            except Exception:
+            parts = rest.split(":")
+            winner_id: Optional[int] = None
+            choice: Optional[str] = None
+
+            if len(parts) == 2:
+                # новый формат
+                winner_id = int(parts[0])
+                choice = parts[1]
+                st = await _ensure_state(chat_id, winner_id)
+            elif len(parts) == 1:
+                # старый формат (без winner_id)
+                choice = parts[0]
+                st = await _ensure_state_by_chat(chat_id)
+                winner_id = st.winner_id if st else None
+            else:
                 await bot.answer_callback_query(c.id, "Xəta"); return
 
-            st = await _ensure_state(chat_id, winner_id)
-            if not st:
+            if not st or not winner_id:
                 await bot.answer_callback_query(c.id, "Sessiya tapılmadı"); return
-
             if choice not in PRIZES:
                 await bot.answer_callback_query(c.id, "Seçim düzgün deyil"); return
 
@@ -258,4 +308,5 @@ def register_winners_handlers(bot: AsyncTeleBot):
         st.trc20_address = addr
         st.stage = "confirm"
         await bot.send_message(chat_id, summarize_az(st), reply_markup=kb_confirm(st.winner_id))
+
 
