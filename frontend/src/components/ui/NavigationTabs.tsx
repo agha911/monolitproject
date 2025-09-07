@@ -2,8 +2,8 @@ import React from 'react';
 import { useTranslation } from 'react-i18next';
 
 interface Props {
-  activeTab: 'home' | 'tasks' | 'friends' | 'shop' | 'tournament';
-  setActiveTab: (tab: 'home' | 'tasks' | 'friends' | 'shop' | 'tournament') => void;
+  activeTab: 'home' | 'tasks' | 'friends' | 'shop' | 'governance';
+  setActiveTab: (tab: 'home' | 'tasks' | 'friends' | 'shop' | 'governance') => void;
 }
 
 const NavigationTabs: React.FC<Props> = ({ activeTab, setActiveTab }) => {
@@ -50,10 +50,10 @@ const NavigationTabs: React.FC<Props> = ({ activeTab, setActiveTab }) => {
         <span className="text-[11px] mt-0.5">{t('tab_shop')}</span>
       </button>
 
-      {/* Турнирная вкладка переиспользуется для Governance */}
+      {/* Governance вместо Tournament */}
       <button
-        onClick={() => setActiveTab('tournament')}
-        className={`${baseBtn} ${activeTab === 'tournament' ? active : inactive}`}
+        onClick={() => setActiveTab('governance')}
+        className={`${baseBtn} ${activeTab === 'governance' ? active : inactive}`}
       >
         <span className="text-lg">⚖️</span>
         <span className="text-[11px] mt-0.5">{t('tab_governance')}</span>
@@ -63,6 +63,7 @@ const NavigationTabs: React.FC<Props> = ({ activeTab, setActiveTab }) => {
 };
 
 export default NavigationTabs;
+
 
 
 
