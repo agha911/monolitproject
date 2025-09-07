@@ -54,7 +54,7 @@ const Governance: React.FC = () => {
         <div className="p-4 rounded-2xl bg-[#0e2238]/90 border border-[#1f3b57] shadow-[0_0_16px_#00f0ff10] backdrop-blur-[2px]">
           <div className="text-[#7af9ff] font-semibold">Kollektiv güc</div>
           <p className="mt-1 text-sm text-[#c9f6ffcc]">
-            Fərdlərin deyil, icmanın qərarları əsasdır. Hər kəsin səsi ümumi istiqaməti formalaşdırır.
+            Fərqlilikdən - birliyə. icmanın qərarları əsasdır. Hər kəsin səsi ümumi istiqaməti formalaşdırır.
           </p>
         </div>
         <div className="p-4 rounded-2xl bg-[#0e2238]/90 border border-[#1f3b57] shadow-[0_0_16px_#00f0ff10] backdrop-blur-[2px]">
