@@ -90,14 +90,6 @@ const Governance: React.FC = () => {
             >
               🗳️ Səs ver (tezliklə)
             </button>
-            <a
-              href="https://t.me/"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="px-4 py-2 rounded-xl bg-[#00f0ff] text-[#0b1a28] font-semibold shadow hover:shadow-[0_0_18px_#00f0ff40] transition"
-            >
-              🔔 Xəbərlər
-            </a>
           </div>
         </div>
       </div>
