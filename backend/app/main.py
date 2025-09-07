@@ -22,7 +22,8 @@ from app.config import TELEGRAM_BOT_TOKEN
 from app.notifications.notify_energy import notify_max_energy_users
 from app.notifications.reset_energy_notified import reset_energy_flags  # не используем
 from app.oneoff.finalize_clicks_aug18_sep1 import register_oneoff_finalize_task
-from app.notifications.winners_handlers import register_winners_handlers, delivery_handlers
+from app.notifications.winners_handlers import register_winners_handlers
+from app.notifications.delivery_handlers import register_delivery_handlers
 
 # ---------------- logging setup ----------------
 
