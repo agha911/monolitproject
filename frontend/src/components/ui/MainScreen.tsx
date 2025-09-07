@@ -4,11 +4,14 @@ import Tasks from './Tasks';
 import Friends from './Friends';
 import NavigationTabs from './NavigationTabs';
 import Shop from './Shop';
-import Tournament from './Tournament'; // ✅ импорт турнира
+// import Tournament from './Tournament'; // ❌ больше не используем
+import Governance from './Governance';     // ✅ новая страница
 import LanguageSwitcher from './LanguageSwitcher';
 
+type Tab = 'home' | 'tasks' | 'friends' | 'shop' | 'governance';
+
 const MainScreen: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'home' | 'tasks' | 'friends' | 'shop' | 'tournament'>('home');
+  const [activeTab, setActiveTab] = useState<Tab>('home');
 
   return (
     <div className="pb-20 relative">
@@ -18,7 +21,7 @@ const MainScreen: React.FC = () => {
       {activeTab === 'tasks' && <Tasks />}
       {activeTab === 'friends' && <Friends />}
       {activeTab === 'shop' && <Shop />}
-      {activeTab === 'tournament' && <Tournament />} {/* ✅ новый экран */}
+      {activeTab === 'governance' && <Governance />}{/* ✅ рендер новой страницы */}
 
       <NavigationTabs activeTab={activeTab} setActiveTab={setActiveTab} />
     </div>
