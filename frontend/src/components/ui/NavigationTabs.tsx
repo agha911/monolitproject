@@ -25,6 +25,7 @@ const NavigationTabs: React.FC<Props> = ({ activeTab, setActiveTab }) => {
         <span className="text-lg">🏠</span>
         <span className="text-[11px] mt-0.5">{t('tab_home')}</span>
       </button>
+
       <button
         onClick={() => setActiveTab('tasks')}
         className={`${baseBtn} ${activeTab === 'tasks' ? active : inactive}`}
@@ -32,6 +33,7 @@ const NavigationTabs: React.FC<Props> = ({ activeTab, setActiveTab }) => {
         <span className="text-lg">📋</span>
         <span className="text-[11px] mt-0.5">{t('tab_tasks')}</span>
       </button>
+
       <button
         onClick={() => setActiveTab('friends')}
         className={`${baseBtn} ${activeTab === 'friends' ? active : inactive}`}
@@ -39,6 +41,7 @@ const NavigationTabs: React.FC<Props> = ({ activeTab, setActiveTab }) => {
         <span className="text-lg">👥</span>
         <span className="text-[11px] mt-0.5">{t('tab_friends')}</span>
       </button>
+
       <button
         onClick={() => setActiveTab('shop')}
         className={`${baseBtn} ${activeTab === 'shop' ? active : inactive}`}
@@ -46,12 +49,14 @@ const NavigationTabs: React.FC<Props> = ({ activeTab, setActiveTab }) => {
         <span className="text-lg">🛒</span>
         <span className="text-[11px] mt-0.5">{t('tab_shop')}</span>
       </button>
+
+      {/* Турнирная вкладка переиспользуется для Governance */}
       <button
         onClick={() => setActiveTab('tournament')}
         className={`${baseBtn} ${activeTab === 'tournament' ? active : inactive}`}
       >
-        <span className="text-lg">🏆</span>
-        <span className="text-[11px] mt-0.5">{t('tab_tournament')}</span>
+        <span className="text-lg">⚖️</span>
+        <span className="text-[11px] mt-0.5">{t('tab_governance')}</span>
       </button>
     </div>
   );
