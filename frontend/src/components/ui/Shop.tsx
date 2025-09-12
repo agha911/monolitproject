@@ -6,6 +6,10 @@ import WebApp from '@twa-dev/sdk';
 const ENERGY_UPGRADE_PRICE = 2500; // должен совпадать с беком
 const REFILL_PRICE = 2500;         // должен совпадать с беком
 
+// Временный сток для предпросмотра (позже можно подменить данными с бэка)
+const TSHIRT_TOTAL = 10;
+const TSHIRT_LEFT = 10;
+
 const Shop: React.FC = () => {
   const { t } = useTranslation();
   const [message, setMessage] = useState('');
@@ -116,7 +120,7 @@ const Shop: React.FC = () => {
       return;
     }
     if (totalXp < price) {
-      setMessage(t('shop_error')); // "Not enough GAP"
+      setMessage(t('shop_error'));
       setLoading(false);
       return;
     }
@@ -147,17 +151,17 @@ const Shop: React.FC = () => {
     setMessage('');
 
     if (totalXp < ENERGY_UPGRADE_PRICE) {
-      setMessage(t('shop_error')); // "Not enough GAP"
+      setMessage(t('shop_error'));
       setLoading(false);
       return;
     }
     if (energyUpgradesLeft !== null && energyUpgradesLeft <= 0) {
-      setMessage(t('shop_error')); // "Limit reached"
+      setMessage(t('shop_error'));
       setLoading(false);
       return;
     }
     if (maxEnergyCap !== null && userMaxEnergy !== null && userMaxEnergy >= maxEnergyCap) {
-      setMessage(t('shop_error')); // "Cap reached"
+      setMessage(t('shop_error'));
       setLoading(false);
       return;
     }
@@ -172,7 +176,6 @@ const Shop: React.FC = () => {
       if (data.status === 'success') {
         await fetchUserData();
         await fetchTotalSpent();
-        // backend возвращает {limit, upgrades_today}
         if (typeof data.limit === 'number' && typeof data.upgrades_today === 'number') {
           setEnergyUpgradeLimit(data.limit);
           setEnergyUpgradesLeft(Math.max(0, data.limit - data.upgrades_today));
@@ -200,17 +203,17 @@ const Shop: React.FC = () => {
       currentEnergy >= (refillMaxEnergy ?? userMaxEnergy ?? 0);
 
     if (isFull) {
-      setMessage(t('shop_error')); // "Energy already full"
+      setMessage(t('shop_error'));
       setLoading(false);
       return;
     }
     if (refillsLeft !== null && refillsLeft <= 0) {
-      setMessage(t('shop_error')); // "Limit reached"
+      setMessage(t('shop_error'));
       setLoading(false);
       return;
     }
     if (totalXp < REFILL_PRICE) {
-      setMessage(t('shop_error')); // "Not enough GAP"
+      setMessage(t('shop_error'));
       setLoading(false);
       return;
     }
@@ -226,10 +229,8 @@ const Shop: React.FC = () => {
         await fetchUserData();
         await fetchTotalSpent();
 
-        // backend (наш вариант) возвращает {limit, refill_count}, но статус-роут — refills_today
         if (typeof data.limit === 'number' && typeof data.refill_count === 'number') {
-          // пересчёт остатка из ответа покупки
-          const used = data.refill_count; // покупок сегодня после операции
+          const used = data.refill_count;
           setRefillLimit(data.limit);
           setRefillsLeft(Math.max(0, data.limit - used));
           setCurrentEnergy(data.energy);
@@ -276,10 +277,37 @@ const Shop: React.FC = () => {
         💸 {t('total_spent')}: {totalSpent.toLocaleString()} $GAP
       </p>
 
+      {/* Товар-футболка — ПЕРВЫМ */}
+      <div className="bg-[#0e1a2b] border border-[#ffffff20] p-4 rounded-xl shadow-[0_0_10px_#ffffff20] text-center space-y-2 max-w-md mx-auto mb-6">
+        <div className="relative w-fit mx-auto">
+          <img
+            src="/tshirt-preview-1.png"
+            alt="T-shirt"
+            className="w-24 h-24 mx-auto rounded-md object-cover"
+          />
+          {/* бейдж количества */}
+          <span className="absolute -right-2 -top-2 bg-[#00f0ff] text-[#0e1a2b] text-xs font-bold px-2 py-1 rounded-full shadow">
+            {TSHIRT_LEFT}/{TSHIRT_TOTAL}
+          </span>
+        </div>
+
+        <h3 className="text-lg font-semibold text-white/90">👕 Gappick T-shirt (Limited)</h3>
+        <p className="text-sm text-[#999999]">Tezliklə satışda</p>
+
+        <button
+          disabled
+          className="bg-[#cccccc20] text-[#cccccc] font-semibold px-4 py-2 rounded cursor-not-allowed"
+        >
+          {t('buy')}
+        </button>
+      </div>
+
       {/* Бустер на клики */}
       <div className="bg-[#0e1a2b] border border-[#00f0ff40] p-4 rounded-xl shadow-[0_0_10px_#00f0ff30] text-center space-y-2 max-w-md mx-auto mb-6">
         <h3 className="text-lg font-semibold text-[#7ee9ff]">💥 {t('boost_click')}</h3>
-        <p className="text-sm text-[#a0f6ff]">{clickBoostPrice} $GAP ({t('level')}: x{clickBoostLevel + 1})</p>
+        <p className="text-sm text-[#a0f6ff]">
+          {clickBoostPrice} $GAP ({t('level')}: x{clickBoostLevel + 1})
+        </p>
 
         <button
           onClick={handleBuyClickBoost}
@@ -321,9 +349,7 @@ const Shop: React.FC = () => {
             {t('available')}: {refillsLeft} / {refillLimit}
           </p>
         )}
-        {energyIsFull && (
-          <p className="text-xs text-[#ffadad]">{t('energy_full')}</p>
-        )}
+        {energyIsFull && <p className="text-xs text-[#ffadad]">{t('energy_full')}</p>}
 
         <button
           onClick={handleRefillEnergy}
@@ -334,30 +360,13 @@ const Shop: React.FC = () => {
         </button>
       </div>
 
-      {/* Товар-футболка */}
-      <div className="bg-[#0e1a2b] border border-[#ffffff20] p-4 rounded-xl shadow-[0_0_10px_#ffffff20] text-center space-y-2 max-w-md mx-auto mt-10 opacity-60">
-        <img
-          src="/tshirt-preview-1.png"
-          alt="T-shirt"
-          className="w-24 h-24 mx-auto rounded-md object-cover"
-        />
-        <h3 className="text-lg font-semibold text-[#cccccc]">👕 Gappick T-shirt</h3>
-        <p className="text-sm text-[#999999]">Tezliklə satışda</p>
-
-        <button
-          disabled
-          className="bg-[#cccccc20] text-[#cccccc] font-semibold px-4 py-2 rounded cursor-not-allowed"
-        >
-          {t('buy')}
-        </button>
-      </div>
-
       {message && <p className="text-sm mt-4 text-center text-[#a0f6ff]">{message}</p>}
     </div>
   );
 };
 
 export default Shop;
+
 
 
 
