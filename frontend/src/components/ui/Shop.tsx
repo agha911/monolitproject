@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import API_BASE_URL from '../config';
 import WebApp from '@twa-dev/sdk';
@@ -10,6 +10,15 @@ const REFILL_PRICE = 2500;         // должен совпадать с бек�
 const TSHIRT_TOTAL = 10;
 const TSHIRT_LEFT = 10;
 
+const INVITE_REQUIREMENTS: Record<number, number> = {
+  6: 1,
+  7: 5,
+  8: 10,
+  9: 15,
+  10: 20,
+};
+const MAX_BOOST_LEVEL = 10;
+
 const Shop: React.FC = () => {
   const { t } = useTranslation();
   const [message, setMessage] = useState('');
@@ -19,6 +28,7 @@ const Shop: React.FC = () => {
   const [clickBoostLevel, setClickBoostLevel] = useState(0);
   const [totalXp, setTotalXp] = useState(0);
   const [totalSpent, setTotalSpent] = useState(0);
+  const [invitesCount, setInvitesCount] = useState(0);
 
   // upgrade max energy status
   const [energyUpgradeLimit, setEnergyUpgradeLimit] = useState<number | null>(null);
@@ -34,6 +44,7 @@ const Shop: React.FC = () => {
 
   const telegramUser = WebApp.initDataUnsafe?.user;
   const telegramUserId = telegramUser?.id;
+  const initData = WebApp.initData;
 
   // ------- loaders -------
   const fetchUserData = async () => {
@@ -41,7 +52,7 @@ const Shop: React.FC = () => {
       const res = await fetch(`${API_BASE_URL}/api/game/progress`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ init_data: WebApp.initData }),
+        body: JSON.stringify({ init_data: initData }),
       });
       const data = await res.json();
       setClickBoostLevel(data.click_boost_level ?? 0);
@@ -50,6 +61,18 @@ const Shop: React.FC = () => {
       if (typeof data.energy === 'number') setCurrentEnergy(data.energy);
     } catch (err) {
       console.error('Ошибка при загрузке данных пользователя:', err);
+    }
+  };
+
+  const fetchInvitesCount = async () => {
+    try {
+      const res = await fetch(
+        `${API_BASE_URL}/api/user/invites?init_data=${encodeURIComponent(initData)}`
+      );
+      const data = await res.json();
+      setInvitesCount(Number(data?.count ?? 0));
+    } catch (err) {
+      console.error('Ошибка при получении количества приглашённых:', err);
     }
   };
 
@@ -103,23 +126,42 @@ const Shop: React.FC = () => {
 
   useEffect(() => {
     fetchUserData();
+    fetchInvitesCount();
     fetchTotalSpent();
     fetchEnergyUpgradeStatus();
     fetchRefillStatus();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // ------- helpers -------
+  const nextBoostLevel = Math.min(clickBoostLevel + 1, MAX_BOOST_LEVEL);
+  const requiredInvites = INVITE_REQUIREMENTS[nextBoostLevel] ?? 0;
+  const clickBoostPrice = 5000 * Math.pow(2, clickBoostLevel);
 
   // ------- actions -------
   const handleBuyClickBoost = async () => {
     setLoading(true);
     setMessage('');
-    const price = 5000 * Math.pow(2, clickBoostLevel);
 
-    if (clickBoostLevel >= 4) {
+    if (clickBoostLevel >= MAX_BOOST_LEVEL) {
       setMessage(t('shop_max_level'));
       setLoading(false);
       return;
     }
-    if (totalXp < price) {
+
+    if (requiredInvites > 0 && invitesCount < requiredInvites) {
+      setMessage(
+        t('boost_invites_required', {
+          level: `x${nextBoostLevel}`,
+          need: requiredInvites,
+          have: invitesCount,
+        })
+      );
+      setLoading(false);
+      return;
+    }
+
+    if (totalXp < clickBoostPrice) {
       setMessage(t('shop_error'));
       setLoading(false);
       return;
@@ -135,9 +177,10 @@ const Shop: React.FC = () => {
       if (data.status === 'success') {
         await fetchUserData();
         await fetchTotalSpent();
+        await fetchInvitesCount();
         setMessage(t('shop_success_boost', { value: `x${clickBoostLevel + 1}` }));
       } else {
-        setMessage(`${t('shop_error')}: ${data.message}`);
+        setMessage(`${t('shop_error')}: ${data.message ?? ''}`);
       }
     } catch {
       setMessage(t('error'));
@@ -161,7 +204,7 @@ const Shop: React.FC = () => {
       return;
     }
     if (maxEnergyCap !== null && userMaxEnergy !== null && userMaxEnergy >= maxEnergyCap) {
-      setMessage(t('shop_error'));
+      setMessage(t('max_energy_reached'));
       setLoading(false);
       return;
     }
@@ -184,7 +227,7 @@ const Shop: React.FC = () => {
         }
         setMessage(t('shop_success', { value: data.new_max_energy }));
       } else {
-        setMessage(`${t('shop_error')}: ${data.message}`);
+        setMessage(`${t('shop_error')}: ${data.message ?? ''}`);
       }
     } catch {
       setMessage(t('error'));
@@ -203,17 +246,17 @@ const Shop: React.FC = () => {
       currentEnergy >= (refillMaxEnergy ?? userMaxEnergy ?? 0);
 
     if (isFull) {
-      setMessage(t('shop_error'));
+      setMessage(t('shop_restored'));
       setLoading(false);
       return;
     }
     if (refillsLeft !== null && refillsLeft <= 0) {
-      setMessage(t('shop_error'));
+      setMessage(t('refill_limit_reached'));
       setLoading(false);
       return;
     }
     if (totalXp < REFILL_PRICE) {
-      setMessage(t('shop_error'));
+      setMessage(t('not_enough_gap'));
       setLoading(false);
       return;
     }
@@ -240,7 +283,7 @@ const Shop: React.FC = () => {
 
         setMessage(t('refill_success'));
       } else {
-        setMessage(`${t('shop_error')}: ${data.message}`);
+        setMessage(`${t('shop_error')}: ${data.message ?? ''}`);
       }
     } catch {
       setMessage(t('error'));
@@ -250,7 +293,11 @@ const Shop: React.FC = () => {
   };
 
   // derived
-  const clickBoostPrice = 5000 * Math.pow(2, clickBoostLevel);
+  const disableClickBoost =
+    loading ||
+    clickBoostLevel >= MAX_BOOST_LEVEL ||
+    totalXp < clickBoostPrice ||
+    (requiredInvites > 0 && invitesCount < requiredInvites);
 
   const disableEnergyUpgrade =
     loading ||
@@ -285,7 +332,6 @@ const Shop: React.FC = () => {
             alt="T-shirt"
             className="w-24 h-24 mx-auto rounded-md object-cover"
           />
-          {/* бейдж количества */}
           <span className="absolute -right-2 -top-2 bg-[#00f0ff] text-[#0e1a2b] text-xs font-bold px-2 py-1 rounded-full shadow">
             {TSHIRT_LEFT}/{TSHIRT_TOTAL}
           </span>
@@ -308,14 +354,22 @@ const Shop: React.FC = () => {
         <p className="text-sm text-[#a0f6ff]">
           {clickBoostPrice} $GAP ({t('level')}: x{clickBoostLevel + 1})
         </p>
+        {requiredInvites > 0 && (
+          <p className="text-xs text-[#89dfff]">
+            {t('invited_friends')}: {invitesCount} • {t('boost_invites_required', { level: `x${nextBoostLevel}`, need: requiredInvites, have: invitesCount })}
+          </p>
+        )}
 
         <button
           onClick={handleBuyClickBoost}
-          disabled={loading || clickBoostLevel >= 4 || totalXp < clickBoostPrice}
+          disabled={disableClickBoost}
           className="bg-[#00f0ff] text-[#0e1a2b] font-semibold px-4 py-2 rounded hover:scale-105 transition-all disabled:opacity-40"
         >
           {loading ? '...' : t('buy')}
         </button>
+        {clickBoostLevel >= MAX_BOOST_LEVEL && (
+          <p className="text-xs text-[#ffadad] mt-1">{t('shop_max_level')}</p>
+        )}
       </div>
 
       {/* Увеличение максимальной энергии */}
@@ -328,7 +382,7 @@ const Shop: React.FC = () => {
           </p>
         )}
         {maxEnergyCap !== null && userMaxEnergy !== null && userMaxEnergy >= maxEnergyCap && (
-          <p className="text-xs text-[#ffadad]">{t('max_reached')}</p>
+          <p className="text-xs text-[#ffadad]">{t('max_energy_reached')}</p>
         )}
 
         <button
@@ -349,7 +403,7 @@ const Shop: React.FC = () => {
             {t('available')}: {refillsLeft} / {refillLimit}
           </p>
         )}
-        {energyIsFull && <p className="text-xs text-[#ffadad]">{t('energy_full')}</p>}
+        {energyIsFull && <p className="text-xs text-[#ffadad]">{t('shop_restored')}</p>}
 
         <button
           onClick={handleRefillEnergy}
@@ -366,6 +420,7 @@ const Shop: React.FC = () => {
 };
 
 export default Shop;
+
 
 
 
