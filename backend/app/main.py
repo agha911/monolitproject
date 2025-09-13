@@ -497,7 +497,7 @@ app.include_router(tournament.router)
 app.include_router(stats.router)
 app.include_router(partner_task.router)
 app.include_router(challenge.router)
-app.include_router(referral_router.router, tags=["referral"])
+app.include_router(referral_router.router, prefix="/api", tags=["referral"])
 
 
 # ---------------- background ----------------
