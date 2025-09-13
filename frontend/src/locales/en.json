@@ -101,5 +101,8 @@
   "claimed_success": "Referral reward credited",
   "expired": "Expired",
   "nothing_to_claim": "Nothing to claim",
-  "try_again": "Try again later"
+  "try_again": "Try again later",
+  "boost_invites_required": "To reach {{level}} you need invited friends: {{need}} (you have: {{have}})",
+  "shop_max_level": "Maximum level reached",
+  "shop_success_boost": "Click booster upgraded to {{value}}"
 }
