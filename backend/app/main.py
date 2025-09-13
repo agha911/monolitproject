@@ -25,7 +25,7 @@ from app.oneoff.finalize_clicks_aug18_sep1 import register_oneoff_finalize_task
 from app.notifications.winners_handlers import register_winners_handlers
 from app.notifications.delivery_handlers import register_delivery_handlers
 from app.referral_utils.referral import credit_referral_share
-from routers import referral as referral_router
+from app.routers import referral as referral_router
 
 
 # ---------------- logging setup ----------------
