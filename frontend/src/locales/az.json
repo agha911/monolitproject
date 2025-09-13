@@ -95,6 +95,14 @@
   "slides_error": "Xəta baş verdi",
   "slides_network_error": "Şəbəkə xətası",
 
-  "error_user_unknown": "Xəta: istifadəçi müəyyən edilmədi"
+  "error_user_unknown": "Xəta: istifadəçi müəyyən edilmədi",
+  "ref_balance": "Bugünkü referal balansı",
+  "status": "Status",
+  "resets_in": "Sıfırlanacaq",
+  "processing": "Emal olunur…",
+  "claimed_success": "Referal mükafatı hesabınıza əlavə edildi",
+  "expired": "Müddət bitib",
+  "nothing_to_claim": "Götürüləcək heç nə yoxdur",
+  "try_again": "Yenidən cəhd edin"
 
 }
