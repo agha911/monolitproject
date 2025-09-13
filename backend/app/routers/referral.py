@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException, Body, Query
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.deps import get_async_session
+from app.database import get_async_session
 from app.schemas.referral import ReferralBalanceOut, ReferralClaimOut
 from app.utils import parse_telegram_user_id
 from app.referral_utils.time_az import baku_today, baku_end_of_today_dt
