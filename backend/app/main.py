@@ -24,6 +24,8 @@ from app.notifications.reset_energy_notified import reset_energy_flags  # не �
 from app.oneoff.finalize_clicks_aug18_sep1 import register_oneoff_finalize_task
 from app.notifications.winners_handlers import register_winners_handlers
 from app.notifications.delivery_handlers import register_delivery_handlers
+from utils.referral import credit_referral_share
+
 
 # ---------------- logging setup ----------------
 
@@ -290,7 +292,6 @@ async def clicks_flush(
         telegram_id = parse_telegram_user_id(payload.init_data)
         now_utc = datetime.now(timezone.utc)
 
-        # входной лог запроса
         api_log.info(
             "FLUSH req | tg=%s session=%s delta=%s seq=%s",
             telegram_id, payload.session_id, payload.delta_clicks, payload.client_seq
@@ -303,6 +304,7 @@ async def clicks_flush(
 
             db_user = await crud_user.get_user_for_update(session, user.id)
 
+            # основная логика принятия кликов
             result = await crud_user.apply_clicks_flush(
                 session=session,
                 user=db_user,
@@ -311,14 +313,32 @@ async def clicks_flush(
                 now_utc=now_utc,
             )
 
-            # ежедневка (добиваем до completed если надо)
+            # ежедневка: доводим до completed при необходимости
             if not (db_user.daily_completed or False):
                 if (db_user.daily_progress or 0) >= (db_user.daily_target or 0) > 0:
                     db_user.daily_progress = db_user.daily_target
                     db_user.daily_completed = True
 
-            # ВАЖНО: турнир инкремент уже делает CRUD внутри apply_clicks_flush.
-            # Здесь повторно НЕ инкрементим, чтобы не удваивать.
+            # !!! ВАЖНО: используем accepted_clicks, а не payload.delta_clicks
+            accepted_clicks = int(result.get("accepted_clicks", 0))
+            if accepted_clicks > 0:
+                try:
+                    # Начисляем 10% рефереру за принятые клики данного пользователя
+                    credited = await credit_referral_share(
+                        session=session,
+                        source_user_id=db_user.id,
+                        delta_clicks=accepted_clicks,
+                    )
+                    if credited > 0:
+                        api_log.info(
+                            "REFERRAL credited | ref_src_user_id=%s amount=%s (10%% of %s)",
+                            db_user.id, credited, accepted_clicks
+                        )
+                except Exception:
+                    # Не валим весь FLUSH, если реферальный блок дал сбой — просто логируем
+                    api_log.exception("REFERRAL credit error | user_id=%s", db_user.id)
+
+            # синхронизируем ORM-объекты (не коммитим — это сделает session.begin)
             await session.flush()
 
             user_id = db_user.id
@@ -327,7 +347,6 @@ async def clicks_flush(
             total_xp = db_user.total_xp or 0
             daily_progress = db_user.daily_progress or 0
             server_seq = int(result["server_seq"])
-            accepted_clicks = int(result["accepted_clicks"])
 
         status = "ok" if accepted_clicks > 0 else "noop"
         api_log.info(
