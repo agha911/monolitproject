@@ -94,6 +94,14 @@
   "slides_error": "Что-то пошло не так",
   "slides_network_error": "Ошибка сети",
 
-  "error_user_unknown": "Ошибка: пользователь не определён"
+  "error_user_unknown": "Ошибка: пользователь не определён",
+  "ref_balance": "Реферальный баланс за сегодня",
+  "status": "Статус",
+  "resets_in": "Сброс через",
+  "processing": "Обрабатываем…",
+  "claimed_success": "Реферальная награда зачислена",
+  "expired": "Срок истёк",
+  "nothing_to_claim": "Нечего забирать",
+  "try_again": "Попробуйте ещё раз"
 
 }
