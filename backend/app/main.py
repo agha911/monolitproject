@@ -24,7 +24,8 @@ from app.notifications.reset_energy_notified import reset_energy_flags  # не �
 from app.oneoff.finalize_clicks_aug18_sep1 import register_oneoff_finalize_task
 from app.notifications.winners_handlers import register_winners_handlers
 from app.notifications.delivery_handlers import register_delivery_handlers
-from utils.referral import credit_referral_share
+from app.utils.referral import credit_referral_share
+from routers import referral as referral_router
 
 
 # ---------------- logging setup ----------------
@@ -496,6 +497,7 @@ app.include_router(tournament.router)
 app.include_router(stats.router)
 app.include_router(partner_task.router)
 app.include_router(challenge.router)
+app.include_router(referral_router.router, tags=["referral"])
 
 
 # ---------------- background ----------------
