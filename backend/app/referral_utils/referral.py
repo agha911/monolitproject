@@ -5,8 +5,8 @@ from sqlalchemy import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update
 
-from models.user import User
-from models.referral import ReferralShareEvent, ReferralDailyBucket
+from app.models.user import User
+from app.models.referral import ReferralShareEvent, ReferralDailyBucket
 
 BAKU_TZ = ZoneInfo("Asia/Baku")
 
