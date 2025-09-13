@@ -4,7 +4,7 @@ from sqlalchemy import (
     BigInteger, Column, Date, DateTime, ForeignKey, String, UniqueConstraint, CheckConstraint
 )
 from sqlalchemy.orm import relationship, Mapped, mapped_column
-from .base import Base  # ваш Base
+from app.database import Base
 
 class ReferralShareEvent(Base):
     __tablename__ = "referral_share_events"
