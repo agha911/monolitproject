@@ -102,6 +102,9 @@
   "claimed_success": "Реферальная награда зачислена",
   "expired": "Срок истёк",
   "nothing_to_claim": "Нечего забирать",
-  "try_again": "Попробуйте ещё раз"
+  "try_again": "Попробуйте ещё раз",
+  "boost_invites_required": "Для уровня {{level}} нужно приглашённых: {{need}} (у вас: {{have}})",
+  "shop_max_level": "Достигнут максимальный уровень",
+  "shop_success_boost": "Бустер клика повышен до {{value}}"
 
 }
