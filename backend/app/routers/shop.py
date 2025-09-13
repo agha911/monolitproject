@@ -160,34 +160,64 @@ async def buy_energy_refill_status(telegram_id: int, session: AsyncSession = Dep
 
 
 @router.post("/buy_click_boost")
-async def buy_click_boost_endpoint(payload: UserIdPayload, session: AsyncSession = Depends(get_async_session)):
-    user = await get_user(session, payload.telegram_id)
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
+async def buy_click_boost_endpoint(
+    payload: UserIdPayload,
+    session: AsyncSession = Depends(get_async_session),
+):
+    INVITE_REQUIREMENTS = {  # требования по наличию приглашённых для ПОКУПАЕМОГО уровня
+        6: 1,
+        7: 5,
+        8: 10,
+        9: 15,
+        10: 20,
+    }
+    MAX_LEVEL = 10
 
-    if user.click_boost_level is None:
-        user.click_boost_level = 0
+    async with session.begin():
+        user = await get_user(session, payload.telegram_id)
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
 
-    current_level = user.click_boost_level
+        # По возможности блокируем строку пользователя (исправь импорт под свой путь)
+        try:
+            from app.crud.user import get_user_for_update as _get_user_for_update  # noqa
+            user = await _get_user_for_update(session, user.id)
+        except Exception:
+            pass
 
-    if current_level >= 4:
-        raise HTTPException(status_code=400, detail="Max boost level reached")
+        if user.click_boost_level is None:
+            user.click_boost_level = 0
 
-    price = 5000 * (2 ** current_level)
-    if user.total_xp < price:
-        raise HTTPException(status_code=400, detail="Not enough GAP")
+        current_level = int(user.click_boost_level)
+        if current_level >= MAX_LEVEL:
+            raise HTTPException(status_code=400, detail="Max boost level reached")
 
-    user.total_xp -= price
-    user.click_boost_level = current_level + 1
+        next_level = current_level + 1
 
-    session.add(user)
+        # Проверяем требования по приглашённым для уровней 6..10
+        required_invites = INVITE_REQUIREMENTS.get(next_level, 0)
+        if (user.invites_count or 0) < required_invites:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Not enough invited friends for level {next_level} (need {required_invites})",
+            )
 
-    # 💰 Учитываем траты
-    await crud_user.increment_total_spent(session, price)
+        # Цена апгрейда — как у тебя было
+        price = 5000 * (2 ** current_level)
+        if (user.total_xp or 0) < price:
+            raise HTTPException(status_code=400, detail="Not enough GAP")
 
-    await session.commit()
+        # Списание и повышение уровня
+        user.total_xp = (user.total_xp or 0) - price
+        user.click_boost_level = next_level
+        session.add(user)
 
+        # 💰 Учитываем траты в GAP-фонде (как и в остальных покупках)
+        await crud_user.increment_total_spent(session, price)
+
+    # Коммит произойдёт на выходе из session.begin()
     return {"status": "success", "new_boost_level": user.click_boost_level}
+
 
 
 
