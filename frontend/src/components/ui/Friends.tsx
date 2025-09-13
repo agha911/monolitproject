@@ -12,11 +12,11 @@ interface UserEntry {
 type ReferralStatus = 'open' | 'claimed' | 'expired' | 'none';
 
 interface ReferralBalanceOut {
-  day_date: string;        // ISO date
+  day_date: string;
   amount: number;
   status: ReferralStatus;
-  expires_at_iso: string;  // ISO datetime
-  seconds_left: number;    // seconds (server)
+  expires_at_iso: string;
+  seconds_left: number;
 }
 
 const Friends: React.FC = () => {
@@ -25,11 +25,8 @@ const Friends: React.FC = () => {
   const [invitesCount, setInvitesCount] = useState(0);
   const [totalUsers, setTotalUsers] = useState(0);
 
-  // --- Referral state ---
   const [refBalance, setRefBalance] = useState<ReferralBalanceOut | null>(null);
   const [claimLoading, setClaimLoading] = useState(false);
-
-  // локальный тикер для обратного отсчета
   const [secondsLeft, setSecondsLeft] = useState<number>(0);
   const timerRef = useRef<number | null>(null);
 
@@ -39,10 +36,10 @@ const Friends: React.FC = () => {
   }, [refBalance, secondsLeft]);
 
   const fmtTime = (s: number) => {
-    const clamped = Math.max(0, s | 0);
-    const hh = String(Math.floor(clamped / 3600)).padStart(2, '0');
-    const mm = String(Math.floor((clamped % 3600) / 60)).padStart(2, '0');
-    const ss = String(clamped % 60).padStart(2, '0');
+    const n = Math.max(0, s | 0);
+    const hh = String(Math.floor(n / 3600)).padStart(2, '0');
+    const mm = String(Math.floor((n % 3600) / 60)).padStart(2, '0');
+    const ss = String(n % 60).padStart(2, '0');
     return `${hh}:${mm}:${ss}`;
   };
 
@@ -69,16 +66,14 @@ const Friends: React.FC = () => {
       setRefBalance(refBalData);
       setSecondsLeft(refBalData?.seconds_left ?? 0);
     } catch (error) {
-      console.error('Ошибка загрузки данных:', error);
+      console.error('fetchAll error:', error);
     }
   };
 
   useEffect(() => {
     fetchAll();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // таймер обратного отсчета
   useEffect(() => {
     if (timerRef.current) {
       window.clearInterval(timerRef.current);
@@ -95,7 +90,7 @@ const Friends: React.FC = () => {
     return () => {
       if (timerRef.current) window.clearInterval(timerRef.current);
     };
-  }, [refBalance?.expires_at_iso]); // пересоздаём, если сменился дедлайн
+  }, [refBalance?.expires_at_iso]);
 
   const handleInvite = () => {
     const link = `https://t.me/monolit_42_bot?start=${WebApp.initDataUnsafe.user?.id}`;
@@ -114,25 +109,22 @@ const Friends: React.FC = () => {
       });
       const data = await res.json();
 
-      // простая обработка статусов
       if (data.status === 'ok') {
-        // обновим баланс и лидеры
         await fetchAll();
-        // можно показать системный popup Telegram
         WebApp.showPopup?.({
           title: '✓',
-          message: `${t('claimed_success', { defaultValue: 'Реферальная награда зачислена' })}: +${data.claimed_amount} $GAP`,
+          message: `${t('claimed_success')}: +${data.claimed_amount} $GAP`,
         });
       } else if (data.status === 'already_claimed') {
-        WebApp.showPopup?.({ title: '!', message: t('already_claimed', { defaultValue: 'Уже забрано' }) as string });
+        WebApp.showPopup?.({ title: '!', message: t('already_claimed') as string });
       } else if (data.status === 'expired') {
-        WebApp.showPopup?.({ title: '!', message: t('expired', { defaultValue: 'Срок истёк' }) as string });
+        WebApp.showPopup?.({ title: '!', message: t('expired') as string });
       } else {
-        WebApp.showPopup?.({ title: '!', message: t('nothing_to_claim', { defaultValue: 'Нечего забирать' }) as string });
+        WebApp.showPopup?.({ title: '!', message: t('nothing_to_claim') as string });
       }
     } catch (e) {
       console.error(e);
-      WebApp.showPopup?.({ title: 'Ошибка', message: t('try_again', { defaultValue: 'Попробуйте ещё раз' }) as string });
+      WebApp.showPopup?.({ title: 'Ошибка', message: t('try_again') as string });
     } finally {
       setClaimLoading(false);
     }
@@ -142,7 +134,6 @@ const Friends: React.FC = () => {
     <div className="p-4 bg-[#131f2f] min-h-screen text-[#00f0ff] flex flex-col gap-8">
       <h2 className="text-xl font-bold text-center drop-shadow">👥 {t('title_friends')}</h2>
 
-      {/* Блок инвайтов */}
       <div className="bg-[#0e1a2b] p-4 rounded shadow-lg border border-[#00f0ff30] text-center flex flex-col gap-3">
         <p className="text-lg">{t('invited_friends')}: {invitesCount}</p>
         <button
@@ -153,21 +144,18 @@ const Friends: React.FC = () => {
         </button>
       </div>
 
-      {/* Блок реферального баланса */}
       <div className="bg-[#0e1a2b] p-4 rounded shadow-lg border border-[#00f0ff30]">
         <div className="flex items-center justify-between mb-3">
           <div className="flex flex-col">
-            <span className="text-lg font-semibold">
-              {t('ref_balance', { defaultValue: 'Реферальный баланс за сегодня' })}
-            </span>
+            <span className="text-lg font-semibold">{t('ref_balance')}</span>
             <span className="text-sm text-[#7ee9ff]">
-              {t('status', { defaultValue: 'Статус' })}: {refBalance?.status ?? '—'}
+              {t('status')}: {refBalance?.status ?? '—'}
             </span>
           </div>
           <div className="text-right">
             <div className="text-2xl font-bold">{refBalance?.amount ?? 0} $GAP</div>
             <div className="text-xs text-[#7ee9ff]">
-              {t('resets_in', { defaultValue: 'Сброс через' })}: {fmtTime(secondsLeft)}
+              {t('resets_in')}: {fmtTime(secondsLeft)}
             </div>
           </div>
         </div>
@@ -181,9 +169,7 @@ const Friends: React.FC = () => {
               : 'bg-[#0d273d] text-[#7ee9ff80] cursor-not-allowed'
             }`}
         >
-          {claimLoading
-            ? t('processing', { defaultValue: 'Обрабатываем…' })
-            : t('claim_reward', { defaultValue: 'Забрать награду' })}
+          {claimLoading ? t('processing') : t('claim_reward')}
         </button>
       </div>
 
@@ -191,7 +177,6 @@ const Friends: React.FC = () => {
         👥 {t('total_users')}: {totalUsers}
       </p>
 
-      {/* Лидерборд */}
       <div className="overflow-x-auto">
         <table className="min-w-full border border-[#00f0ff30] text-sm bg-[#0e1a2b] rounded-lg shadow-[0_0_10px_#00f0ff20] overflow-hidden">
           <thead className="bg-[#0d273d] text-[#7ee9ff]">
@@ -228,6 +213,7 @@ const Friends: React.FC = () => {
 };
 
 export default Friends;
+
 
 
 
