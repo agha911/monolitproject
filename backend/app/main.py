@@ -24,7 +24,7 @@ from app.notifications.reset_energy_notified import reset_energy_flags  # не �
 from app.oneoff.finalize_clicks_aug18_sep1 import register_oneoff_finalize_task
 from app.notifications.winners_handlers import register_winners_handlers
 from app.notifications.delivery_handlers import register_delivery_handlers
-from app.utils.referral import credit_referral_share
+from app.referral_utils.referral import credit_referral_share
 from routers import referral as referral_router
 
 
