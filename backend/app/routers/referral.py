@@ -5,7 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from deps import get_async_session
 from schemas.referral import ReferralBalanceOut, ReferralClaimOut
-from utils.telegram import parse_telegram_user_id
+from utils import parse_telegram_user_id
 from utils.time_az import baku_today, baku_end_of_today_dt
 from utils.referral import expire_old_buckets
 from models.user import User
