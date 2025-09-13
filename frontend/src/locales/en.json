@@ -93,5 +93,13 @@
   "slides_award_received": "+{{amount}} GAP credited!",
   "slides_already_claimed": "Already claimed",
   "slides_error": "Something went wrong",
-  "slides_network_error": "Network error"
+  "slides_network_error": "Network error",
+  "ref_balance": "Referral balance for today",
+  "status": "Status",
+  "resets_in": "Resets in",
+  "processing": "Processing…",
+  "claimed_success": "Referral reward credited",
+  "expired": "Expired",
+  "nothing_to_claim": "Nothing to claim",
+  "try_again": "Try again later"
 }
