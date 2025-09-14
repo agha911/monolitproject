@@ -14,56 +14,53 @@ from app.models.referral import ReferralDailyBucket
 router = APIRouter()
 
 @router.get("/api/referral/balance", response_model=ReferralBalanceOut)
-async def get_referral_balance(
+async def referral_balance(
     init_data: str = Query(...),
     session: AsyncSession = Depends(get_async_session),
 ):
     telegram_id = parse_telegram_user_id(init_data)
 
-    async with session.begin():
-        user = await session.execute(select(User).where(User.telegram_id == telegram_id))
-        user = user.scalar_one_or_none()
-        if not user:
-            raise HTTPException(status_code=404, detail="User not found")
+    res = await session.execute(select(User).where(User.telegram_id == telegram_id))
+    user = res.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
 
-        # Ленивая экспирация старых корзин
-        await expire_old_buckets(session, user.id)
+    # ✅ Принудительная экспирация старых корзин прямо при запросе баланса
+    await expire_old_buckets(session, user.id)
+    await session.flush()
 
-        # Текущая (сегодняшняя) корзина
-        today = baku_today()
-        q = await session.execute(
-            select(ReferralDailyBucket).where(
-                ReferralDailyBucket.referrer_id == user.id,
-                ReferralDailyBucket.day_date == today
-            ).limit(1)
+    today = baku_today_date()
+    q = await session.execute(
+        select(ReferralDailyBucket)
+        .where(
+            ReferralDailyBucket.referrer_id == user.id,
+            ReferralDailyBucket.day_date == today
         )
-        bucket = q.scalar_one_or_none()
+        .limit(1)
+    )
+    bucket = q.scalar_one_or_none()
 
-        end_dt = baku_end_of_today_dt()
-        now_utc = datetime.now(timezone.utc)
-        # seconds_left считаем по Баку-таймзоне, но вернём просто секунды
-        seconds_left = int((end_dt - end_dt.tzinfo.fromutc(now_utc)).total_seconds())
-        if seconds_left < 0:
-            seconds_left = 0
+    # Расчёт таймера: конец бакинского дня минус текущее бакинское время
+    now_baku = datetime.now(BAKU_TZ)
+    end_today = baku_end_of_today_dt()
+    seconds_left = max(0, int((end_today - now_baku).total_seconds()))
 
-        if bucket is None:
-            # ещё не было начислений
-            return ReferralBalanceOut(
-                day_date=today,
-                amount=0,
-                status="none",
-                expires_at_iso=end_dt.isoformat(),
-                seconds_left=seconds_left if seconds_left > 0 else 0,
-            )
+    if not bucket:
+        return {
+            "day_date": str(today),
+            "amount": 0,
+            "status": "none",
+            "expires_at_iso": end_today.isoformat(),
+            "seconds_left": seconds_left,
+        }
 
-        # если корзина не open — таймер смысла не имеет
-        return ReferralBalanceOut(
-            day_date=bucket.day_date,
-            amount=bucket.amount,
-            status=bucket.status,  # open | claimed | expired
-            expires_at_iso=end_dt.isoformat(),
-            seconds_left=seconds_left if bucket.status == "open" else 0,
-        )
+    return {
+        "day_date": str(bucket.day_date),
+        "amount": int(bucket.amount or 0),
+        "status": bucket.status,  # ожидаем "open" для сегодняшней корзины
+        "expires_at_iso": end_today.isoformat(),
+        "seconds_left": seconds_left,
+    }
 
 
 @router.post("/api/referral/claim", response_model=ReferralClaimOut)
