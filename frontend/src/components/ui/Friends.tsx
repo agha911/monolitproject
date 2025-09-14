@@ -21,6 +21,7 @@ interface ReferralBalanceOut {
 
 const Friends: React.FC = () => {
   const { t } = useTranslation();
+
   const [leaderboard, setLeaderboard] = useState<UserEntry[]>([]);
   const [invitesCount, setInvitesCount] = useState(0);
   const [totalUsers, setTotalUsers] = useState(0);
@@ -32,6 +33,7 @@ const Friends: React.FC = () => {
 
   const canClaim = useMemo(() => {
     if (!refBalance) return false;
+    if (!WebApp?.initData) return false;
     return refBalance.status === 'open' && refBalance.amount > 0 && secondsLeft > 0;
   }, [refBalance, secondsLeft]);
 
@@ -47,24 +49,61 @@ const Friends: React.FC = () => {
     try {
       const [leaderboardRes, invitesRes, usersRes, refBalanceRes] = await Promise.all([
         fetch(`${API_BASE_URL}/api/game/leaderboard`),
-        fetch(`${API_BASE_URL}/api/user/invites?init_data=${encodeURIComponent(WebApp.initData)}`),
+        fetch(`${API_BASE_URL}/api/user/invites?init_data=${encodeURIComponent(WebApp.initData || '')}`),
         fetch(`${API_BASE_URL}/api/user/count`),
-        fetch(`${API_BASE_URL}/api/referral/balance?init_data=${encodeURIComponent(WebApp.initData)}`),
+        fetch(`${API_BASE_URL}/api/referral/balance?init_data=${encodeURIComponent(WebApp.initData || '')}`),
       ]);
 
-      const [leaderboardData, invitesData, usersData, refBalData] = await Promise.all([
+      const [leaderboardData, invitesData, usersData] = await Promise.all([
         leaderboardRes.json(),
         invitesRes.json(),
         usersRes.json(),
-        refBalanceRes.json(),
       ]);
 
-      setLeaderboard(leaderboardData);
-      setInvitesCount(invitesData.count || 0);
-      setTotalUsers(usersData.count || 0);
+      // Разбираем реф. баланс отдельно, чтобы ошибка не уронила всё
+      let refBalData: any = null;
+      try {
+        if (!refBalanceRes.ok) {
+          const txt = await refBalanceRes.text().catch(() => '');
+          console.error('[referral/balance] HTTP', refBalanceRes.status, txt);
+        } else {
+          const ct = refBalanceRes.headers.get('content-type') || '';
+          if (ct.includes('application/json')) {
+            refBalData = await refBalanceRes.json();
+          } else {
+            const txt = await refBalanceRes.text().catch(() => '');
+            console.error('[referral/balance] non-JSON', txt);
+          }
+        }
+      } catch (e) {
+        console.error('[referral/balance] fetch/json error', e);
+      }
 
-      setRefBalance(refBalData);
-      setSecondsLeft(refBalData?.seconds_left ?? 0);
+      setLeaderboard(Array.isArray(leaderboardData) ? leaderboardData : (leaderboardData?.items ?? []));
+      setInvitesCount(invitesData?.count || 0);
+      setTotalUsers(usersData?.count || 0);
+
+      if (refBalData) {
+        setRefBalance(refBalData);
+        // серверный seconds_left
+        let secs = Number(refBalData.seconds_left ?? 0);
+        // резерв — считаем из expires_at_iso
+        if ((!secs || secs < 0) && refBalData.expires_at_iso) {
+          const end = new Date(refBalData.expires_at_iso).getTime();
+          const now = Date.now();
+          secs = Math.max(0, Math.floor((end - now) / 1000));
+        }
+        setSecondsLeft(secs);
+      } else {
+        setRefBalance({
+          day_date: new Date().toISOString().slice(0, 10),
+          amount: 0,
+          status: 'none',
+          expires_at_iso: '',
+          seconds_left: 0,
+        });
+        setSecondsLeft(0);
+      }
     } catch (error) {
       console.error('fetchAll error:', error);
     }
@@ -81,8 +120,7 @@ const Friends: React.FC = () => {
     }
     if (!refBalance) return;
 
-    setSecondsLeft(refBalance.seconds_left ?? 0);
-
+    // secondsLeft уже установлен в fetchAll; запускаем тиканье
     timerRef.current = window.setInterval(() => {
       setSecondsLeft((s) => (s > 0 ? s - 1 : 0));
     }, 1000) as unknown as number;
@@ -90,7 +128,7 @@ const Friends: React.FC = () => {
     return () => {
       if (timerRef.current) window.clearInterval(timerRef.current);
     };
-  }, [refBalance?.expires_at_iso]);
+  }, [refBalance?.expires_at_iso, refBalance?.seconds_left]);
 
   const handleInvite = () => {
     const link = `https://t.me/monolit_42_bot?start=${WebApp.initDataUnsafe.user?.id}`;
@@ -151,6 +189,12 @@ const Friends: React.FC = () => {
             <span className="text-sm text-[#7ee9ff]">
               {t('status')}: {refBalance?.status ?? '—'}
             </span>
+            {!WebApp?.initData && (
+              <span className="text-xs text-[#ffadad] mt-1">
+                {/* ключ добавь при желании в локали */}
+                Telegram initData is missing
+              </span>
+            )}
           </div>
           <div className="text-right">
             <div className="text-2xl font-bold">{refBalance?.amount ?? 0} $GAP</div>
@@ -191,9 +235,7 @@ const Friends: React.FC = () => {
               <tr
                 key={user.id}
                 className={`text-center ${
-                  index === 0
-                    ? 'bg-[#001d2b] font-bold text-[#00f0ff]'
-                    : 'text-[#a0f6ff] hover:bg-[#0f273c]'
+                  index === 0 ? 'bg-[#001d2b] font-bold text-[#00f0ff]' : 'text-[#a0f6ff] hover:bg-[#0f273c]'
                 }`}
               >
                 <td className="px-4 py-2 border border-[#00f0ff10]">{index + 1}</td>
@@ -213,6 +255,7 @@ const Friends: React.FC = () => {
 };
 
 export default Friends;
+
 
 
 
