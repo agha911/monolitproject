@@ -1,7 +1,6 @@
 # utils/referral.py
 from datetime import datetime
 from zoneinfo import ZoneInfo
-from sqlalchemy import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update
 
@@ -10,8 +9,13 @@ from app.models.referral import ReferralShareEvent, ReferralDailyBucket
 
 BAKU_TZ = ZoneInfo("Asia/Baku")
 
-def baku_today_date() -> datetime.date:
+def baku_today_date():
     return datetime.now(BAKU_TZ).date()
+
+def baku_end_of_today_dt():
+    # конец текущего бакинского дня (локальное время)
+    now_baku = datetime.now(BAKU_TZ)
+    return now_baku.replace(hour=23, minute=59, second=59, microsecond=999999)
 
 async def expire_old_buckets(session: AsyncSession, referrer_id: int) -> None:
     """Все открытые корзины ранее сегодняшнего дня -> expired."""
@@ -41,25 +45,23 @@ async def credit_referral_share(session: AsyncSession, source_user_id: int, delt
         return 0
 
     referrer_id = src.invited_by
-    share = delta_clicks // 10  # 10%, в целых монетах вниз
+    share = delta_clicks // 10  # 10% (целочисленно вниз)
     if share <= 0:
         return 0
 
-    # Ленивая экспирация прошлых дней
+    # Ленивая экспирация прошлых дней — обязательно перед апдейтом «сегодня»
     await expire_old_buckets(session, referrer_id)
 
-    # Аудит-событие
-    await session.merge(ReferralShareEvent(
+    # Аудит-событие (add, а не merge)
+    session.add(ReferralShareEvent(
         referrer_id=referrer_id,
         source_user_id=source_user_id,
         day_date=baku_today_date(),
         amount=share,
     ))
 
-    # Обновляем/вставляем дневную корзину
+    # Обновляем/вставляем дневную корзину сегодняшнего дня
     today = baku_today_date()
-
-    # Пытаемся получить существующую корзину
     q = await session.execute(
         select(ReferralDailyBucket)
         .where(
@@ -83,14 +85,12 @@ async def credit_referral_share(session: AsyncSession, source_user_id: int, delt
             bucket.amount += share
             bucket.updated_at = datetime.utcnow()
             session.add(bucket)
-        # если корзина уже claimed/expired (бывает при редких гонках) — откроем новую запись текущего дня
         else:
-            new_bucket = ReferralDailyBucket(
+            session.add(ReferralDailyBucket(
                 referrer_id=referrer_id,
                 day_date=today,
                 amount=share,
                 status="open",
-            )
-            session.add(new_bucket)
+            ))
 
     return share
