@@ -6,7 +6,7 @@ import API_BASE_URL from '../config';
 interface UserEntry {
   id: number;
   username: string;
-  total_xp: number;
+               total_xp: number;
 }
 
 type ReferralStatus = 'open' | 'claimed' | 'expired' | 'none';
@@ -85,9 +85,7 @@ const Friends: React.FC = () => {
 
       if (refBalData) {
         setRefBalance(refBalData);
-        // серверный seconds_left
         let secs = Number(refBalData.seconds_left ?? 0);
-        // резерв — считаем из expires_at_iso
         if ((!secs || secs < 0) && refBalData.expires_at_iso) {
           const end = new Date(refBalData.expires_at_iso).getTime();
           const now = Date.now();
@@ -111,6 +109,7 @@ const Friends: React.FC = () => {
 
   useEffect(() => {
     fetchAll();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -138,6 +137,11 @@ const Friends: React.FC = () => {
 
   const handleClaimReferral = async () => {
     if (!canClaim || claimLoading) return;
+    if (!WebApp?.initData) {
+      WebApp.showPopup?.({ title: '!', message: t('try_again') as string });
+      return;
+    }
+
     try {
       setClaimLoading(true);
       const res = await fetch(`${API_BASE_URL}/api/referral/claim`, {
@@ -145,24 +149,50 @@ const Friends: React.FC = () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ init_data: WebApp.initData }),
       });
-      const data = await res.json();
 
-      if (data.status === 'ok') {
+      let data: any = null;
+      try {
+        const ct = res.headers.get('content-type') || '';
+        if (ct.includes('application/json')) {
+          data = await res.json();
+        } else {
+          const txt = await res.text().catch(() => '');
+          console.error('[referral/claim] non-JSON', res.status, txt);
+        }
+      } catch (e) {
+        console.error('[referral/claim] parse error', e);
+      }
+
+      if (!res.ok) {
+        WebApp.showPopup?.({
+          title: String(res.status),
+          message: (data?.detail as string) || (t('try_again') as string),
+        });
+        return;
+      }
+
+      const status = data?.status;
+      if (status === 'ok') {
         await fetchAll();
         WebApp.showPopup?.({
           title: '✓',
           message: `${t('claimed_success')}: +${data.claimed_amount} $GAP`,
         });
-      } else if (data.status === 'already_claimed') {
+      } else if (status === 'already_claimed') {
         WebApp.showPopup?.({ title: '!', message: t('already_claimed') as string });
-      } else if (data.status === 'expired') {
+        await fetchAll();
+      } else if (status === 'expired') {
         WebApp.showPopup?.({ title: '!', message: t('expired') as string });
-      } else {
+        await fetchAll();
+      } else if (status === 'nothing') {
         WebApp.showPopup?.({ title: '!', message: t('nothing_to_claim') as string });
+      } else {
+        console.error('[referral/claim] unexpected payload', data);
+        WebApp.showPopup?.({ title: '!', message: t('try_again') as string });
       }
     } catch (e) {
-      console.error(e);
-      WebApp.showPopup?.({ title: 'Ошибка', message: t('try_again') as string });
+      console.error('[referral/claim] fetch failed', e);
+      WebApp.showPopup?.({ title: '!', message: t('try_again') as string });
     } finally {
       setClaimLoading(false);
     }
@@ -182,6 +212,7 @@ const Friends: React.FC = () => {
         </button>
       </div>
 
+      {/* Реферальный блок можно скрывать, если нет приглашённых */}
       <div className="bg-[#0e1a2b] p-4 rounded shadow-lg border border-[#00f0ff30]">
         <div className="flex items-center justify-between mb-3">
           <div className="flex flex-col">
@@ -191,7 +222,7 @@ const Friends: React.FC = () => {
             </span>
             {!WebApp?.initData && (
               <span className="text-xs text-[#ffadad] mt-1">
-                {/* ключ добавь при желании в локали */}
+                {/* добавь ключ в локали при желании */}
                 Telegram initData is missing
               </span>
             )}
