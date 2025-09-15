@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Body
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.deps import get_async_session
+from app.database import get_async_session
 from app.utils import parse_telegram_user_id
 from app.models.user import User
 from app.models.referral import ReferralDailyBucket
