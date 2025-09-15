@@ -2,7 +2,7 @@
 from sqlalchemy import select
 from app.models.user import User
 from app.models.referral import ReferralShareEvent
-from app.utils.time_az import baku_today  # единый модуль времени
+from app.referral_utils.time_az import baku_today  # единый модуль времени
 
 async def credit_referral_share(session: AsyncSession, source_user_id: int, delta_clicks: int) -> int:
     if delta_clicks <= 0:
