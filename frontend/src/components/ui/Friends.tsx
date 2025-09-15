@@ -136,67 +136,87 @@ const Friends: React.FC = () => {
   };
 
   const handleClaimReferral = async () => {
-    if (!canClaim || claimLoading) return;
-    if (!WebApp?.initData) {
-      WebApp.showPopup?.({ title: '!', message: t('try_again') as string });
+  if (!canClaim || claimLoading) return;
+  if (!WebApp?.initData) {
+    WebApp.showPopup?.({ title: '!', message: t('try_again') as string });
+    return;
+  }
+
+  // 1) Запоминаем сумму ДО запроса (на случай пустого/не-JSON ответа)
+  const preClaimAmount = refBalance?.amount ?? 0;
+
+  try {
+    setClaimLoading(true);
+    const res = await fetch(`${API_BASE_URL}/api/referral/claim`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        // чуть повышаем шанс получить JSON
+        'Accept': 'application/json'
+      },
+      body: JSON.stringify({ init_data: WebApp.initData }),
+    });
+
+    let data: any = null;
+    let parsed = false;
+    try {
+      const ct = res.headers.get('content-type') || '';
+      if (ct.includes('application/json')) {
+        data = await res.json();
+        parsed = true;
+      } else {
+        const txt = await res.text().catch(() => '');
+        console.warn('[referral/claim] non-JSON', res.status, txt);
+      }
+    } catch (e) {
+      console.warn('[referral/claim] parse error', e);
+    }
+
+    // 2) Если сервер вернул НЕ ok — показываем detail/try_again
+    if (!res.ok) {
+      WebApp.showPopup?.({
+        title: String(res.status),
+        message: (data?.detail as string) || (t('try_again') as string),
+      });
       return;
     }
 
-    try {
-      setClaimLoading(true);
-      const res = await fetch(`${API_BASE_URL}/api/referral/claim`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ init_data: WebApp.initData }),
-      });
-
-      let data: any = null;
-      try {
-        const ct = res.headers.get('content-type') || '';
-        if (ct.includes('application/json')) {
-          data = await res.json();
-        } else {
-          const txt = await res.text().catch(() => '');
-          console.error('[referral/claim] non-JSON', res.status, txt);
-        }
-      } catch (e) {
-        console.error('[referral/claim] parse error', e);
-      }
-
-      if (!res.ok) {
-        WebApp.showPopup?.({
-          title: String(res.status),
-          message: (data?.detail as string) || (t('try_again') as string),
-        });
-        return;
-      }
-
-      const status = data?.status;
+    // 3) У нас ok. Если JSON есть — обрабатываем статусы, как обычно
+    if (parsed && data && typeof data.status === 'string') {
+      const status = data.status;
       if (status === 'ok') {
         await fetchAll();
         WebApp.showPopup?.({
           title: '✓',
           message: `${t('claimed_success')}: +${data.claimed_amount} $GAP`,
         });
-      } else if (status === 'already_claimed') {
-        WebApp.showPopup?.({ title: '!', message: t('already_claimed') as string });
-        await fetchAll();
       } else if (status === 'expired') {
         WebApp.showPopup?.({ title: '!', message: t('expired') as string });
         await fetchAll();
       } else if (status === 'nothing') {
         WebApp.showPopup?.({ title: '!', message: t('nothing_to_claim') as string });
       } else {
-        console.error('[referral/claim] unexpected payload', data);
+        console.warn('[referral/claim] unexpected payload', data);
         WebApp.showPopup?.({ title: '!', message: t('try_again') as string });
       }
-    } catch (e) {
-      console.error('[referral/claim] fetch failed', e);
-      WebApp.showPopup?.({ title: '!', message: t('try_again') as string });
-    } finally {
-      setClaimLoading(false);
+      return;
     }
-  };
+
+    // 4) ФОЛЛБЭК: ok, но JSON нет/неожидан. Считаем клейм успешным.
+    // Показываем, что собрали то, что было на экране до клика:
+    await fetchAll();
+    WebApp.showPopup?.({
+      title: '✓',
+      message: `${t('claimed_success')}: +${preClaimAmount} $GAP`,
+    });
+
+  } catch (e) {
+    console.error('[referral/claim] fetch failed', e);
+    WebApp.showPopup?.({ title: '!', message: t('try_again') as string });
+  } finally {
+    setClaimLoading(false);
+  }
+};
 
   return (
     <div className="p-4 bg-[#131f2f] min-h-screen text-[#00f0ff] flex flex-col gap-8">
