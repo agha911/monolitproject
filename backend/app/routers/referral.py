@@ -108,32 +108,41 @@ async def claim_referral_reward(
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
+    # Роллинг-окно 24ч от последнего клейма (anchor_at)
     cycle = await _ensure_cycle(session, user.id)
     now = baku_now()
     deadline = cycle.anchor_at + timedelta(hours=ROLLING_HOURS)
 
-    # Просрочено — нечего клеймить (и сброс якоря)
+    # Просрочено — сбрасываем якорь и сообщаем об истечении окна
     if now >= deadline:
         cycle.anchor_at = now
         cycle.updated_at = now
         await session.flush()
-        return ReferralClaimOut(status="expired", claimed_amount=0)
+        return ReferralClaimOut(
+            status="expired",
+            claimed_amount=0,
+            total_xp=user.total_xp or 0,
+        )
 
-    # Сумма с anchor_at
+    # Суммируем начисления с момента anchor_at
     amount = await _sum_since_anchor(session, user.id, cycle.anchor_at)
     if amount <= 0:
-        return ReferralClaimOut(status="nothing", claimed_amount=0)
+        return ReferralClaimOut(
+            status="nothing",
+            claimed_amount=0,
+            total_xp=user.total_xp or 0,
+        )
 
-    # Выплата
+    # Выплата пользователю
     user.total_xp = (user.total_xp or 0) + amount
     session.add(user)
 
-    # Аудит клейма (опционально)
+    # Аудит клейма (много клеймов допустимо)
     session.add(ReferralClaim(
         referrer_id=user.id,
-        day_date=now.date(),          # можно хранить и дату клейма
+        day_date=now.date(),
         claimed_amount=amount,
-        claimed_at=datetime.utcnow(), # UTC лог
+        claimed_at=datetime.utcnow(),  # UTC для аудита
     ))
 
     # Сбрасываем окно: новый якорь «сейчас»
@@ -143,9 +152,10 @@ async def claim_referral_reward(
 
     await session.commit()
 
-    return ReferralClaimOut(status="ok", claimed_amount=amount)
-    await session.commit()
-
-    return ReferralClaimOut(status="ok", claimed_amount=amount_today)
+    return ReferralClaimOut(
+        status="ok",
+        claimed_amount=amount,
+        total_xp=user.total_xp or 0,
+    )
 
 
