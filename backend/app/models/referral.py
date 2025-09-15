@@ -34,3 +34,14 @@ class ReferralClaim(Base):
         UniqueConstraint("referrer_id", "day_date", name="uq_referral_claim_referrer_day"),
         CheckConstraint("claimed_amount >= 0", name="rc_claimed_amount_nonneg"),
     )
+
+class ReferralCycle(Base):
+    __tablename__ = "referral_cycle"
+
+    referrer_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("users.id", ondelete="CASCADE"),
+        primary_key=True
+    )
+    anchor_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
