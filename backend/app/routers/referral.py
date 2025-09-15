@@ -13,7 +13,7 @@ from app.models.referral import ReferralShareEvent, ReferralClaim
 from app.schemas.referral import ReferralBalanceOut, ReferralClaimOut
 
 # единые функции времени
-from app.utils.time_az import baku_now, baku_today, baku_end_of_today_dt  # :contentReference[oaicite:2]{index=2}
+from app.referral_utils.time_az import baku_now, baku_today, baku_end_of_today_dt  # :contentReference[oaicite:2]{index=2}
 
 router = APIRouter()
 
