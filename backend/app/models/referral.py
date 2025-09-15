@@ -1,7 +1,7 @@
 # models/referral.py
 from datetime import datetime, date
 from sqlalchemy import (
-    BigInteger, Column, Date, DateTime, ForeignKey, String, UniqueConstraint, CheckConstraint, func
+    BigInteger, Column, Date, DateTime, ForeignKey, String, UniqueConstraint, CheckConstraint, func, Index
 )
 from sqlalchemy.orm import relationship, Mapped, mapped_column
 from app.database import Base
