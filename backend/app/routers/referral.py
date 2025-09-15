@@ -17,7 +17,7 @@ from app.referral_utils.time_az import baku_now, baku_today, baku_end_of_today_d
 
 router = APIRouter()
 
-@router.get("/api/referral/balance", response_model=ReferralBalanceOut)
+@router.get("/referral/balance", response_model=ReferralBalanceOut)
 async def get_referral_balance(
     init_data: str = Query(...),
     session: AsyncSession = Depends(get_async_session),
@@ -72,7 +72,7 @@ async def get_referral_balance(
     )
 
 
-@router.post("/api/referral/claim", response_model=ReferralClaimOut)
+@router.post("/referral/claim", response_model=ReferralClaimOut)
 async def claim_referral_reward(
     payload: dict = Body(...),
     session: AsyncSession = Depends(get_async_session),
