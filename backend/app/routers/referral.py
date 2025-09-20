@@ -2,20 +2,18 @@ from datetime import datetime, timedelta
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Body
-from sqlalchemy import select, func, update, insert
+from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.database import get_async_session  # или app.database.get_async_session если у вас так
+from app.database import get_async_session
 from app.utils import parse_telegram_user_id
 from app.models.user import User
 from app.models.referral import ReferralShareEvent, ReferralClaim, ReferralCycle
 from app.schemas.referral import ReferralBalanceOut, ReferralClaimOut
 
-# функции времени (Baku)
-from app.referral_utils.time_az import baku_now  # у нас теперь роллинг 24ч, day_date не нужен
+from app.referral_utils.time_az import baku_now
 
 router = APIRouter()
-
 ROLLING_HOURS = 24
 
 
@@ -26,7 +24,6 @@ async def _ensure_cycle(session: AsyncSession, referrer_id: int) -> ReferralCycl
     row = q.scalar_one_or_none()
     if row:
         return row
-    # создаём новый «якорь» окна
     now = baku_now()
     rc = ReferralCycle(referrer_id=referrer_id, anchor_at=now, updated_at=now)
     session.add(rc)
@@ -35,11 +32,11 @@ async def _ensure_cycle(session: AsyncSession, referrer_id: int) -> ReferralCycl
 
 
 async def _sum_since_anchor(session: AsyncSession, referrer_id: int, anchor: datetime) -> int:
-    # суммируем события, созданные с anchor_at
+    # Важно: сумма по created_at, а не по day_date
     sum_q = await session.execute(
         select(func.coalesce(func.sum(ReferralShareEvent.amount), 0)).where(
             ReferralShareEvent.referrer_id == referrer_id,
-            ReferralShareEvent.created_at >= anchor,  # Важно: по created_at!
+            ReferralShareEvent.created_at >= anchor,
         )
     )
     return int(sum_q.scalar_one() or 0)
@@ -57,30 +54,32 @@ async def get_referral_balance(
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
-    # Якори и дедлайны
     cycle = await _ensure_cycle(session, user.id)
     now = baku_now()
     deadline = cycle.anchor_at + timedelta(hours=ROLLING_HOURS)
     seconds_left = max(0, int((deadline - now).total_seconds()))
 
-    # Если просрочено — лениво «сбрасываем» окно
+    # Если окно просрочено — открываем новое (ленивый reset) и коммитим
     if now >= deadline:
-        # сгорание: окно начинаем заново с текущего момента
         cycle.anchor_at = now
         cycle.updated_at = now
-        await session.flush()
-        # после «сброса» ничего к выдаче
+        session.add(cycle)
+        await session.commit()  # критично: сохраняем новый anchor_at
+
+        # пересчитываем новый дедлайн/секунды
+        new_deadline = cycle.anchor_at + timedelta(hours=ROLLING_HOURS)
+        new_seconds_left = int((new_deadline - now).total_seconds())
+
         return ReferralBalanceOut(
             day_date=now.date().isoformat(),
             amount=0,
-            status="expired",
-            expires_at_iso=(now + timedelta(hours=ROLLING_HOURS)).isoformat(),
-            seconds_left=ROLLING_HOURS * 3600,
+            status="none",  # новое окно, пока ничего не накопилось
+            expires_at_iso=new_deadline.isoformat(),
+            seconds_left=new_seconds_left,
         )
 
-    # Не просрочено — считаем сумму с anchor_at
+    # Окно активно — считаем с anchor_at
     amount = await _sum_since_anchor(session, user.id, cycle.anchor_at)
-
     status = "open" if amount > 0 else "none"
 
     return ReferralBalanceOut(
@@ -108,24 +107,23 @@ async def claim_referral_reward(
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
-    # Роллинг-окно 24ч от последнего клейма (anchor_at)
     cycle = await _ensure_cycle(session, user.id)
     now = baku_now()
     deadline = cycle.anchor_at + timedelta(hours=ROLLING_HOURS)
 
-    # Просрочено — сбрасываем якорь, ФИКС: коммитим изменения, чтобы открыть новое окно
+    # Просрочено — сбрасываем якорь и сохраняем новое окно
     if now >= deadline:
         cycle.anchor_at = now
         cycle.updated_at = now
         session.add(cycle)
-        await session.commit()  # <-- критично: иначе окно не открывается
+        await session.commit()  # фикс «залипания»
         return ReferralClaimOut(
             status="expired",
             claimed_amount=0,
             total_xp=user.total_xp or 0,
         )
 
-    # Суммируем начисления с момента anchor_at
+    # Сумма с момента anchor_at
     amount = await _sum_since_anchor(session, user.id, cycle.anchor_at)
     if amount <= 0:
         return ReferralClaimOut(
@@ -138,15 +136,15 @@ async def claim_referral_reward(
     user.total_xp = (user.total_xp or 0) + amount
     session.add(user)
 
-    # Аудит клейма (много клеймов допустимо)
+    # Аудит (множественные клеймы допускаются)
     session.add(ReferralClaim(
         referrer_id=user.id,
         day_date=now.date(),
         claimed_amount=amount,
-        claimed_at=datetime.utcnow(),  # UTC для аудита
+        claimed_at=datetime.utcnow(),  # UTC лог
     ))
 
-    # Сбрасываем окно: новый якорь «сейчас»
+    # Новое окно от текущего момента
     cycle.anchor_at = now
     cycle.updated_at = now
     session.add(cycle)
@@ -158,5 +156,6 @@ async def claim_referral_reward(
         claimed_amount=amount,
         total_xp=user.total_xp or 0,
     )
+
 
 
