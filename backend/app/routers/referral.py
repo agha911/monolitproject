@@ -113,11 +113,12 @@ async def claim_referral_reward(
     now = baku_now()
     deadline = cycle.anchor_at + timedelta(hours=ROLLING_HOURS)
 
-    # Просрочено — сбрасываем якорь и сообщаем об истечении окна
+    # Просрочено — сбрасываем якорь, ФИКС: коммитим изменения, чтобы открыть новое окно
     if now >= deadline:
         cycle.anchor_at = now
         cycle.updated_at = now
-        await session.flush()
+        session.add(cycle)
+        await session.commit()  # <-- критично: иначе окно не открывается
         return ReferralClaimOut(
             status="expired",
             claimed_amount=0,
