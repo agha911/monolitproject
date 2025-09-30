@@ -1,4 +1,4 @@
-# app/notifications/announce_referral_and_boost.py
+# app/notifications/announce_art_contest.py
 
 import asyncio
 from sqlalchemy.future import select
@@ -8,40 +8,40 @@ from app.bot_instance import bot
 from app.database import async_session_maker
 from app.models.user import User
 
-# 🔔 Единое объявление про обновления
+# 🔗 Instagram səhifəsi (qaydalar və iştirak)
+INSTAGRAM_URL = "https://www.instagram.com/gap_pick?igsh=ZzdzYWE1MzgzNGJk&utm_source=qr"
+
+# 🔔 Elan: Art Yarışması
 ANNOUNCEMENT_TEXT = (
-    "🎉 *Gappick yenilikləri!*\n\n"
-    "👥 *Yeni referal mexaniki*\n"
-    "• Dəvət etdiyin hər aktiv istifadəçi üçün *10%* klik mükafatı qazanırsan.\n"
-    "• Balans *istənilən anda* topladığını kleymləyə bilərsən.\n"
-    "• Kleymlədikdən sonra *24 saatlıq pəncərə* başlayır — həmin müddətdə yenə toplayıb kleymlə.\n"
-    "• Əgər *24 saat ərzində kleymləməsən*, o pəncərə bağlanır və yeni dövr sıfırdan başlayır.\n"
-    "• *Dostlar* bölməsində balans və *geri sayım* göstərilir.\n\n"
-    "💥 *Klik Busteri: x10-a qədər!*\n"
-    "• Səviyyələr genişləndirildi: x1 → x10.\n"
-    "• *Tələblər (6–10 səviyyə):*\n"
-    "  — 6 səviyyə: *1* dəvət\n"
-    "  — 7 səviyyə: *5* dəvət\n"
-    "  — 8 səviyyə: *10* dəvət\n"
-    "  — 9 səviyyə: *15* dəvət\n"
-    "  — 10 səviyyə: *20* dəvət\n\n"
-    "🛒 Busteri *Mağaza* bölməsindən al, tələbləri yerinə yetir və klikini gücləndir!\n\n"
-    "🚀 *Yenilikləri indi sına!*"
+    "✨ *Art Yarışmamız başladı!* ✨\n"
+    "🏆 *Baş mükafat: 300 USDT*\n\n"
+    "Sən də öz yaradıcılığını göstər və Gappick maskotundan ilhamlanmış unikal "
+    "T-shirt dizaynı yarat! 👕🪙\n\n"
+    "📌 *Qaydalar çox sadədir:*\n"
+    "1️⃣ Öz dizaynını hazırla\n"
+    "2️⃣ Story-də paylaş\n"
+    "3️⃣ Səhifəmizi qeyd et və «iştirak edirəm» yaz ✍️\n\n"
+    "🔑 Yalnız *bir qalib* seçiləcək!\n\n"
+    "Bu fürsəti qaçırma — yaradıcılığını hamıya göstər! 🚀"
 )
 
-# 📌 Кнопка: открыть WebApp
 def build_markup() -> InlineKeyboardMarkup:
     markup = InlineKeyboardMarkup()
     markup.add(
         InlineKeyboardButton(
-            text="🚀 Aç",
+            text="📸 Instagram səhifəsi",
+            url=INSTAGRAM_URL
+        )
+    )
+    markup.add(
+        InlineKeyboardButton(
+            text="🚀 Aç (WebApp)",
             web_app=WebAppInfo(url="https://monolitproject-5g7v.vercel.app/")
         )
     )
     return markup
 
 async def send_announcement_to_all():
-    # читаем всех пользователей одной сессией
     async with async_session_maker() as session:
         result = await session.execute(select(User))
         users = result.scalars().all()
@@ -59,16 +59,15 @@ async def send_announcement_to_all():
             )
             success += 1
         except Exception as e:
-            # Логируем и продолжаем, чтобы рассылка не останавливалась
             print(f"[ERROR] send to {user.telegram_id}: {e}")
             failed += 1
-        # (опционально) небольшая пауза, чтобы смягчить rate-limit
-        await asyncio.sleep(0.02)
+        await asyncio.sleep(0.03)
 
     print(f"[DONE] Sent to {success} users, failed for {failed} users.")
 
 if __name__ == "__main__":
     asyncio.run(send_announcement_to_all())
+
 
 
 
