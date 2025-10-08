@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends
-from sqlalchemy import select
+from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.deps import get_db, get_current_user
@@ -13,20 +13,24 @@ from app.models.partner import Partner
 
 router = APIRouter(prefix="/api", tags=["user-card"])
 
+
 async def _get_invited_count(session: AsyncSession, user_id: int) -> int:
     """
-    TODO: Возьми из своей реферальной схемы.
-    Сейчас возвращаем 0, чтобы не ломать контракт.
+    Реальный подсчет приглашённых: COUNT(*) пользователей, у которых invited_by = current_user.id
     """
-    return 0
+    res = await session.execute(
+        select(func.count()).select_from(User).where(User.invited_by == user_id)
+    )
+    return int(res.scalar() or 0)
+
 
 @router.get("/user/card", response_model=UserCardOut)
 async def get_user_card(
     session: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    username = getattr(current_user, "username", "") or getattr(current_user, "telegram_username", "")
-    coins = getattr(current_user, "coins", None) or getattr(current_user, "balance", 0)
+    username = current_user.username or ""
+    coins = int(current_user.score or 0)  # баланс берём из поля score
 
     invited_count = await _get_invited_count(session, current_user.id)
 
@@ -63,7 +67,7 @@ async def get_user_card(
 
     return UserCardOut(
         username=username or f"id:{current_user.id}",
-        coins=int(coins),
-        invited_count=int(invited_count),
+        coins=coins,
+        invited_count=invited_count,
         active_drops=active_drops,
     )
