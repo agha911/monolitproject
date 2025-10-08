@@ -16,7 +16,7 @@ from app.crud.drop_purchases import (
     create_purchase_raw,
     get_purchase_by_code,
 )
-from app.utils.codes import generate_unique_code
+from app.drop_utils.codes import generate_unique_code
 
 
 class DropBuyError(Exception):
