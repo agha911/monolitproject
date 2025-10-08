@@ -1,11 +1,11 @@
+# app/services/drops.py
 from __future__ import annotations
 
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import and_, func, select, update
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
 
 from app.models.drop import Drop
 from app.models.drop_purchase import DropPurchase
@@ -24,34 +24,26 @@ class DropBuyError(Exception):
 
 
 async def _get_drop_for_update(session: AsyncSession, drop_id: int) -> Optional[Drop]:
-    # блокируем строку на время операции (чтобы корректно считать supply)
-    stmt = (
-        select(Drop)
-        .where(Drop.id == drop_id)
-        .with_for_update()
-    )
+    """Заблокировать строку дропа на время операции (для корректного подсчёта supply)."""
+    stmt = select(Drop).where(Drop.id == drop_id).with_for_update()
     res = await session.execute(stmt)
     return res.scalar_one_or_none()
 
 
-async def _deduct_user_coins(session: AsyncSession, user_id: int, amount: int) -> None:
+async def _deduct_user_score(session: AsyncSession, user_id: int, amount: int) -> None:
+    """Списать монеты из поля `User.score` (баланс игры)."""
     if amount <= 0:
         return
-    # читаем баланс
     res = await session.execute(select(User).where(User.id == user_id).with_for_update())
     user = res.scalar_one_or_none()
     if not user:
         raise DropBuyError("user_not_found")
-    current = getattr(user, "coins", None) or getattr(user, "balance", None) or 0
+
+    current = int(user.score or 0)
     if current < amount:
         raise DropBuyError("not_enough_coins")
-    # обновляем (здесь на объекте — SQLAlchemy сам сделает UPDATE)
-    if hasattr(user, "coins"):
-        user.coins = current - amount
-    elif hasattr(user, "balance"):
-        user.balance = current - amount
-    else:
-        raise DropBuyError("user_balance_field_missing")
+
+    user.score = current - amount  # SQLAlchemy сам выполнит UPDATE при flush/commit
 
 
 async def buy_drop(session: AsyncSession, *, user_id: int, drop_id: int) -> DropPurchase:
@@ -59,7 +51,7 @@ async def buy_drop(session: AsyncSession, *, user_id: int, drop_id: int) -> Drop
     Покупка дропа с проверками:
       - дроп активен, видим, окно дат ок
       - не превышен total_supply и per_user_limit
-      - списываем монеты пользователя
+      - списываем score пользователя
       - создаём unique_code (ретраи при конфликте)
     """
     # 1) читаем дроп под блокировкой
@@ -67,12 +59,11 @@ async def buy_drop(session: AsyncSession, *, user_id: int, drop_id: int) -> Drop
     if not drop:
         raise DropBuyError("drop_not_found")
 
-    now_expr = func.now()
     # 2) валидации
     if not drop.active or not drop.visible:
         raise DropBuyError("drop_inactive")
-    # проверяем окно дат на уровне БД выражением (или забери drop.start_at/end_at и сравни с datetime.utcnow())
-    res = await session.execute(select(now_expr))
+
+    res = await session.execute(select(func.now()))
     now = res.scalar()
     if not (drop.start_at <= now <= drop.end_at):
         raise DropBuyError("drop_out_of_window")
@@ -88,9 +79,9 @@ async def buy_drop(session: AsyncSession, *, user_id: int, drop_id: int) -> Drop
         if used_user >= drop.per_user_limit:
             raise DropBuyError("drop_user_limit_reached")
 
-    # 3) списание монет
-    price = drop.price_coins or 0
-    await _deduct_user_coins(session, user_id, price)
+    # 3) списание монет (score)
+    price = int(drop.price_coins or 0)
+    await _deduct_user_score(session, user_id, price)
 
     # 4) генерация кода с ретраями при конфликте UNIQUE
     for _ in range(5):
@@ -99,7 +90,6 @@ async def buy_drop(session: AsyncSession, *, user_id: int, drop_id: int) -> Drop
             purchase = await create_purchase_raw(session, user_id=user_id, drop_id=drop.id, unique_code=code)
             return purchase
         except Exception as e:
-            # проверяем нарушение уникальности (psycopg2.errors.UniqueViolation), но без жёсткой зависимости на драйвер
             if "unique" in str(e).lower() and "unique_code" in str(e).lower():
                 continue
             raise
@@ -128,7 +118,7 @@ async def redeem_by_code(session: AsyncSession, *, unique_code: str, actor_is_pa
 
 async def revoke_by_code(session: AsyncSession, *, unique_code: str) -> DropPurchase:
     """
-    Админ/партнёр отменяет код (REVOKED).
+    Отмена (REVOKED) кода админом/партнёром, если код ещё не погашен.
     """
     purchase = await get_purchase_by_code(session, unique_code)
     if not purchase:
@@ -139,3 +129,4 @@ async def revoke_by_code(session: AsyncSession, *, unique_code: str) -> DropPurc
     purchase.status = "revoked"
     await session.flush()
     return purchase
+
