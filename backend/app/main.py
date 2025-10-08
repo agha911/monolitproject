@@ -26,6 +26,7 @@ from app.notifications.winners_handlers import register_winners_handlers
 from app.notifications.delivery_handlers import register_delivery_handlers
 from app.referral_utils.referral import credit_referral_share
 from app.routers import referral as referral_router
+from app.routers import store_drops, user_card, partner_drops
 
 
 # ---------------- logging setup ----------------
@@ -498,6 +499,9 @@ app.include_router(stats.router)
 app.include_router(partner_task.router)
 app.include_router(challenge.router)
 app.include_router(referral_router.router, prefix="/api", tags=["referral"])
+app.include_router(store_drops.router)
+app.include_router(user_card.router)
+app.include_router(partner_drops.router)
 
 
 # ---------------- background ----------------
