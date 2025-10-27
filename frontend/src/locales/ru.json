@@ -127,6 +127,8 @@
   "drop_price": "Цена: {{price}} $GAP",
   "drops_empty": "Нет активных дропов.",
   "drop_code_title": "Код дропа",
-  "drop_code_hint": "Покажите этот код партнёру:"
+  "drop_code_hint": "Покажите этот код партнёру:",
+  "shop_tab_boosters": "Бустеры",
+  "shop_tab_drops": "Дропы"
 
 }
