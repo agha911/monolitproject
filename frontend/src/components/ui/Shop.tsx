@@ -4,7 +4,7 @@ import API_BASE_URL from '../config';
 import WebApp from '@twa-dev/sdk';
 
 // 🆕 импорт API для дропов (использует X-Telegram-User-Id под капотом)
-import { listDrops, buyDrop, type Drop, type Purchase } from '../../scripts/api/drops';
+import { listDrops, buyDrop, type Drop, type Purchase } from '../scripts/api/drops';
 
 const ENERGY_UPGRADE_PRICE = 2500; // должен совпадать с беком
 const REFILL_PRICE = 2500;         // должен совпадать с беком
