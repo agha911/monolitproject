@@ -3,23 +3,17 @@ import { useTranslation } from 'react-i18next';
 import API_BASE_URL from '../config';
 import WebApp from '@twa-dev/sdk';
 
-// 🆕 импорт API для дропов (использует X-Telegram-User-Id под капотом)
+// дропы API
 import { listDrops, buyDrop, type Drop, type Purchase } from '../scripts/api/drops';
 
-const ENERGY_UPGRADE_PRICE = 2500; // должен совпадать с беком
-const REFILL_PRICE = 2500;         // должен совпадать с беком
+const ENERGY_UPGRADE_PRICE = 2500;
+const REFILL_PRICE = 2500;
 
-// Временный сток для предпросмотра (позже можно подменить данными с бэка)
+// временный сток футболок (плейсхолдер)
 const TSHIRT_TOTAL = 10;
 const TSHIRT_LEFT = 10;
 
-const INVITE_REQUIREMENTS: Record<number, number> = {
-  6: 1,
-  7: 5,
-  8: 10,
-  9: 15,
-  10: 20,
-};
+const INVITE_REQUIREMENTS: Record<number, number> = { 6: 1, 7: 5, 8: 10, 9: 15, 10: 20 };
 const MAX_BOOST_LEVEL = 10;
 
 const Shop: React.FC = () => {
@@ -27,7 +21,7 @@ const Shop: React.FC = () => {
   const [message, setMessage] = useState('');
   const [loading, setLoading] = useState(false);
 
-  // 🆕 табы магазина: boosters | drops
+  // вкладки
   const [tab, setTab] = useState<'boosters' | 'drops'>('boosters');
 
   // user basics
@@ -48,7 +42,7 @@ const Shop: React.FC = () => {
   const [currentEnergy, setCurrentEnergy] = useState<number | null>(null);
   const [refillMaxEnergy, setRefillMaxEnergy] = useState<number | null>(null);
 
-  // 🆕 дропы
+  // дропы
   const [drops, setDrops] = useState<Drop[]>([]);
   const [dropsLoading, setDropsLoading] = useState(false);
   const [purchase, setPurchase] = useState<Purchase | null>(null);
@@ -57,7 +51,7 @@ const Shop: React.FC = () => {
   const telegramUserId = telegramUser?.id;
   const initData = WebApp.initData;
 
-  // ------- loaders -------
+  // loaders
   const fetchUserData = async () => {
     try {
       const res = await fetch(`${API_BASE_URL}/api/game/progress`, {
@@ -135,7 +129,7 @@ const Shop: React.FC = () => {
     }
   };
 
-  // 🆕 загрузка дропов (только при первой активации вкладки "drops")
+  // дропы: загружаем при первом открытии вкладки
   useEffect(() => {
     const loadDropsOnce = async () => {
       if (tab !== 'drops' || drops.length > 0 || dropsLoading) return;
@@ -162,12 +156,12 @@ const Shop: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ------- helpers -------
+  // helpers
   const nextBoostLevel = Math.min(clickBoostLevel + 1, MAX_BOOST_LEVEL);
   const requiredInvites = INVITE_REQUIREMENTS[nextBoostLevel] ?? 0;
   const clickBoostPrice = 5000 * Math.pow(2, clickBoostLevel);
 
-  // ------- actions -------
+  // actions
   const handleBuyClickBoost = async () => {
     setLoading(true);
     setMessage('');
@@ -340,12 +334,9 @@ const Shop: React.FC = () => {
     currentEnergy >= (refillMaxEnergy ?? userMaxEnergy ?? 0);
 
   const disableRefill =
-    loading ||
-    totalXp < REFILL_PRICE ||
-    (refillsLeft !== null && refillsLeft <= 0) ||
-    energyIsFull;
+    loading || totalXp < REFILL_PRICE || (refillsLeft !== null && refillsLeft <= 0) || energyIsFull;
 
-  // 🆕 UI-переключатель
+  // tabs UI
   const Tabs = (
     <div className="max-w-md mx-auto mb-6">
       <div className="w-full bg-[#0e1a2b] border border-[#1f3b57] rounded-full p-1 flex">
@@ -379,33 +370,9 @@ const Shop: React.FC = () => {
 
       {Tabs}
 
-      {/* ======= Вкладка БУСТЕРЫ ======= */}
+      {/* === Вкладка БУСТЕРЫ === */}
       {tab === 'boosters' && (
         <>
-          {/* Товар-футболка — ПЕРВЫМ */}
-          <div className="bg-[#0e1a2b] border border-[#ffffff20] p-4 rounded-xl shadow-[0_0_10px_#ffffff20] text-center space-y-2 max-w-md mx-auto mb-6">
-            <div className="relative w-fit mx-auto">
-              <img
-                src="/tshirt-preview-1.png"
-                alt="T-shirt"
-                className="w-24 h-24 mx-auto rounded-md object-cover"
-              />
-              <span className="absolute -right-2 -top-2 bg-[#00f0ff] text-[#0e1a2b] text-xs font-bold px-2 py-1 rounded-full shadow">
-                {TSHIRT_LEFT}/{TSHIRT_TOTAL}
-              </span>
-            </div>
-
-            <h3 className="text-lg font-semibold text-white/90">👕 Gappick T-shirt (Limited)</h3>
-            <p className="text-sm text-[#999999]">Tezliklə satışda</p>
-
-            <button
-              disabled
-              className="bg-[#cccccc20] text-[#cccccc] font-semibold px-4 py-2 rounded cursor-not-allowed"
-            >
-              {t('buy')}
-            </button>
-          </div>
-
           {/* Бустер на клики */}
           <div className="bg-[#0e1a2b] border border-[#00f0ff40] p-4 rounded-xl shadow-[0_0_10px_#00f0ff30] text-center space-y-2 max-w-md mx-auto mb-6">
             <h3 className="text-lg font-semibold text-[#7ee9ff]">💥 {t('boost_click')}</h3>
@@ -414,7 +381,12 @@ const Shop: React.FC = () => {
             </p>
             {requiredInvites > 0 && (
               <p className="text-xs text-[#89dfff]">
-                {t('invited_friends')}: {invitesCount} • {t('boost_invites_required', { level: `x${nextBoostLevel}`, need: requiredInvites, have: invitesCount })}
+                {t('invited_friends')}: {invitesCount} •{' '}
+                {t('boost_invites_required', {
+                  level: `x${nextBoostLevel}`,
+                  need: requiredInvites,
+                  have: invitesCount,
+                })}
               </p>
             )}
 
@@ -474,29 +446,64 @@ const Shop: React.FC = () => {
         </>
       )}
 
-      {/* ======= Вкладка ДРОПЫ ======= */}
+      {/* === Вкладка ДРОПЫ === */}
       {tab === 'drops' && (
         <div className="max-w-md mx-auto">
-          {dropsLoading && <div className="text-center text-sm text-[#7ee9ff] mb-4">{t('common.loading')}</div>}
+          {/* Футболка перенесена сюда (плейсхолдер) */}
+          <div className="bg-[#0e1a2b] border border-[#ffffff20] p-4 rounded-xl shadow-[0_0_10px_#ffffff20] text-center space-y-2 mb-6">
+            <div className="relative w-fit mx-auto">
+              <img
+                src="/tshirt-preview-1.png"
+                alt="T-shirt"
+                className="w-24 h-24 mx-auto rounded-md object-cover"
+              />
+              <span className="absolute -right-2 -top-2 bg-[#00f0ff] text-[#0e1a2b] text-xs font-bold px-2 py-1 rounded-full shadow">
+                {TSHIRT_LEFT}/{TSHIRT_TOTAL}
+              </span>
+            </div>
+
+            <h3 className="text-lg font-semibold text-white/90">👕 Gappick T-shirt (Limited)</h3>
+            <p className="text-sm text-[#999999]">Tezliklə satışda</p>
+
+            <button
+              disabled
+              className="bg-[#cccccc20] text-[#cccccc] font-semibold px-4 py-2 rounded cursor-not-allowed"
+            >
+              {t('buy')}
+            </button>
+          </div>
+
+          {dropsLoading && (
+            <div className="text-center text-sm text-[#7ee9ff] mb-4">{t('common.loading')}</div>
+          )}
           {!dropsLoading && drops.length === 0 && (
-            <div className="text-center text-sm text-[#7ee9ff] mb-4">{t('drops_empty') || 'Нет активных дропов'}</div>
+            <div className="text-center text-sm text-[#7ee9ff] mb-4">
+              {t('drops_empty') || 'Нет активных дропов'}
+            </div>
           )}
 
           <div className="space-y-3">
             {drops.map((d) => (
-              <div key={d.id} className="rounded-2xl p-4 bg-[#0e1a2b] border border-[#00f0ff40] text-white flex items-center justify-between">
+              <div
+                key={d.id}
+                className="rounded-2xl p-4 bg-[#0e1a2b] border border-[#00f0ff40] text-white flex items-center justify-between"
+              >
                 <div>
                   <div className="text-base font-semibold">{d.title}</div>
                   <div className="text-xs opacity-80">
-                    {t('drop_discount', { percent: d.discount_percent })} · {t('drop_price', { price: d.price_coins })}
+                    {t('drop_discount', { percent: d.discount_percent })} ·{' '}
+                    {t('drop_price', { price: d.price_coins })}
                   </div>
                 </div>
                 <button
                   className="px-3 py-1 rounded-lg bg-[#00f0ff] text-[#0e1a2b] text-sm font-semibold"
                   onClick={async () => {
                     try {
-                      const p = await buyDrop(d.id);
+                      const p = await buyDrop(d.id); // отправляет telegram_id+drop_id
                       setPurchase(p);
+                      // при желании можно обновить баланс/статистику:
+                      await fetchUserData();
+                      await fetchTotalSpent();
                     } catch (e: any) {
                       alert(e?.message || t('shop_error'));
                     }
@@ -514,7 +521,8 @@ const Shop: React.FC = () => {
               <div className="w-full rounded-t-2xl bg-white p-4">
                 <div className="font-semibold">{t('drop_code_title') || 'Код дропа'}</div>
                 <div className="text-sm mt-1">
-                  {t('drop_code_hint') || 'Покажите этот код партнёру:'} <b>{purchase.unique_code}</b>
+                  {t('drop_code_hint') || 'Покажите этот код партнёру:'}{' '}
+                  <b>{purchase.unique_code}</b>
                 </div>
                 <div className="text-xs opacity-70 mt-1">
                   {purchase.partner_name} · {purchase.discount_percent ?? '-'}%
@@ -529,7 +537,10 @@ const Shop: React.FC = () => {
                   >
                     {t('actions.copy') || 'Копировать'}
                   </button>
-                  <button className="px-3 py-2 rounded-lg bg-gray-200" onClick={() => setPurchase(null)}>
+                  <button
+                    className="px-3 py-2 rounded-lg bg-gray-200"
+                    onClick={() => setPurchase(null)}
+                  >
                     {t('actions.close') || 'Закрыть'}
                   </button>
                 </div>
@@ -545,6 +556,7 @@ const Shop: React.FC = () => {
 };
 
 export default Shop;
+
 
 
 
