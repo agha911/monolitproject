@@ -128,6 +128,8 @@
   "drop_price": "Qiymət: {{price}} $GAP",
   "drops_empty": "Aktiv drop yoxdur.",
   "drop_code_title": "Drop kodu",
-  "drop_code_hint": "Bu kodu tərəfdaşa göstərin:"
+  "drop_code_hint": "Bu kodu tərəfdaşa göstərin:",
+  "shop_tab_boosters": "Busterlər",
+  "shop_tab_drops": "Droplar"
 
 }
