@@ -2,14 +2,14 @@
 import logging
 from telebot import types
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
-from sqlalchemy import select, update, and_
+from sqlalchemy import select, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.bot_instance import bot
+from app.bot_instance import bot            # твой уже созданный (Async)TeleBot
 from app.database import async_session_maker
 
-# Модели (проверь имена в своих файлах)
-from app.models.partner import Partner, PartnerUser
+# Модели из твоих файлов
+from app.models.partner import Partner
 from app.models.drop import Drop
 from app.models.drop_purchase import DropPurchase
 
@@ -21,27 +21,14 @@ async def _get_partner_by_api_key(session: AsyncSession, api_key: str) -> Partne
     res = await session.execute(select(Partner).where(Partner.api_key == api_key))
     return res.scalar_one_or_none()
 
-async def _upsert_partner_user(session: AsyncSession, partner_id: int, tg_user_id: int) -> None:
-    # есть ли запись?
-    res = await session.execute(
-        select(PartnerUser).where(
-            PartnerUser.partner_id == partner_id,
-            PartnerUser.telegram_user_id == tg_user_id,
-        )
-    )
-    link = res.scalar_one_or_none()
-    if link is None:
-        session.add(PartnerUser(partner_id=partner_id, telegram_user_id=tg_user_id))
-        await session.flush()
+async def _bind_partner_to_telegram(session: AsyncSession, partner: Partner, tg_id: int, tg_username: str | None):
+    partner.tg_user_id = tg_id
+    if tg_username:
+        partner.tg_username = tg_username
+    await session.flush()
 
 async def _get_partner_for_telegram(session: AsyncSession, tg_user_id: int) -> Partner | None:
-    q = (
-        select(Partner)
-        .join(PartnerUser, PartnerUser.partner_id == Partner.id)
-        .where(PartnerUser.telegram_user_id == tg_user_id)
-        .limit(1)
-    )
-    res = await session.execute(q)
+    res = await session.execute(select(Partner).where(Partner.tg_user_id == tg_user_id).limit(1))
     return res.scalar_one_or_none()
 
 async def _list_partner_drops(session: AsyncSession, partner_id: int, limit: int, offset: int):
@@ -108,7 +95,7 @@ async def partner_login(msg):
             if not partner:
                 await bot.reply_to(msg, "Неверный ключ.")
                 return
-            await _upsert_partner_user(session, partner.id, msg.from_user.id)
+            await _bind_partner_to_telegram(session, partner, msg.from_user.id, msg.from_user.username)
             await session.commit()
 
         await bot.reply_to(msg, f"Готово! Доступ выдан: {partner.name}\nВведите /partner")
@@ -128,7 +115,7 @@ async def partner_menu(msg):
         kb = InlineKeyboardMarkup()
         kb.add(InlineKeyboardButton("📦 Мои дропы", callback_data="p:drops:0"))
         kb.add(InlineKeyboardButton("🔎 По коду", switch_inline_query_current_chat="code "))
-        kb.add(InlineKeyboardButton("📊 Статистика", callback_data="p:stats"))
+        kb.add(InlineKeyboardButton("📊 Статистика", callback_data="p:stats"))  # заглушка
         await bot.send_message(msg.chat.id, f"Партнёр: {partner.name}", reply_markup=kb)
     except Exception as e:
         log.exception("partner failed")
@@ -264,3 +251,4 @@ async def purchase_action(cb):
     except Exception as e:
         log.exception("p:redeem/revoke failed")
         await bot.answer_callback_query(cb.id, f"Ошибка: {e}", show_alert=True)
+
