@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { getUserCard, type UserCard as IUserCard } from '../scripts/api/user';
+import { getUserCard, type UserCard as IUserCard } from './scripts/api/user';
 
 type Props = { onClose: () => void };
 
