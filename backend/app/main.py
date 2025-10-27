@@ -20,6 +20,7 @@ from app.core.referral_cache import referral_cache
 from app.bot_instance import bot
 from app.config import TELEGRAM_BOT_TOKEN
 import app.helpers.bot_partner
+import app.helpers.partner_debug
 from app.notifications.notify_energy import notify_max_energy_users
 from app.notifications.reset_energy_notified import reset_energy_flags  # не используем
 from app.oneoff.finalize_clicks_aug18_sep1 import register_oneoff_finalize_task
