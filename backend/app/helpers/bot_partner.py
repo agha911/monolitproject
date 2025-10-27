@@ -1,7 +1,7 @@
 # bot_partner.py
 from telebot import types
 from app.database import SessionLocal
-from partner_auth import (
+from .partner_auth import (
     partner_by_api_key, upsert_partner_user, get_partner_for_telegram,
     list_partner_drops, toggle_drop_active, get_purchase_by_code, set_purchase_status
 )
