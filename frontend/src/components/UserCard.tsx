@@ -21,7 +21,7 @@ type Purchase = {
 
 type IUserCard = {
   username: string;
-  coins: number;
+  coins: number;           // на бэке это total_xp/score
   invited_count: number;
   active_drops: Purchase[];
 };
@@ -53,12 +53,11 @@ const UserCard: React.FC<Props> = ({ onClose }) => {
     (async () => {
       try {
         const tgId = WebApp?.initDataUnsafe?.user?.id;
-        const url = `${API_BASE_URL}/api/user/card?telegram_id=${encodeURIComponent(String(tgId ?? ''))}`;
-        const res = await fetch(url, { headers: { 'Accept': 'application/json' } });
-        if (!res.ok) {
-          const text = await res.text();
-          throw new Error(text || `HTTP ${res.status}`);
-        }
+        if (!tgId) throw new Error('Telegram user id is missing');
+
+        const url = `${API_BASE_URL}/api/user/card?telegram_id=${encodeURIComponent(String(tgId))}`;
+        const res = await fetch(url, { headers: { Accept: 'application/json' } });
+        if (!res.ok) throw new Error((await res.text()) || `HTTP ${res.status}`);
         const json: IUserCard = await res.json();
         setData(json);
       } catch (e: any) {
@@ -88,15 +87,26 @@ const UserCard: React.FC<Props> = ({ onClose }) => {
         {data && (
           <>
             <div className="rounded-xl p-3 bg-gray-100 mb-3">
-              <div className="text-sm opacity-70">{t('userCard.profile', { defaultValue: 'Профиль' })}</div>
+              <div className="text-sm opacity-70">
+                {t('userCard.profile', { defaultValue: 'Профиль' })}
+              </div>
               <div className="text-xl font-semibold">
-                {t('userCard.username', { username: data.username, defaultValue: `@${data.username}` })}
+                {t('userCard.username', {
+                  username: data.username,
+                  defaultValue: `@${data.username}`,
+                })}
               </div>
               <div className="mt-1 text-sm">
-                {t('userCard.coins', { count: data.coins, defaultValue: `Монеты: ${data.coins}` })}
+                {t('userCard.coins', {
+                  count: data.coins,
+                  defaultValue: `Монеты: ${data.coins}`,
+                })}
               </div>
               <div className="mt-1 text-sm">
-                {t('userCard.invited', { count: data.invited_count, defaultValue: `Приглашено друзей: ${data.invited_count}` })}
+                {t('userCard.invited', {
+                  count: data.invited_count,
+                  defaultValue: `Приглашено друзей: ${data.invited_count}`,
+                })}
               </div>
             </div>
 
@@ -111,7 +121,10 @@ const UserCard: React.FC<Props> = ({ onClose }) => {
 
             <div className="space-y-2">
               {data.active_drops.map((p) => (
-                <div key={p.id} className="rounded-xl p-3 bg-gray-100 flex items-center justify-between">
+                <div
+                  key={p.id}
+                  className="rounded-xl p-3 bg-gray-100 flex items-center justify-between"
+                >
                   <div>
                     <div className="text-sm font-medium">
                       {p.drop_title || t('userCard.dropFallback', { defaultValue: 'Дроп' })}
@@ -124,7 +137,10 @@ const UserCard: React.FC<Props> = ({ onClose }) => {
                       })}
                     </div>
                     <div className="text-xs mt-1">
-                      {t('userCard.codeLine', { code: p.unique_code, defaultValue: `ID: ${p.unique_code}` })}
+                      {t('userCard.codeLine', {
+                        code: p.unique_code,
+                        defaultValue: `ID: ${p.unique_code}`,
+                      })}
                     </div>
                   </div>
                   <button
@@ -146,4 +162,5 @@ const UserCard: React.FC<Props> = ({ onClose }) => {
 };
 
 export default UserCard;
+
 
