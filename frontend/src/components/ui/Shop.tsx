@@ -3,6 +3,9 @@ import { useTranslation } from 'react-i18next';
 import API_BASE_URL from '../config';
 import WebApp from '@twa-dev/sdk';
 
+// 🆕 импорт API для дропов (использует X-Telegram-User-Id под капотом)
+import { listDrops, buyDrop, type Drop, type Purchase } from '../../scripts/api/drops';
+
 const ENERGY_UPGRADE_PRICE = 2500; // должен совпадать с беком
 const REFILL_PRICE = 2500;         // должен совпадать с беком
 
@@ -24,6 +27,9 @@ const Shop: React.FC = () => {
   const [message, setMessage] = useState('');
   const [loading, setLoading] = useState(false);
 
+  // 🆕 табы магазина: boosters | drops
+  const [tab, setTab] = useState<'boosters' | 'drops'>('boosters');
+
   // user basics
   const [clickBoostLevel, setClickBoostLevel] = useState(0);
   const [totalXp, setTotalXp] = useState(0);
@@ -41,6 +47,11 @@ const Shop: React.FC = () => {
   const [refillsLeft, setRefillsLeft] = useState<number | null>(null);
   const [currentEnergy, setCurrentEnergy] = useState<number | null>(null);
   const [refillMaxEnergy, setRefillMaxEnergy] = useState<number | null>(null);
+
+  // 🆕 дропы
+  const [drops, setDrops] = useState<Drop[]>([]);
+  const [dropsLoading, setDropsLoading] = useState(false);
+  const [purchase, setPurchase] = useState<Purchase | null>(null);
 
   const telegramUser = WebApp.initDataUnsafe?.user;
   const telegramUserId = telegramUser?.id;
@@ -123,6 +134,24 @@ const Shop: React.FC = () => {
       console.error('Ошибка статуса рефилла:', err);
     }
   };
+
+  // 🆕 загрузка дропов (только при первой активации вкладки "drops")
+  useEffect(() => {
+    const loadDropsOnce = async () => {
+      if (tab !== 'drops' || drops.length > 0 || dropsLoading) return;
+      try {
+        setDropsLoading(true);
+        const items = await listDrops();
+        setDrops(items);
+      } catch (e) {
+        console.error('Ошибка загрузки дропов:', e);
+      } finally {
+        setDropsLoading(false);
+      }
+    };
+    loadDropsOnce();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab]);
 
   useEffect(() => {
     fetchUserData();
@@ -316,6 +345,30 @@ const Shop: React.FC = () => {
     (refillsLeft !== null && refillsLeft <= 0) ||
     energyIsFull;
 
+  // 🆕 UI-переключатель
+  const Tabs = (
+    <div className="max-w-md mx-auto mb-6">
+      <div className="w-full bg-[#0e1a2b] border border-[#1f3b57] rounded-full p-1 flex">
+        <button
+          className={`flex-1 py-2 text-sm rounded-full transition ${
+            tab === 'boosters' ? 'bg-[#00f0ff] text-[#0e1a2b] font-semibold' : 'text-[#7ee9ff]'
+          }`}
+          onClick={() => setTab('boosters')}
+        >
+          {t('shop_tab_boosters')}
+        </button>
+        <button
+          className={`flex-1 py-2 text-sm rounded-full transition ${
+            tab === 'drops' ? 'bg-[#00f0ff] text-[#0e1a2b] font-semibold' : 'text-[#7ee9ff]'
+          }`}
+          onClick={() => setTab('drops')}
+        >
+          {t('shop_tab_drops')}
+        </button>
+      </div>
+    </div>
+  );
+
   return (
     <div className="p-4 bg-[#131f2f] min-h-screen text-[#00f0ff]">
       <h2 className="text-xl font-bold text-center drop-shadow-md mb-4">🛒 {t('title_shop')}</h2>
@@ -324,95 +377,167 @@ const Shop: React.FC = () => {
         💸 {t('total_spent')}: {totalSpent.toLocaleString()} $GAP
       </p>
 
-      {/* Товар-футболка — ПЕРВЫМ */}
-      <div className="bg-[#0e1a2b] border border-[#ffffff20] p-4 rounded-xl shadow-[0_0_10px_#ffffff20] text-center space-y-2 max-w-md mx-auto mb-6">
-        <div className="relative w-fit mx-auto">
-          <img
-            src="/tshirt-preview-1.png"
-            alt="T-shirt"
-            className="w-24 h-24 mx-auto rounded-md object-cover"
-          />
-          <span className="absolute -right-2 -top-2 bg-[#00f0ff] text-[#0e1a2b] text-xs font-bold px-2 py-1 rounded-full shadow">
-            {TSHIRT_LEFT}/{TSHIRT_TOTAL}
-          </span>
+      {Tabs}
+
+      {/* ======= Вкладка БУСТЕРЫ ======= */}
+      {tab === 'boosters' && (
+        <>
+          {/* Товар-футболка — ПЕРВЫМ */}
+          <div className="bg-[#0e1a2b] border border-[#ffffff20] p-4 rounded-xl shadow-[0_0_10px_#ffffff20] text-center space-y-2 max-w-md mx-auto mb-6">
+            <div className="relative w-fit mx-auto">
+              <img
+                src="/tshirt-preview-1.png"
+                alt="T-shirt"
+                className="w-24 h-24 mx-auto rounded-md object-cover"
+              />
+              <span className="absolute -right-2 -top-2 bg-[#00f0ff] text-[#0e1a2b] text-xs font-bold px-2 py-1 rounded-full shadow">
+                {TSHIRT_LEFT}/{TSHIRT_TOTAL}
+              </span>
+            </div>
+
+            <h3 className="text-lg font-semibold text-white/90">👕 Gappick T-shirt (Limited)</h3>
+            <p className="text-sm text-[#999999]">Tezliklə satışda</p>
+
+            <button
+              disabled
+              className="bg-[#cccccc20] text-[#cccccc] font-semibold px-4 py-2 rounded cursor-not-allowed"
+            >
+              {t('buy')}
+            </button>
+          </div>
+
+          {/* Бустер на клики */}
+          <div className="bg-[#0e1a2b] border border-[#00f0ff40] p-4 rounded-xl shadow-[0_0_10px_#00f0ff30] text-center space-y-2 max-w-md mx-auto mb-6">
+            <h3 className="text-lg font-semibold text-[#7ee9ff]">💥 {t('boost_click')}</h3>
+            <p className="text-sm text-[#a0f6ff]">
+              {clickBoostPrice} $GAP ({t('level')}: x{clickBoostLevel + 1})
+            </p>
+            {requiredInvites > 0 && (
+              <p className="text-xs text-[#89dfff]">
+                {t('invited_friends')}: {invitesCount} • {t('boost_invites_required', { level: `x${nextBoostLevel}`, need: requiredInvites, have: invitesCount })}
+              </p>
+            )}
+
+            <button
+              onClick={handleBuyClickBoost}
+              disabled={disableClickBoost}
+              className="bg-[#00f0ff] text-[#0e1a2b] font-semibold px-4 py-2 rounded hover:scale-105 transition-all disabled:opacity-40"
+            >
+              {loading ? '...' : t('buy')}
+            </button>
+            {clickBoostLevel >= MAX_BOOST_LEVEL && (
+              <p className="text-xs text-[#ffadad] mt-1">{t('shop_max_level')}</p>
+            )}
+          </div>
+
+          {/* Увеличение максимальной энергии */}
+          <div className="bg-[#0e1a2b] border border-[#00f0ff40] p-4 rounded-xl shadow-[0_0_10px_#00f0ff30] text-center space-y-2 max-w-md mx-auto mb-6">
+            <h3 className="text-lg font-semibold text-[#7ee9ff]">🔋 {t('energy_upgrade')}</h3>
+            <p className="text-sm text-[#a0f6ff]">{ENERGY_UPGRADE_PRICE} $GAP</p>
+            {energyUpgradeLimit !== null && energyUpgradesLeft !== null && (
+              <p className="text-xs text-[#89dfff]">
+                {t('available')}: {energyUpgradesLeft} / {energyUpgradeLimit}
+              </p>
+            )}
+            {maxEnergyCap !== null && userMaxEnergy !== null && userMaxEnergy >= maxEnergyCap && (
+              <p className="text-xs text-[#ffadad]">{t('max_energy_reached')}</p>
+            )}
+
+            <button
+              onClick={handleBuyEnergyUpgrade}
+              disabled={disableEnergyUpgrade}
+              className="bg-[#00f0ff] text-[#0e1a2b] font-semibold px-4 py-2 rounded hover:scale-105 transition-all disabled:opacity-40"
+            >
+              {loading ? '...' : t('buy')}
+            </button>
+          </div>
+
+          {/* Восполнение энергии */}
+          <div className="bg-[#0e1a2b] border border-[#00f0ff40] p-4 rounded-xl shadow-[0_0_10px_#00f0ff30] text-center space-y-2 max-w-md mx-auto mb-6">
+            <h3 className="text-lg font-semibold text-[#7ee9ff]">⚡ {t('refill_energy')}</h3>
+            <p className="text-sm text-[#a0f6ff]">{REFILL_PRICE} $GAP</p>
+            {refillLimit !== null && refillsLeft !== null && (
+              <p className="text-xs text-[#89dfff]">
+                {t('available')}: {refillsLeft} / {refillLimit}
+              </p>
+            )}
+            {energyIsFull && <p className="text-xs text-[#ffadad]">{t('shop_restored')}</p>}
+
+            <button
+              onClick={handleRefillEnergy}
+              disabled={disableRefill}
+              className="bg-[#00f0ff] text-[#0e1a2b] font-semibold px-4 py-2 rounded hover:scale-105 transition-all disabled:opacity-40"
+            >
+              {loading ? '...' : t('buy')}
+            </button>
+          </div>
+        </>
+      )}
+
+      {/* ======= Вкладка ДРОПЫ ======= */}
+      {tab === 'drops' && (
+        <div className="max-w-md mx-auto">
+          {dropsLoading && <div className="text-center text-sm text-[#7ee9ff] mb-4">{t('common.loading')}</div>}
+          {!dropsLoading && drops.length === 0 && (
+            <div className="text-center text-sm text-[#7ee9ff] mb-4">{t('drops_empty') || 'Нет активных дропов'}</div>
+          )}
+
+          <div className="space-y-3">
+            {drops.map((d) => (
+              <div key={d.id} className="rounded-2xl p-4 bg-[#0e1a2b] border border-[#00f0ff40] text-white flex items-center justify-between">
+                <div>
+                  <div className="text-base font-semibold">{d.title}</div>
+                  <div className="text-xs opacity-80">
+                    {t('drop_discount', { percent: d.discount_percent })} · {t('drop_price', { price: d.price_coins })}
+                  </div>
+                </div>
+                <button
+                  className="px-3 py-1 rounded-lg bg-[#00f0ff] text-[#0e1a2b] text-sm font-semibold"
+                  onClick={async () => {
+                    try {
+                      const p = await buyDrop(d.id);
+                      setPurchase(p);
+                    } catch (e: any) {
+                      alert(e?.message || t('shop_error'));
+                    }
+                  }}
+                >
+                  {t('buy')}
+                </button>
+              </div>
+            ))}
+          </div>
+
+          {/* Модалка результата покупки дропа */}
+          {purchase && (
+            <div className="fixed inset-0 bg-black/50 flex items-end">
+              <div className="w-full rounded-t-2xl bg-white p-4">
+                <div className="font-semibold">{t('drop_code_title') || 'Код дропа'}</div>
+                <div className="text-sm mt-1">
+                  {t('drop_code_hint') || 'Покажите этот код партнёру:'} <b>{purchase.unique_code}</b>
+                </div>
+                <div className="text-xs opacity-70 mt-1">
+                  {purchase.partner_name} · {purchase.discount_percent ?? '-'}%
+                </div>
+                <div className="mt-3 flex gap-2">
+                  <button
+                    className="px-3 py-2 rounded-lg bg-black text-white"
+                    onClick={async () => {
+                      await navigator.clipboard.writeText(purchase.unique_code);
+                      alert(t('alerts.copied') || 'ID скопирован');
+                    }}
+                  >
+                    {t('actions.copy') || 'Копировать'}
+                  </button>
+                  <button className="px-3 py-2 rounded-lg bg-gray-200" onClick={() => setPurchase(null)}>
+                    {t('actions.close') || 'Закрыть'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
-
-        <h3 className="text-lg font-semibold text-white/90">👕 Gappick T-shirt (Limited)</h3>
-        <p className="text-sm text-[#999999]">Tezliklə satışda</p>
-
-        <button
-          disabled
-          className="bg-[#cccccc20] text-[#cccccc] font-semibold px-4 py-2 rounded cursor-not-allowed"
-        >
-          {t('buy')}
-        </button>
-      </div>
-
-      {/* Бустер на клики */}
-      <div className="bg-[#0e1a2b] border border-[#00f0ff40] p-4 rounded-xl shadow-[0_0_10px_#00f0ff30] text-center space-y-2 max-w-md mx-auto mb-6">
-        <h3 className="text-lg font-semibold text-[#7ee9ff]">💥 {t('boost_click')}</h3>
-        <p className="text-sm text-[#a0f6ff]">
-          {clickBoostPrice} $GAP ({t('level')}: x{clickBoostLevel + 1})
-        </p>
-        {requiredInvites > 0 && (
-          <p className="text-xs text-[#89dfff]">
-            {t('invited_friends')}: {invitesCount} • {t('boost_invites_required', { level: `x${nextBoostLevel}`, need: requiredInvites, have: invitesCount })}
-          </p>
-        )}
-
-        <button
-          onClick={handleBuyClickBoost}
-          disabled={disableClickBoost}
-          className="bg-[#00f0ff] text-[#0e1a2b] font-semibold px-4 py-2 rounded hover:scale-105 transition-all disabled:opacity-40"
-        >
-          {loading ? '...' : t('buy')}
-        </button>
-        {clickBoostLevel >= MAX_BOOST_LEVEL && (
-          <p className="text-xs text-[#ffadad] mt-1">{t('shop_max_level')}</p>
-        )}
-      </div>
-
-      {/* Увеличение максимальной энергии */}
-      <div className="bg-[#0e1a2b] border border-[#00f0ff40] p-4 rounded-xl shadow-[0_0_10px_#00f0ff30] text-center space-y-2 max-w-md mx-auto mb-6">
-        <h3 className="text-lg font-semibold text-[#7ee9ff]">🔋 {t('energy_upgrade')}</h3>
-        <p className="text-sm text-[#a0f6ff]">{ENERGY_UPGRADE_PRICE} $GAP</p>
-        {energyUpgradeLimit !== null && energyUpgradesLeft !== null && (
-          <p className="text-xs text-[#89dfff]">
-            {t('available')}: {energyUpgradesLeft} / {energyUpgradeLimit}
-          </p>
-        )}
-        {maxEnergyCap !== null && userMaxEnergy !== null && userMaxEnergy >= maxEnergyCap && (
-          <p className="text-xs text-[#ffadad]">{t('max_energy_reached')}</p>
-        )}
-
-        <button
-          onClick={handleBuyEnergyUpgrade}
-          disabled={disableEnergyUpgrade}
-          className="bg-[#00f0ff] text-[#0e1a2b] font-semibold px-4 py-2 rounded hover:scale-105 transition-all disabled:opacity-40"
-        >
-          {loading ? '...' : t('buy')}
-        </button>
-      </div>
-
-      {/* Восполнение энергии */}
-      <div className="bg-[#0e1a2b] border border-[#00f0ff40] p-4 rounded-xl shadow-[0_0_10px_#00f0ff30] text-center space-y-2 max-w-md mx-auto mb-6">
-        <h3 className="text-lg font-semibold text-[#7ee9ff]">⚡ {t('refill_energy')}</h3>
-        <p className="text-sm text-[#a0f6ff]">{REFILL_PRICE} $GAP</p>
-        {refillLimit !== null && refillsLeft !== null && (
-          <p className="text-xs text-[#89dfff]">
-            {t('available')}: {refillsLeft} / {refillLimit}
-          </p>
-        )}
-        {energyIsFull && <p className="text-xs text-[#ffadad]">{t('shop_restored')}</p>}
-
-        <button
-          onClick={handleRefillEnergy}
-          disabled={disableRefill}
-          className="bg-[#00f0ff] text-[#0e1a2b] font-semibold px-4 py-2 rounded hover:scale-105 transition-all disabled:opacity-40"
-        >
-          {loading ? '...' : t('buy')}
-        </button>
-      </div>
+      )}
 
       {message && <p className="text-sm mt-4 text-center text-[#a0f6ff]">{message}</p>}
     </div>
