@@ -231,12 +231,15 @@ const Clicker: React.FC = () => {
     <div className="w-full min-h-screen bg-[#131f2f] text-center flex flex-col items-center justify-start pt-8 px-4 text-[#00f0ff]">
       {/* 🆕 маленькая кнопка «Карта» */}
       <button
-        className="fixed top-3 right-3 z-50 rounded-full bg-black/80 text-white px-3 py-1 text-xs shadow"
+        className="fixed top-3 left-3 z-50 w-9 h-9 rounded-full bg-black/80 text-white shadow flex items-center justify-center active:scale-95"
         onClick={() => setShowUserCard(true)}
-        aria-label={t('userCard.open')}
-        title={t('userCard.open')}
+        aria-label={t('userCard.open', { defaultValue: 'User card' })}
+        title={t('userCard.open', { defaultValue: 'User card' })}
       >
-        {t('userCard.open')}
+        {/* простая иконка пользователя (SVG) */}
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+          <path d="M12 12c2.761 0 5-2.686 5-6s-2.239-6-5-6-5 2.686-5 6 2.239 6 5 6Zm0 2c-4.418 0-8 2.91-8 6.5V22h16v-1.5C20 16.91 16.418 14 12 14Z" fill="currentColor"/>
+        </svg>
       </button>
 
       <h2 className="text-2xl font-bold mb-2 drop-shadow-md">$GAP: {totalXp}</h2>
