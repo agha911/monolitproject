@@ -5,7 +5,6 @@ import WebApp from '@twa-dev/sdk';
 
 type Props = { onClose: () => void };
 
-// ---- локальные типы ответа бэка ----
 type Purchase = {
   id: number;
   user_id: number;
@@ -22,7 +21,7 @@ type Purchase = {
 
 type IUserCard = {
   username: string;
-  coins: number;           // на бэке это user.score
+  coins: number;
   invited_count: number;
   active_drops: Purchase[];
 };
@@ -38,7 +37,6 @@ const UserCard: React.FC<Props> = ({ onClose }) => {
       await navigator.clipboard.writeText(text);
       alert(t('alerts.copied', { defaultValue: 'ID скопирован' }));
     } catch {
-      // фоллбек для редких сред
       try {
         const ta = document.createElement('textarea');
         ta.value = text;
@@ -47,9 +45,7 @@ const UserCard: React.FC<Props> = ({ onClose }) => {
         document.execCommand('copy');
         document.body.removeChild(ta);
         alert(t('alerts.copied', { defaultValue: 'ID скопирован' }));
-      } catch {
-        // no-op
-      }
+      } catch {}
     }
   };
 
@@ -57,13 +53,8 @@ const UserCard: React.FC<Props> = ({ onClose }) => {
     (async () => {
       try {
         const tgId = WebApp?.initDataUnsafe?.user?.id;
-        const res = await fetch(`${API_BASE_URL}/api/user/card`, {
-          headers: {
-            'Content-Type': 'application/json',
-            'Accept': 'application/json',
-            'X-Telegram-User-Id': String(tgId ?? ''),
-          },
-        });
+        const url = `${API_BASE_URL}/api/user/card?telegram_id=${encodeURIComponent(String(tgId ?? ''))}`;
+        const res = await fetch(url, { headers: { 'Accept': 'application/json' } });
         if (!res.ok) {
           const text = await res.text();
           throw new Error(text || `HTTP ${res.status}`);
