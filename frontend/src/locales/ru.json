@@ -105,6 +105,23 @@
   "try_again": "Попробуйте ещё раз",
   "boost_invites_required": "Для уровня {{level}} нужно приглашённых: {{need}} (у вас: {{have}})",
   "shop_max_level": "Достигнут максимальный уровень",
-  "shop_success_boost": "Бустер клика повышен до {{value}}"
+  "shop_success_boost": "Бустер клика повышен до {{value}}",
+  "userCard": {
+    "open": "Карта",
+    "title": "Карта пользователя",
+    "profile": "Профиль",
+    "username": "@{{username}}",
+    "coins": "Монеты: {{count}}",
+    "invited": "Приглашено друзей: {{count}}",
+    "myDrops": "Мои дропы",
+    "empty": "Пока нет активных дропов.",
+    "dropFallback": "Дроп",
+    "partnerLine": "Партнёр: {{partner}} · Скидка: {{percent}}%",
+    "codeLine": "ID: {{code}}"
+  },
+  "actions": { "close": "Закрыть", "copy": "Копировать" },
+  "alerts": { "copied": "ID скопирован" },
+  "common": { "loading": "Загрузка…" },
+  "errors": { "loadFailed": "Ошибка загрузки" }
 
 }
