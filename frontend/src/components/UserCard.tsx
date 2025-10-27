@@ -1,8 +1,31 @@
 import React, { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { getUserCard, type UserCard as IUserCard } from './scripts/api/user';
+import API_BASE_URL from './config';
+import WebApp from '@twa-dev/sdk';
 
 type Props = { onClose: () => void };
+
+// ---- локальные типы ответа бэка ----
+type Purchase = {
+  id: number;
+  user_id: number;
+  drop_id: number;
+  unique_code: string;
+  status: 'active' | 'redeemed' | 'revoked';
+  created_at: string;
+  redeemed_at?: string | null;
+  drop_title?: string | null;
+  partner_name?: string | null;
+  price_coins?: number | null;
+  discount_percent?: number | null;
+};
+
+type IUserCard = {
+  username: string;
+  coins: number;           // на бэке это user.score
+  invited_count: number;
+  active_drops: Purchase[];
+};
 
 const UserCard: React.FC<Props> = ({ onClose }) => {
   const { t } = useTranslation();
@@ -13,86 +36,113 @@ const UserCard: React.FC<Props> = ({ onClose }) => {
   const copy = async (text: string) => {
     try {
       await navigator.clipboard.writeText(text);
-      alert(t('alerts.copied'));
+      alert(t('alerts.copied', { defaultValue: 'ID скопирован' }));
     } catch {
-      const ta = document.createElement('textarea');
-      ta.value = text;
-      document.body.appendChild(ta);
-      ta.select();
-      document.execCommand('copy');
-      document.body.removeChild(ta);
-      alert(t('alerts.copied'));
+      // фоллбек для редких сред
+      try {
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+        alert(t('alerts.copied', { defaultValue: 'ID скопирован' }));
+      } catch {
+        // no-op
+      }
     }
   };
 
   useEffect(() => {
     (async () => {
       try {
-        const res = await getUserCard();
-        setData(res);
+        const tgId = WebApp?.initDataUnsafe?.user?.id;
+        const res = await fetch(`${API_BASE_URL}/api/user/card`, {
+          headers: {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json',
+            'X-Telegram-User-Id': String(tgId ?? ''),
+          },
+        });
+        if (!res.ok) {
+          const text = await res.text();
+          throw new Error(text || `HTTP ${res.status}`);
+        }
+        const json: IUserCard = await res.json();
+        setData(json);
       } catch (e: any) {
-        setErr(e?.message || t('errors.loadFailed'));
+        setErr(e?.message || t('errors.loadFailed', { defaultValue: 'Ошибка загрузки' }));
       } finally {
         setLoading(false);
       }
     })();
-  }, [t]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
     <div className="fixed inset-0 z-50 bg-black/50 flex items-end">
       <div className="w-full rounded-t-2xl bg-white text-black p-4 max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between mb-2">
-          <div className="text-lg font-semibold">{t('userCard.title')}</div>
+          <div className="text-lg font-semibold">
+            {t('userCard.title', { defaultValue: 'Карта пользователя' })}
+          </div>
           <button className="text-sm px-2 py-1 rounded bg-gray-200" onClick={onClose}>
-            {t('actions.close')}
+            {t('actions.close', { defaultValue: 'Закрыть' })}
           </button>
         </div>
 
-        {loading && <div>{t('common.loading')}</div>}
-        {err && <div className="text-red-600">{err}</div>}
+        {loading && <div>{t('common.loading', { defaultValue: 'Загрузка…' })}</div>}
+        {err && <div className="text-red-600 break-words">{err}</div>}
 
         {data && (
           <>
             <div className="rounded-xl p-3 bg-gray-100 mb-3">
-              <div className="text-sm opacity-70">{t('userCard.profile')}</div>
+              <div className="text-sm opacity-70">{t('userCard.profile', { defaultValue: 'Профиль' })}</div>
               <div className="text-xl font-semibold">
-                {t('userCard.username', { username: data.username })}
+                {t('userCard.username', { username: data.username, defaultValue: `@${data.username}` })}
               </div>
               <div className="mt-1 text-sm">
-                {t('userCard.coins', { count: data.coins })}
+                {t('userCard.coins', { count: data.coins, defaultValue: `Монеты: ${data.coins}` })}
               </div>
               <div className="mt-1 text-sm">
-                {t('userCard.invited', { count: data.invited_count })}
+                {t('userCard.invited', { count: data.invited_count, defaultValue: `Приглашено друзей: ${data.invited_count}` })}
               </div>
             </div>
 
-            <div className="text-base font-semibold mb-2">{t('userCard.myDrops')}</div>
+            <div className="text-base font-semibold mb-2">
+              {t('userCard.myDrops', { defaultValue: 'Мои дропы' })}
+            </div>
             {data.active_drops.length === 0 && (
-              <div className="text-sm opacity-70">{t('userCard.empty')}</div>
+              <div className="text-sm opacity-70">
+                {t('userCard.empty', { defaultValue: 'Пока нет активных дропов.' })}
+              </div>
             )}
 
             <div className="space-y-2">
               {data.active_drops.map((p) => (
                 <div key={p.id} className="rounded-xl p-3 bg-gray-100 flex items-center justify-between">
                   <div>
-                    <div className="text-sm font-medium">{p.drop_title || t('userCard.dropFallback')}</div>
+                    <div className="text-sm font-medium">
+                      {p.drop_title || t('userCard.dropFallback', { defaultValue: 'Дроп' })}
+                    </div>
                     <div className="text-xs opacity-75">
                       {t('userCard.partnerLine', {
                         partner: p.partner_name || '—',
                         percent: p.discount_percent ?? '-',
+                        defaultValue: `Партнёр: ${p.partner_name || '—'} · Скидка: ${p.discount_percent ?? '-'}%`,
                       })}
                     </div>
                     <div className="text-xs mt-1">
-                      {t('userCard.codeLine', { code: p.unique_code })}
+                      {t('userCard.codeLine', { code: p.unique_code, defaultValue: `ID: ${p.unique_code}` })}
                     </div>
                   </div>
                   <button
                     className="px-3 py-1 rounded-lg bg-black text-white text-sm"
                     onClick={() => copy(p.unique_code)}
-                    aria-label={t('actions.copy')}
-                    title={t('actions.copy')}
+                    aria-label={t('actions.copy', { defaultValue: 'Копировать' })}
+                    title={t('actions.copy', { defaultValue: 'Копировать' })}
                   >
-                    {t('actions.copy')}
+                    {t('actions.copy', { defaultValue: 'Копировать' })}
                   </button>
                 </div>
               ))}
@@ -105,3 +155,4 @@ const UserCard: React.FC<Props> = ({ onClose }) => {
 };
 
 export default UserCard;
+
