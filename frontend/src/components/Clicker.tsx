@@ -5,6 +5,7 @@ import MainButton from './MainButton';
 import API_BASE_URL from './config';
 import { useClickBuffer, FlushResponse } from '../hooks/useClickBuffer';
 import { useAnimatedInt } from '../hooks/useAnimatedInt';
+import UserCard from './UserCard'; // 🆕 добавлено
 
 type ChallengeDay = {
   day_index: number;
@@ -41,6 +42,7 @@ const Clicker: React.FC = () => {
   const [floatingTexts, setFloatingTexts] = useState<any[]>([]);
   const [serverSeq, setServerSeq] = useState<number | null>(null);
   const [seqReady, setSeqReady] = useState(false);
+  const [showUserCard, setShowUserCard] = useState(false); // 🆕 добавлено
 
   // челлендж (отключен kill switch'ом)
   const [challengeLoading, setChallengeLoading] = useState(false);
@@ -227,6 +229,16 @@ const Clicker: React.FC = () => {
 
   return (
     <div className="w-full min-h-screen bg-[#131f2f] text-center flex flex-col items-center justify-start pt-8 px-4 text-[#00f0ff]">
+      {/* 🆕 маленькая кнопка «Карта» */}
+      <button
+        className="fixed top-3 right-3 z-50 rounded-full bg-black/80 text-white px-3 py-1 text-xs shadow"
+        onClick={() => setShowUserCard(true)}
+        aria-label={t('userCard.open')}
+        title={t('userCard.open')}
+      >
+        {t('userCard.open')}
+      </button>
+
       <h2 className="text-2xl font-bold mb-2 drop-shadow-md">$GAP: {totalXp}</h2>
       <div className="text-sm text-[#7ee9ff] mb-2">x{clickBoost} boost</div>
 
@@ -290,11 +302,15 @@ const Clicker: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* 🆕 модалка «Карта пользователя» */}
+      {showUserCard && <UserCard onClose={() => setShowUserCard(false)} />}
     </div>
   );
 };
 
 export default Clicker;
+
 
 
 
