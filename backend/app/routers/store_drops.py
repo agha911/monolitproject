@@ -16,7 +16,7 @@ from app.models.drop_purchase import DropPurchase
 from app.crud.user import get_user
 
 # попробуй этот импорт; если у тебя другой путь к генератору — замени на свой
-from app.codes import generate_unique_code
+from app.drop_utils.codes import generate_unique_code
 
 router = APIRouter(prefix="/api", tags=["store-drops"])
 
