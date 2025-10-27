@@ -5,7 +5,7 @@ from helpers.partner_auth import (
     partner_by_api_key, upsert_partner_user, get_partner_for_telegram,
     list_partner_drops, toggle_drop_active, get_purchase_by_code, set_purchase_status
 )
-from app.main import bot  # ваш инстанс TeleBot
+from app.bot_instance import bot  # ваш инстанс TeleBot
 
 @bot.message_handler(commands=['partner_login'])
 def partner_login(msg):
