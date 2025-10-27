@@ -126,5 +126,7 @@
   "drop_price": "Price: {{price}} $GAP",
   "drops_empty": "No active drops.",
   "drop_code_title": "Drop code",
-  "drop_code_hint": "Show this code to the partner:"
+  "drop_code_hint": "Show this code to the partner:",
+  "shop_tab_boosters": "Boosters",
+  "shop_tab_drops": "Drops"
 }
