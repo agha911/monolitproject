@@ -1,6 +1,6 @@
 // src/scripts/api/http.ts
 import WebApp from '@twa-dev/sdk';
-import API_BASE_URL from './components/config'; // 👈 берём общий конфиг
+import API_BASE_URL from '../../config'; // 👈 берём общий конфиг
 
 const API_BASE = API_BASE_URL || ''; // если один домен/прокси — оставь пусто
 
