@@ -122,6 +122,11 @@
   "actions": { "close": "Закрыть", "copy": "Копировать" },
   "alerts": { "copied": "ID скопирован" },
   "common": { "loading": "Загрузка…" },
-  "errors": { "loadFailed": "Ошибка загрузки" }
+  "errors": { "loadFailed": "Ошибка загрузки" },
+  "drop_discount": "Скидка: {{percent}}%",
+  "drop_price": "Цена: {{price}} $GAP",
+  "drops_empty": "Нет активных дропов.",
+  "drop_code_title": "Код дропа",
+  "drop_code_hint": "Покажите этот код партнёру:"
 
 }
