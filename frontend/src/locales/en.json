@@ -106,20 +106,20 @@
   "shop_max_level": "Maximum level reached",
   "shop_success_boost": "Click booster upgraded to {{value}}",
   "userCard": {
-    "open": "Карта",
-    "title": "Карта пользователя",
-    "profile": "Профиль",
+    "open": "User",
+    "title": "User Card",
+    "profile": "Profile",
     "username": "@{{username}}",
-    "coins": "Монеты: {{count}}",
-    "invited": "Приглашено друзей: {{count}}",
-    "myDrops": "Мои дропы",
-    "empty": "Пока нет активных дропов.",
-    "dropFallback": "Дроп",
-    "partnerLine": "Партнёр: {{partner}} · Скидка: {{percent}}%",
+    "coins": "Coins: {{count}}",
+    "invited": "Invited friends: {{count}}",
+    "myDrops": "My drops",
+    "empty": "No active drops yet.",
+    "dropFallback": "Drop",
+    "partnerLine": "Partner: {{partner}} · Discount: {{percent}}%",
     "codeLine": "ID: {{code}}"
   },
-  "actions": { "close": "Закрыть", "copy": "Копировать" },
-  "alerts": { "copied": "ID скопирован" },
-  "common": { "loading": "Загрузка…" },
-  "errors": { "loadFailed": "Ошибка загрузки" }
+  "actions": { "close": "Close", "copy": "Copy" },
+  "alerts": { "copied": "ID copied" },
+  "common": { "loading": "Loading…" },
+  "errors": { "loadFailed": "Failed to load" }
 }
