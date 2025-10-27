@@ -123,6 +123,11 @@
   "actions": { "close": "Bağla", "copy": "Kopyala" },
   "alerts": { "copied": "ID kopyalandı" },
   "common": { "loading": "Yüklənir…" },
-  "errors": { "loadFailed": "Yükləmə xətası" }
+  "errors": { "loadFailed": "Yükləmə xətası" },
+  "drop_discount": "Endirim: {{percent}}%",
+  "drop_price": "Qiymət: {{price}} $GAP",
+  "drops_empty": "Aktiv drop yoxdur.",
+  "drop_code_title": "Drop kodu",
+  "drop_code_hint": "Bu kodu tərəfdaşa göstərin:"
 
 }
