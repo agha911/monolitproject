@@ -121,5 +121,10 @@
   "actions": { "close": "Close", "copy": "Copy" },
   "alerts": { "copied": "ID copied" },
   "common": { "loading": "Loading…" },
-  "errors": { "loadFailed": "Failed to load" }
+  "errors": { "loadFailed": "Failed to load" },
+  "drop_discount": "Discount: {{percent}}%",
+  "drop_price": "Price: {{price}} $GAP",
+  "drops_empty": "No active drops.",
+  "drop_code_title": "Drop code",
+  "drop_code_hint": "Show this code to the partner:"
 }
