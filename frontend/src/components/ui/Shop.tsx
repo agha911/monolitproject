@@ -46,6 +46,7 @@ const Shop: React.FC = () => {
   const [drops, setDrops] = useState<Drop[]>([]);
   const [dropsLoading, setDropsLoading] = useState(false);
   const [purchase, setPurchase] = useState<Purchase | null>(null);
+  const [selectedDrop, setSelectedDrop] = useState<Drop | null>(null); // 🆕 для модалки
 
   const telegramUser = WebApp.initDataUnsafe?.user;
   const telegramUserId = telegramUser?.id;
@@ -434,7 +435,6 @@ const Shop: React.FC = () => {
               </p>
             )}
             {energyIsFull && <p className="text-xs text-[#ffadad]">{t('shop_restored')}</p>}
-
             <button
               onClick={handleRefillEnergy}
               disabled={disableRefill}
@@ -449,7 +449,7 @@ const Shop: React.FC = () => {
       {/* === Вкладка ДРОПЫ === */}
       {tab === 'drops' && (
         <div className="max-w-md mx-auto">
-          {/* Футболка перенесена сюда (плейсхолдер) */}
+          {/* Футболка (плейсхолдер) */}
           <div className="bg-[#0e1a2b] border border-[#ffffff20] p-4 rounded-xl shadow-[0_0_10px_#ffffff20] text-center space-y-2 mb-6">
             <div className="relative w-fit mx-auto">
               <img
@@ -461,10 +461,8 @@ const Shop: React.FC = () => {
                 {TSHIRT_LEFT}/{TSHIRT_TOTAL}
               </span>
             </div>
-
             <h3 className="text-lg font-semibold text-white/90">👕 Gappick T-shirt (Limited)</h3>
             <p className="text-sm text-[#999999]">Tezliklə satışda</p>
-
             <button
               disabled
               className="bg-[#cccccc20] text-[#cccccc] font-semibold px-4 py-2 rounded cursor-not-allowed"
@@ -499,9 +497,9 @@ const Shop: React.FC = () => {
                   className="px-3 py-1 rounded-lg bg-[#00f0ff] text-[#0e1a2b] text-sm font-semibold"
                   onClick={async () => {
                     try {
-                      const p = await buyDrop(d.id); // отправляет telegram_id+drop_id
+                      setSelectedDrop(d); // 🆕 чтобы показать цену/партнёра
+                      const p = await buyDrop(d.id);
                       setPurchase(p);
-                      // при желании можно обновить баланс/статистику:
                       await fetchUserData();
                       await fetchTotalSpent();
                     } catch (e: any) {
@@ -517,16 +515,45 @@ const Shop: React.FC = () => {
 
           {/* Модалка результата покупки дропа */}
           {purchase && (
-            <div className="fixed inset-0 bg-black/50 flex items-end">
-              <div className="w-full rounded-t-2xl bg-white p-4">
-                <div className="font-semibold">{t('drop_code_title') || 'Код дропа'}</div>
-                <div className="text-sm mt-1">
+            <div
+              className="fixed inset-0 bg-black/50 flex items-end"
+              onClick={(e) => {
+                if (e.target === e.currentTarget) {
+                  setPurchase(null);
+                  setSelectedDrop(null);
+                }
+              }}
+            >
+              <div className="w-full rounded-t-2xl bg-white p-4 relative">
+                {/* крестик */}
+                <button
+                  className="absolute right-3 top-3 w-8 h-8 rounded-full bg-black/80 text-white flex items-center justify-center"
+                  onClick={() => {
+                    setPurchase(null);
+                    setSelectedDrop(null);
+                  }}
+                  aria-label={t('actions.close') || 'Close'}
+                  title={t('actions.close') || 'Close'}
+                >
+                  ×
+                </button>
+
+                <div className="font-semibold mb-1">{t('drop_code_title') || 'Код дропа'}</div>
+                <div className="text-sm">
                   {t('drop_code_hint') || 'Покажите этот код партнёру:'}{' '}
                   <b>{purchase.unique_code}</b>
                 </div>
-                <div className="text-xs opacity-70 mt-1">
-                  {purchase.partner_name} · {purchase.discount_percent ?? '-'}%
+
+                <div className="text-xs opacity-70 mt-2">
+                  {(purchase.partner_name || selectedDrop?.partner?.name) ?? '—'} ·{' '}
+                  {(purchase.discount_percent ?? selectedDrop?.discount_percent ?? '-') + '%'}
                 </div>
+                <div className="text-xs opacity-70 mt-1">
+                  {t('drop_price', {
+                    price: selectedDrop?.price_coins ?? purchase.price_coins ?? 0,
+                  })}
+                </div>
+
                 <div className="mt-3 flex gap-2">
                   <button
                     className="px-3 py-2 rounded-lg bg-black text-white"
@@ -539,7 +566,10 @@ const Shop: React.FC = () => {
                   </button>
                   <button
                     className="px-3 py-2 rounded-lg bg-gray-200"
-                    onClick={() => setPurchase(null)}
+                    onClick={() => {
+                      setPurchase(null);
+                      setSelectedDrop(null);
+                    }}
                   >
                     {t('actions.close') || 'Закрыть'}
                   </button>
@@ -556,6 +586,7 @@ const Shop: React.FC = () => {
 };
 
 export default Shop;
+
 
 
 
