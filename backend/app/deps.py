@@ -17,18 +17,20 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
 
 
 async def get_current_user(
+    request: Request,
     session: AsyncSession = Depends(get_db),
-    x_telegram_user_id: int = Header(..., alias="X-Telegram-User-Id"),
+    x_telegram_user_id: str | None = Header(default=None, alias="X-Telegram-User-Id"),
 ) -> User:
     """
-    Простой и привычный путь:
-    - фронт передает заголовок X-Telegram-User-Id (tg user id)
-    - ищем пользователя по users.telegram_id
-    - если не найден — считаем, что не зарегистрирован
+    Авторизация «как везде»:
+      - сначала пробуем заголовок X-Telegram-User-Id
+      - если его нет (или CORS мешает) — читаем ?telegram_id= в query
     """
-    res = await session.execute(
-        select(User).where(User.telegram_id == int(x_telegram_user_id)).limit(1)
-    )
+    tg_id = x_telegram_user_id or request.query_params.get("telegram_id")
+    if not tg_id:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing telegram id")
+
+    res = await session.execute(select(User).where(User.telegram_id == int(tg_id)).limit(1))
     user = res.scalar_one_or_none()
     if not user:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="User is not registered")
