@@ -114,7 +114,7 @@ async def partner_menu(msg):
 
         kb = InlineKeyboardMarkup()
         kb.add(InlineKeyboardButton("📦 Мои дропы", callback_data="p:drops:0"))
-        kb.add(InlineKeyboardButton("🔎 По коду", switch_inline_query_current_chat="code "))
+        kb.add(types.InlineKeyboardButton("🔎 По коду", callback_data="p:howcode"))
         kb.add(InlineKeyboardButton("📊 Статистика", callback_data="p:stats"))  # заглушка
         await bot.send_message(msg.chat.id, f"Партнёр: {partner.name}", reply_markup=kb)
     except Exception as e:
