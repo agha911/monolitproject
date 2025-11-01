@@ -2,7 +2,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Optional, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Body, Query, Header, status
+from fastapi import APIRouter, Depends, HTTPException, Header
 from pydantic import BaseModel
 from sqlalchemy import select, func
 from sqlalchemy.exc import IntegrityError
@@ -15,7 +15,7 @@ from app.models.partner import Partner
 from app.models.drop_purchase import DropPurchase
 from app.crud.user import get_user
 
-# попробуй этот импорт; если у тебя другой путь к генератору — замени на свой
+# генератор кода (оставь путь, который у тебя используется в проекте)
 from app.drop_utils.codes import generate_unique_code
 
 router = APIRouter(prefix="/api", tags=["store-drops"])
@@ -75,6 +75,10 @@ class DropOut(BaseModel):
     active: bool
     visible: bool
     partner: Optional[dict] = None
+    # 🆕 персональные поля
+    user_used: int = 0
+    user_left: int = 0
+    disabled_for_user: bool = False
 
 class BuyDropIn(BaseModel):
     telegram_id: int
@@ -96,7 +100,14 @@ class PurchaseOut(BaseModel):
 # ---------- routes ----------
 
 @router.get("/drops", response_model=list[DropOut])
-async def list_drops(session: AsyncSession = Depends(get_async_session)):
+async def list_drops(
+    session: AsyncSession = Depends(get_async_session),
+    x_telegram_user_id: Optional[int] = Header(default=None, alias="X-Telegram-User-Id"),
+):
+    """
+    Возвращает активные дропы. Если передан X-Telegram-User-Id, добавляет персональные поля:
+    user_used / user_left / disabled_for_user (учитывая per_user_limit).
+    """
     now = func.now()
     q = (
         select(Drop)
@@ -110,8 +121,26 @@ async def list_drops(session: AsyncSession = Depends(get_async_session)):
     )
     res = await session.execute(q)
     rows: list[Drop] = res.scalars().all()
+
+    # Текущий пользователь (если передан заголовок)
+    current_user: Optional[User] = None
+    if x_telegram_user_id:
+        try:
+            current_user = await _get_user_by_telegram_id(session, int(x_telegram_user_id))
+        except HTTPException:
+            current_user = None
+
     out: list[DropOut] = []
     for d in rows:
+        user_used = 0
+        user_left = 0
+        disabled_for_user = False
+
+        if current_user and (d.per_user_limit or 0) > 0:
+            user_used = await _count_user_used(session, d.id, current_user.id)
+            user_left = max(0, int(d.per_user_limit) - user_used)
+            disabled_for_user = (user_left == 0)
+
         out.append(
             DropOut(
                 id=d.id,
@@ -126,6 +155,9 @@ async def list_drops(session: AsyncSession = Depends(get_async_session)):
                 active=bool(d.active),
                 visible=bool(d.visible),
                 partner={"id": d.partner.id, "name": d.partner.name, "slug": d.partner.slug} if d.partner else None,
+                user_used=user_used,
+                user_left=user_left,
+                disabled_for_user=disabled_for_user,
             )
         )
     return out
@@ -134,7 +166,7 @@ async def list_drops(session: AsyncSession = Depends(get_async_session)):
 async def buy_drop(payload: BuyDropIn, session: AsyncSession = Depends(get_async_session)):
     user: User = await _get_user_by_telegram_id(session, payload.telegram_id)
 
-    # lock row for supply checks
+    # блокировка строки дропа для проверки лимитов/остатков
     qd = select(Drop).where(Drop.id == payload.drop_id).with_for_update()
     res = await session.execute(qd)
     drop = res.scalar_one_or_none()
@@ -148,16 +180,19 @@ async def buy_drop(payload: BuyDropIn, session: AsyncSession = Depends(get_async
     if not (drop.start_at <= now <= drop.end_at):
         raise HTTPException(status_code=400, detail="drop_out_of_window")
 
+    # общий лимит
     if drop.total_supply is not None:
         used = await _count_supply_used(session, drop.id)
         if used >= int(drop.total_supply):
             raise HTTPException(status_code=400, detail="drop_total_supply_reached")
 
+    # персональный лимит
     if int(drop.per_user_limit or 0) > 0:
         used_user = await _count_user_used(session, drop.id, user.id)
         if used_user >= int(drop.per_user_limit):
             raise HTTPException(status_code=400, detail="drop_user_limit_reached")
 
+    # списываем монеты
     price = int(drop.price_coins or 0)
     if price > 0:
         bal = _get_balance(user)
@@ -165,6 +200,7 @@ async def buy_drop(payload: BuyDropIn, session: AsyncSession = Depends(get_async
             raise HTTPException(status_code=400, detail="not_enough_coins")
         _set_balance(user, bal - price)
 
+    # создаём покупку + уникальный код
     purchase = None
     for _ in range(5):
         code = generate_unique_code(prefix="GAP", size=10)
