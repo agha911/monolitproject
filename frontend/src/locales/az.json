@@ -130,6 +130,9 @@
   "drop_code_title": "Drop kodu",
   "drop_code_hint": "Bu kodu tərəfdaşa göstərin:",
   "shop_tab_boosters": "Busterlər",
-  "shop_tab_drops": "Droplar"
+  "shop_tab_drops": "Droplar",
+  "errors": {
+  "drop_user_limit_reached": "Bu drop-dan artıq istifadə etmisiniz."
+}
 
 }
