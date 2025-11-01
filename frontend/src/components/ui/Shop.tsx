@@ -46,7 +46,7 @@ const Shop: React.FC = () => {
   const [drops, setDrops] = useState<Drop[]>([]);
   const [dropsLoading, setDropsLoading] = useState(false);
   const [purchase, setPurchase] = useState<Purchase | null>(null);
-  const [selectedDrop, setSelectedDrop] = useState<Drop | null>(null); // 🆕 для модалки
+  const [selectedDrop, setSelectedDrop] = useState<Drop | null>(null);
 
   const telegramUser = WebApp.initDataUnsafe?.user;
   const telegramUserId = telegramUser?.id;
@@ -481,36 +481,64 @@ const Shop: React.FC = () => {
           )}
 
           <div className="space-y-3">
-            {drops.map((d) => (
-              <div
-                key={d.id}
-                className="rounded-2xl p-4 bg-[#0e1a2b] border border-[#00f0ff40] text-white flex items-center justify-between"
-              >
-                <div>
-                  <div className="text-base font-semibold">{d.title}</div>
-                  <div className="text-xs opacity-80">
-                    {t('drop_discount', { percent: d.discount_percent })} ·{' '}
-                    {t('drop_price', { price: d.price_coins })}
-                  </div>
-                </div>
-                <button
-                  className="px-3 py-1 rounded-lg bg-[#00f0ff] text-[#0e1a2b] text-sm font-semibold"
-                  onClick={async () => {
-                    try {
-                      setSelectedDrop(d); // 🆕 чтобы показать цену/партнёра
-                      const p = await buyDrop(d.id);
-                      setPurchase(p);
-                      await fetchUserData();
-                      await fetchTotalSpent();
-                    } catch (e: any) {
-                      alert(e?.message || t('shop_error'));
-                    }
-                  }}
+            {drops.map((d) => {
+              const userOut = (d as any).user_remaining === 0;
+              const leftAll = (d as any).remaining;
+              const leftUser = (d as any).user_remaining;
+
+              return (
+                <div
+                  key={d.id}
+                  className={`rounded-2xl p-4 bg-[#0e1a2b] border ${
+                    userOut ? 'border-[#ffffff30]' : 'border-[#00f0ff40]'
+                  } text-white flex items-center justify-between`}
                 >
-                  {t('buy')}
-                </button>
-              </div>
-            ))}
+                  <div>
+                    <div className="text-base font-semibold">{d.title}</div>
+                    <div className="text-xs opacity-80">
+                      {t('drop_discount', { percent: d.discount_percent })} ·{' '}
+                      {t('drop_price', { price: d.price_coins })}
+                    </div>
+
+                    {(leftAll != null || leftUser != null) && (
+                      <div className="text-[11px] opacity-70 mt-1">
+                        {leftAll != null && <span>{t('available')}: {leftAll}</span>}
+                        {leftAll != null && leftUser != null && <span> • </span>}
+                        {leftUser != null && <span>{t('your_available') ?? 'You'}: {leftUser}</span>}
+                      </div>
+                    )}
+                  </div>
+
+                  {userOut ? (
+                    <span className="px-3 py-1 rounded-lg bg-[#cccccc20] text-[#cccccc] text-sm font-semibold">
+                      ✓
+                    </span>
+                  ) : (
+                    <button
+                      className="px-3 py-1 rounded-lg bg-[#00f0ff] text-[#0e1a2b] text-sm font-semibold"
+                      onClick={async () => {
+                        try {
+                          setSelectedDrop(d);
+                          const p = await buyDrop(d.id);
+                          setPurchase(p);
+                          await fetchUserData();
+                          await fetchTotalSpent();
+                          // локально уменьшим user_remaining, если фронту вернули лимиты
+                          if (leftUser != null) {
+                            (d as any).user_remaining = Math.max(0, leftUser - 1);
+                            setDrops((prev) => prev.map(x => (x.id === d.id ? { ...x, ...(d as any) } : x)));
+                          }
+                        } catch (e: any) {
+                          alert(e?.message || t('shop_error'));
+                        }
+                      }}
+                    >
+                      {t('buy')}
+                    </button>
+                  )}
+                </div>
+              );
+            })}
           </div>
 
           {/* Модалка результата покупки дропа */}
@@ -540,17 +568,18 @@ const Shop: React.FC = () => {
 
                 <div className="font-semibold mb-1">{t('drop_code_title') || 'Код дропа'}</div>
                 <div className="text-sm">
-                  {t('drop_code_hint') || 'Покажите этот код партнёру:'}{' '}
-                  <b>{purchase.unique_code}</b>
+                  {t('drop_code_hint') || 'Покажите этот код партнёру:'} <b>{purchase.unique_code}</b>
                 </div>
 
                 <div className="text-xs opacity-70 mt-2">
-                  {(purchase.partner_name || selectedDrop?.partner?.name) ?? '—'} ·{' '}
-                  {(purchase.discount_percent ?? selectedDrop?.discount_percent ?? '-') + '%'}
+                  {(purchase.partner_name || (selectedDrop as any)?.partner?.name) ?? '—'} ·{' '}
+                  {(purchase.discount_percent ??
+                    (selectedDrop as any)?.discount_percent ??
+                    '-') + '%'}
                 </div>
                 <div className="text-xs opacity-70 mt-1">
                   {t('drop_price', {
-                    price: selectedDrop?.price_coins ?? purchase.price_coins ?? 0,
+                    price: (selectedDrop as any)?.price_coins ?? purchase.price_coins ?? 0,
                   })}
                 </div>
 
