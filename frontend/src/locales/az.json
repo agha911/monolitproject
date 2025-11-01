@@ -118,7 +118,12 @@
     "empty": "Hələ aktiv drop yoxdur.",
     "dropFallback": "Drop",
     "partnerLine": "Tərəfdaş: {{partner}} · Endirim: {{percent}}%",
-    "codeLine": "ID: {{code}}"
+    "codeLine": "ID: {{code}}",
+    "fundTitle": "GAP Fondu",
+    "fundTotal": "Toplam toplanan: {{amount}} $GAP",
+    "partnersTitle": "Tərəfdaş balansları",
+    "partnersEmpty": "Hələ tərəfdaşlar yoxdur",
+    "partnerBalance": "Balans: {{amount}} $GAP"
   },
   "actions": { "close": "Bağla", "copy": "Kopyala" },
   "alerts": { "copied": "ID kopyalandı" },
