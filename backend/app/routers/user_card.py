@@ -14,7 +14,7 @@ from app.models.drop_purchase import DropPurchase
 from app.crud.user import get_user
 
 # 🆕 добавили CRUD для total_spent и партнёров
-from app.crud.app_stats import get_total_spent
+from app.crud.user import get_total_spent
 from app.crud.partners import list_partner_balances
 
 router = APIRouter(prefix="/api", tags=["user-card"])
