@@ -129,6 +129,9 @@
   "drop_code_title": "Код дропа",
   "drop_code_hint": "Покажите этот код партнёру:",
   "shop_tab_boosters": "Бустеры",
-  "shop_tab_drops": "Дропы"
+  "shop_tab_drops": "Дропы",
+  "errors": {
+  "drop_user_limit_reached": "Вы уже использовали этот дроп."
+}
 
 }
