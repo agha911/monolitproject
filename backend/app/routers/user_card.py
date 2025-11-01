@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Optional, Literal
+from typing import Optional, Literal, List, Dict, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
@@ -13,7 +13,12 @@ from app.models.partner import Partner
 from app.models.drop_purchase import DropPurchase
 from app.crud.user import get_user
 
+# 🆕 добавили CRUD для total_spent и партнёров
+from app.crud.app_stats import get_total_spent
+from app.crud.partners import list_partner_balances
+
 router = APIRouter(prefix="/api", tags=["user-card"])
+
 
 def _get_balance(u: User) -> int:
     if getattr(u, "total_xp", None) is not None:
@@ -21,6 +26,7 @@ def _get_balance(u: User) -> int:
     if getattr(u, "score", None) is not None:
         return int(u.score or 0)
     return 0
+
 
 class PurchaseOut(BaseModel):
     id: int
@@ -35,11 +41,24 @@ class PurchaseOut(BaseModel):
     price_coins: Optional[int] = None
     discount_percent: Optional[float] = None
 
+
+# 🆕 секция балансов партнёров
+class PartnerBalanceOut(BaseModel):
+    id: int
+    name: str
+    slug: str
+    partner_balance: int
+
+
 class UserCardOut(BaseModel):
     username: str
     coins: int
     invited_count: int
     active_drops: list[PurchaseOut]
+    # 🆕 добавили фонд и партнёров
+    fund_total_spent: int
+    partners: list[PartnerBalanceOut]
+
 
 @router.get("/user/card", response_model=UserCardOut)
 async def user_card(
@@ -84,9 +103,26 @@ async def user_card(
     coins = _get_balance(user)
     invited = int(getattr(user, "invites_count", 0) or 0)
 
+    # 🆕 фонд (тотал спент)
+    total_spent = int(await get_total_spent(session))
+
+    # 🆕 список партнёров с балансами
+    partner_rows = await list_partner_balances(session, limit=200, offset=0, order="desc")
+    partners_out = [
+        PartnerBalanceOut(
+            id=int(p["id"]),
+            name=p["name"],
+            slug=p["slug"],
+            partner_balance=int(p["partner_balance"] or 0),
+        )
+        for p in partner_rows
+    ]
+
     return UserCardOut(
         username=user.username or "",
         coins=coins,
         invited_count=invited,
         active_drops=items,
+        fund_total_spent=total_spent,
+        partners=partners_out,
     )
