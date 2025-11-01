@@ -128,5 +128,8 @@
   "drop_code_title": "Drop code",
   "drop_code_hint": "Show this code to the partner:",
   "shop_tab_boosters": "Boosters",
-  "shop_tab_drops": "Drops"
+  "shop_tab_drops": "Drops",
+  "errors": {
+  "drop_user_limit_reached": "You’ve already used this drop."
+}
 }
