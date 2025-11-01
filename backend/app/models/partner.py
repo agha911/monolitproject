@@ -19,6 +19,7 @@ class Partner(Base):
     tg_user_id: Mapped[int | None] = mapped_column(BigInteger)
     api_key: Mapped[str | None] = mapped_column(String(64), unique=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    partner_balance: Mapped[int] = mapped_column(BigInteger, default=0)
 
     # relations
     drops: Mapped[List["Drop"]] = relationship(
