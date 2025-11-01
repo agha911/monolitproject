@@ -15,7 +15,11 @@ from app.models.partner import Partner
 from app.models.drop_purchase import DropPurchase
 from app.crud.user import get_user
 
-# генератор кода (оставь путь, который у тебя используется в проекте)
+# 🆕 начисления статистики и партнёрского баланса
+from app.crud.user import increment_total_spent
+from app.crud.partners import increment_partner_balance
+
+# генератор кода (как у тебя в проекте)
 from app.drop_utils.codes import generate_unique_code
 
 router = APIRouter(prefix="/api", tags=["store-drops"])
@@ -75,7 +79,7 @@ class DropOut(BaseModel):
     active: bool
     visible: bool
     partner: Optional[dict] = None
-    # 🆕 персональные поля
+    # персональные поля
     user_used: int = 0
     user_left: int = 0
     disabled_for_user: bool = False
@@ -104,10 +108,6 @@ async def list_drops(
     session: AsyncSession = Depends(get_async_session),
     x_telegram_user_id: Optional[int] = Header(default=None, alias="X-Telegram-User-Id"),
 ):
-    """
-    Возвращает активные дропы. Если передан X-Telegram-User-Id, добавляет персональные поля:
-    user_used / user_left / disabled_for_user (учитывая per_user_limit).
-    """
     now = func.now()
     q = (
         select(Drop)
@@ -122,7 +122,6 @@ async def list_drops(
     res = await session.execute(q)
     rows: list[Drop] = res.scalars().all()
 
-    # Текущий пользователь (если передан заголовок)
     current_user: Optional[User] = None
     if x_telegram_user_id:
         try:
@@ -166,7 +165,7 @@ async def list_drops(
 async def buy_drop(payload: BuyDropIn, session: AsyncSession = Depends(get_async_session)):
     user: User = await _get_user_by_telegram_id(session, payload.telegram_id)
 
-    # блокировка строки дропа для проверки лимитов/остатков
+    # блокируем строку дропа для проверки лимитов/остатков
     qd = select(Drop).where(Drop.id == payload.drop_id).with_for_update()
     res = await session.execute(qd)
     drop = res.scalar_one_or_none()
@@ -192,19 +191,24 @@ async def buy_drop(payload: BuyDropIn, session: AsyncSession = Depends(get_async
         if used_user >= int(drop.per_user_limit):
             raise HTTPException(status_code=400, detail="drop_user_limit_reached")
 
-    # списываем монеты
     price = int(drop.price_coins or 0)
-    if price > 0:
-        bal = _get_balance(user)
-        if bal < price:
-            raise HTTPException(status_code=400, detail="not_enough_coins")
-        _set_balance(user, bal - price)
 
-    # создаём покупку + уникальный код
     purchase = None
+    # ⚠️ цикл: пробуем сгенерировать уникальный код и провести покупку атомарно
     for _ in range(5):
         code = generate_unique_code(prefix="GAP", size=10)
         try:
+            # 1) списываем монеты (внутри той же попытки)
+            if price > 0:
+                # если была предыдущая попытка с ROLLBACK — перечитаем пользователя под блокировкой
+                res_user = await session.execute(select(User).where(User.id == user.id).with_for_update())
+                user = res_user.scalar_one()
+                bal = _get_balance(user)
+                if bal < price:
+                    raise HTTPException(status_code=400, detail="not_enough_coins")
+                _set_balance(user, bal - price)
+
+            # 2) создаём покупку с уникальным кодом
             purchase = DropPurchase(
                 user_id=user.id,
                 drop_id=drop.id,
@@ -212,11 +216,22 @@ async def buy_drop(payload: BuyDropIn, session: AsyncSession = Depends(get_async
                 status="active",
             )
             session.add(purchase)
+
+            # 3) начисляем статистику и партнёру (в той же транзакции)
+            if price > 0:
+                partner_share = price // 2
+                await increment_total_spent(session, partner_share)                 # +50% в total_spent
+                await increment_partner_balance(session, drop.partner_id, partner_share)  # +50% партнёру
+
+            # 4) фиксируем изменения в БД
             await session.flush()
             break
+
         except IntegrityError:
+            # если конфликт уникальности кода — откатываем попытку и пробуем ещё раз
             await session.rollback()
             continue
+
     if not purchase:
         raise HTTPException(status_code=500, detail="code_generation_conflict")
 
@@ -234,6 +249,7 @@ async def buy_drop(payload: BuyDropIn, session: AsyncSession = Depends(get_async
         redeemed_at=purchase.redeemed_at,
         drop_title=drop.title,
         partner_name=drop.partner.name if drop.partner else None,
-        price_coins=int(drop.price_coins or 0),
+        price_coins=price,
         discount_percent=float(drop.discount_percent),
     )
+
