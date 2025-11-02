@@ -29,6 +29,7 @@ from app.notifications.delivery_handlers import register_delivery_handlers
 from app.referral_utils.referral import credit_referral_share
 from app.routers import referral as referral_router
 from app.routers import store_drops, user_card, partner_drops
+from app.routers import boosters
 
 
 # ---------------- logging setup ----------------
@@ -504,6 +505,7 @@ app.include_router(referral_router.router, prefix="/api", tags=["referral"])
 app.include_router(store_drops.router)
 app.include_router(user_card.router)
 app.include_router(partner_drops.router)
+app.include_router(boosters.router)
 
 
 # ---------------- background ----------------
