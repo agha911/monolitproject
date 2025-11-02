@@ -1,11 +1,11 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import WebApp from '@twa-dev/sdk';
 import { useTranslation } from 'react-i18next';
 import MainButton from './MainButton';
 import API_BASE_URL from './config';
 import { useClickBuffer, FlushResponse } from '../hooks/useClickBuffer';
 import { useAnimatedInt } from '../hooks/useAnimatedInt';
-import UserCard from './UserCard'; // 🆕 добавлено
+import UserCard from './UserCard';
 
 type ChallengeDay = {
   day_index: number;
@@ -20,8 +20,11 @@ type ChallengeDay = {
   is_active: boolean;
 };
 
-// 🔒 Kill switch: отключаем челлендж
 const CHALLENGE_HARD_DISABLED = true;
+
+type SpawnedBooster =
+  | { kind: 'coins'; id: number; x: number; y: number; expiresAt: number }
+  | { kind: 'mult'; id: number; x: number; y: number; expiresAt: number };
 
 const Clicker: React.FC = () => {
   const { t } = useTranslation();
@@ -42,17 +45,15 @@ const Clicker: React.FC = () => {
   const [floatingTexts, setFloatingTexts] = useState<any[]>([]);
   const [serverSeq, setServerSeq] = useState<number | null>(null);
   const [seqReady, setSeqReady] = useState(false);
-  const [showUserCard, setShowUserCard] = useState(false); // 🆕 добавлено
+  const [showUserCard, setShowUserCard] = useState(false);
 
-  // челлендж (отключен kill switch'ом)
-  const [challengeLoading, setChallengeLoading] = useState(false);
+  // boosters UI state
+  const [spawned, setSpawned] = useState<SpawnedBooster | null>(null);
+  const [tempMultUntil, setTempMultUntil] = useState<number | null>(null);
+  const spawnTimer = useRef<number | null>(null);
 
-  const fmtHMS = (s: number) => {
-    const h = Math.floor(s / 3600);
-    const m = Math.floor((s % 3600) / 60);
-    const ss = s % 60;
-    return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(ss).padStart(2,'0')}`;
-  };
+  // челлендж (отключен)
+  const [challengeLoading] = useState(false);
 
   useEffect(() => {
     WebApp.ready();
@@ -194,6 +195,9 @@ const Clicker: React.FC = () => {
     }
   };
 
+  const tempMultiplierActive = tempMultUntil !== null && Date.now() < tempMultUntil ? 10 : 1;
+  const effectiveBoost = clickBoost * tempMultiplierActive;
+
   const { addClicks } = useClickBuffer({
     initData: WebApp.initData,
     sessionId,
@@ -208,9 +212,74 @@ const Clicker: React.FC = () => {
     canSend: energy > 0
   });
 
+  // ——— booster spawn helper ———
+  const maybeSpawnBooster = () => {
+    if (spawned) return; // один за раз
+    if (Math.random() < 0.04) {
+      const kind: 'coins' | 'mult' = Math.random() < 0.5 ? 'coins' : 'mult';
+      const x = 10 + Math.random() * 80;
+      const y = 10 + Math.random() * 80;
+      const id = Date.now() + Math.random();
+      const expiresAt = Date.now() + 4000; // 4s
+      setSpawned({ kind, id, x, y, expiresAt } as SpawnedBooster);
+
+      if (spawnTimer.current) window.clearTimeout(spawnTimer.current);
+      spawnTimer.current = window.setTimeout(() => {
+        setSpawned((cur) => (cur && cur.id === id ? null : cur));
+      }, 4000) as unknown as number;
+    }
+  };
+
+  const handleBoosterClick = async (b: SpawnedBooster) => {
+    setSpawned(null);
+    if (!telegramUser) return;
+
+    try {
+      if (b.kind === 'coins') {
+        const res = await fetch(`${API_BASE_URL}/api/boosters/claim/coins`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ init_data: WebApp.initData }),
+        });
+        const data = await res.json();
+        if (data.status === 'ok') {
+          const granted = Number(data.granted ?? 50000);
+          setTotalXp((prev) => prev + granted);
+          alert(t('boosters.coin_granted', { defaultValue: 'Bonus +50K added!' }));
+        } else if (data.status === 'daily_limit_reached') {
+          console.info('Daily limit reached');
+        } else {
+          alert(t('error', { defaultValue: 'Error' }));
+        }
+      } else {
+        const res = await fetch(`${API_BASE_URL}/api/boosters/claim/multiplier`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ init_data: WebApp.initData }),
+        });
+        const data = await res.json();
+        if (data.status === 'ok') {
+          const expires = data.expires_at ? new Date(data.expires_at).getTime() : Date.now() + 15000;
+          setTempMultUntil(expires);
+        } else if (data.status === 'daily_limit_reached') {
+          console.info('Daily limit reached');
+        } else {
+          alert(t('error', { defaultValue: 'Error' }));
+        }
+      }
+    } catch (e) {
+      console.warn('Booster claim error', e);
+    }
+  };
+
+  // ——— main click ———
   const handleMultiClick = (x: number, y: number) => {
     if (!telegramUser || loading || energy <= 0) return;
-    const spend = Math.min(clickBoost, energy);
+
+    // шанс появления бустера при клике
+    maybeSpawnBooster();
+
+    const spend = Math.min(effectiveBoost, energy);
     if (spend <= 0) return;
 
     setTotalXp((prev) => prev + spend);
@@ -225,25 +294,49 @@ const Clicker: React.FC = () => {
     addClicks(spend);
   };
 
+  // ——— x10 countdown ———
+  const [multCountdown, setMultCountdown] = useState<number>(0);
+  useEffect(() => {
+    if (!tempMultUntil) {
+      setMultCountdown(0);
+      return;
+    }
+    const tick = () => {
+      const left = Math.max(0, Math.ceil((tempMultUntil - Date.now()) / 1000));
+      setMultCountdown(left);
+      if (left <= 0) setTempMultUntil(null);
+    };
+    tick();
+    const id = window.setInterval(tick, 250);
+    return () => window.clearInterval(id);
+  }, [tempMultUntil]);
+
   const energyInt = Math.floor(smoothEnergy);
 
   return (
     <div className="w-full min-h-screen bg-[#131f2f] text-center flex flex-col items-center justify-start pt-8 px-4 text-[#00f0ff]">
-      {/* 🆕 маленькая кнопка «Карта» */}
+      {/* кнопка «Карта» */}
       <button
         className="fixed top-3 left-3 z-50 w-9 h-9 rounded-full bg-black/80 text-white shadow flex items-center justify-center active:scale-95"
         onClick={() => setShowUserCard(true)}
         aria-label={t('userCard.open', { defaultValue: 'User card' })}
         title={t('userCard.open', { defaultValue: 'User card' })}
       >
-        {/* простая иконка пользователя (SVG) */}
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
           <path d="M12 12c2.761 0 5-2.686 5-6s-2.239-6-5-6-5 2.686-5 6 2.239 6 5 6Zm0 2c-4.418 0-8 2.91-8 6.5V22h16v-1.5C20 16.91 16.418 14 12 14Z" fill="currentColor"/>
         </svg>
       </button>
 
       <h2 className="text-2xl font-bold mb-2 drop-shadow-md">$GAP: {totalXp}</h2>
-      <div className="text-sm text-[#7ee9ff] mb-2">x{clickBoost} boost</div>
+
+      <div className="text-sm text-[#7ee9ff] mb-2 flex items-center gap-2">
+        <span>x{clickBoost} {t('boost', { defaultValue: 'boost' })}</span>
+        {tempMultiplierActive > 1 && (
+          <span className="px-2 py-0.5 rounded-full bg-[#00f0ff] text-[#0e1a2b] text-xs font-bold">
+            x10 · {multCountdown}s
+          </span>
+        )}
+      </div>
 
       <div className="my-4 w-full max-w-md">
         <label className="block mb-1 text-sm text-[#7ee9ff]">
@@ -267,6 +360,29 @@ const Clicker: React.FC = () => {
           <MainButton energy={energyInt} onMultiClick={handleMultiClick} />
         </div>
 
+        {/* всплывающие бустеры — пульсирующие 🎁/🚀 */}
+        {spawned && (
+          <button
+            className="absolute w-12 h-12 rounded-full text-xl grid place-items-center active:scale-95 booster-pulse"
+            style={{
+              left: `${spawned.x}%`,
+              top: `${spawned.y}%`,
+              transform: 'translate(-50%, -50%)',
+              background: spawned.kind === 'coins' ? '#1EE38F' : '#FFC800',
+              color: '#0e1a2b'
+            }}
+            onClick={() => handleBoosterClick(spawned)}
+            aria-label={spawned.kind === 'coins'
+              ? t('boosters.coin_label', { defaultValue: 'Gift booster' })
+              : t('boosters.mult_label', { defaultValue: 'Rocket booster' })}
+            title={spawned.kind === 'coins'
+              ? t('boosters.coin_label', { defaultValue: 'Gift booster' })
+              : t('boosters.mult_label', { defaultValue: 'Rocket booster' })}
+          >
+            {spawned.kind === 'coins' ? '🎁' : '🚀'}
+          </button>
+        )}
+
         {floatingTexts.map((text) => (
           <div
             key={text.id}
@@ -283,15 +399,23 @@ const Clicker: React.FC = () => {
           </div>
         ))}
 
+        {/* Локальные анимации */}
         <style>{`
           @keyframes floatUpFade {
             0% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
             100% { opacity: 0; transform: translate(-50%, -100%) scale(1.2); }
           }
+          @keyframes pulsePop {
+            0%   { transform: translate(-50%, -50%) scale(1); box-shadow: 0 0 0 0 rgba(0,240,255,0.0); }
+            50%  { transform: translate(-50%, -50%) scale(1.1); box-shadow: 0 0 18px 6px rgba(0,240,255,0.35); }
+            100% { transform: translate(-50%, -50%) scale(1); box-shadow: 0 0 0 0 rgba(0,240,255,0.0); }
+          }
+          .booster-pulse {
+            animation: pulsePop 0.9s ease-in-out infinite;
+          }
         `}</style>
       </div>
 
-      {/* Заглушка для кнопки задания */}
       {!challengeLoading && (
         <div className="mt-4 w-full max-w-md">
           <button
@@ -306,13 +430,13 @@ const Clicker: React.FC = () => {
         </div>
       )}
 
-      {/* 🆕 модалка «Карта пользователя» */}
       {showUserCard && <UserCard onClose={() => setShowUserCard(false)} />}
     </div>
   );
 };
 
 export default Clicker;
+
 
 
 
