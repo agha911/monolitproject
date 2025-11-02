@@ -20,6 +20,7 @@ type ChallengeDay = {
   is_active: boolean;
 };
 
+// 🔒 Kill switch: отключаем челлендж
 const CHALLENGE_HARD_DISABLED = true;
 
 type SpawnedBooster =
@@ -47,13 +48,13 @@ const Clicker: React.FC = () => {
   const [seqReady, setSeqReady] = useState(false);
   const [showUserCard, setShowUserCard] = useState(false);
 
+  // челлендж (отключен kill switch'ом)
+  const [challengeLoading] = useState(false);
+
   // boosters UI state
   const [spawned, setSpawned] = useState<SpawnedBooster | null>(null);
   const [tempMultUntil, setTempMultUntil] = useState<number | null>(null);
   const spawnTimer = useRef<number | null>(null);
-
-  // челлендж (отключен)
-  const [challengeLoading] = useState(false);
 
   useEffect(() => {
     WebApp.ready();
@@ -195,6 +196,7 @@ const Clicker: React.FC = () => {
     }
   };
 
+  // временный множитель x10, если активирован бустер
   const tempMultiplierActive = tempMultUntil !== null && Date.now() < tempMultUntil ? 10 : 1;
   const effectiveBoost = clickBoost * tempMultiplierActive;
 
@@ -212,9 +214,9 @@ const Clicker: React.FC = () => {
     canSend: energy > 0
   });
 
-  // ——— booster spawn helper ———
+  // шанс появления бустера при клике
   const maybeSpawnBooster = () => {
-    if (spawned) return; // один за раз
+    if (spawned) return; // только один одновременно
     if (Math.random() < 0.04) {
       const kind: 'coins' | 'mult' = Math.random() < 0.5 ? 'coins' : 'mult';
       const x = 10 + Math.random() * 80;
@@ -241,15 +243,16 @@ const Clicker: React.FC = () => {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ init_data: WebApp.initData }),
         });
+        if (!res.ok) throw new Error('bad_response');
         const data = await res.json();
         if (data.status === 'ok') {
           const granted = Number(data.granted ?? 50000);
           setTotalXp((prev) => prev + granted);
           alert(t('boosters.coin_granted', { defaultValue: 'Bonus +50K added!' }));
         } else if (data.status === 'daily_limit_reached') {
-          console.info('Daily limit reached');
+          // игнорируем без алертов
         } else {
-          alert(t('error', { defaultValue: 'Error' }));
+          throw new Error(data.message || 'unknown');
         }
       } else {
         const res = await fetch(`${API_BASE_URL}/api/boosters/claim/multiplier`, {
@@ -257,14 +260,15 @@ const Clicker: React.FC = () => {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ init_data: WebApp.initData }),
         });
+        if (!res.ok) throw new Error('bad_response');
         const data = await res.json();
         if (data.status === 'ok') {
           const expires = data.expires_at ? new Date(data.expires_at).getTime() : Date.now() + 15000;
           setTempMultUntil(expires);
         } else if (data.status === 'daily_limit_reached') {
-          console.info('Daily limit reached');
+          // игнорируем
         } else {
-          alert(t('error', { defaultValue: 'Error' }));
+          throw new Error(data.message || 'unknown');
         }
       }
     } catch (e) {
@@ -272,11 +276,10 @@ const Clicker: React.FC = () => {
     }
   };
 
-  // ——— main click ———
   const handleMultiClick = (x: number, y: number) => {
     if (!telegramUser || loading || energy <= 0) return;
 
-    // шанс появления бустера при клике
+    // шанс всплытия бустера
     maybeSpawnBooster();
 
     const spend = Math.min(effectiveBoost, energy);
@@ -294,7 +297,7 @@ const Clicker: React.FC = () => {
     addClicks(spend);
   };
 
-  // ——— x10 countdown ———
+  // счетчик для x10 бейджа
   const [multCountdown, setMultCountdown] = useState<number>(0);
   useEffect(() => {
     if (!tempMultUntil) {
@@ -315,7 +318,7 @@ const Clicker: React.FC = () => {
 
   return (
     <div className="w-full min-h-screen bg-[#131f2f] text-center flex flex-col items-center justify-start pt-8 px-4 text-[#00f0ff]">
-      {/* кнопка «Карта» */}
+      {/* Кнопка «Карта пользователя» в левом верхнем углу */}
       <button
         className="fixed top-3 left-3 z-50 w-9 h-9 rounded-full bg-black/80 text-white shadow flex items-center justify-center active:scale-95"
         onClick={() => setShowUserCard(true)}
@@ -360,18 +363,24 @@ const Clicker: React.FC = () => {
           <MainButton energy={energyInt} onMultiClick={handleMultiClick} />
         </div>
 
-        {/* всплывающие бустеры — пульсирующие 🎁/🚀 */}
+        {/* всплывающие бустеры — чистые эмодзи 🎁/🚀 без фона */}
         {spawned && (
-          <button
-            className="absolute w-12 h-12 rounded-full text-xl grid place-items-center active:scale-95 booster-pulse"
+          <div
+            role="button"
+            tabIndex={0}
+            className="absolute z-50 text-4xl select-none booster-pulse"
             style={{
               left: `${spawned.x}%`,
               top: `${spawned.y}%`,
               transform: 'translate(-50%, -50%)',
-              background: spawned.kind === 'coins' ? '#1EE38F' : '#FFC800',
-              color: '#0e1a2b'
+              pointerEvents: 'auto',
+              userSelect: 'none',
+              lineHeight: 1,
+              filter: 'drop-shadow(0 0 10px rgba(0,240,255,0.6)) drop-shadow(0 0 18px rgba(0,240,255,0.35))',
             }}
-            onClick={() => handleBoosterClick(spawned)}
+            onMouseDown={(e) => e.stopPropagation()}
+            onClick={(e) => { e.stopPropagation(); handleBoosterClick(spawned); }}
+            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); handleBoosterClick(spawned); } }}
             aria-label={spawned.kind === 'coins'
               ? t('boosters.coin_label', { defaultValue: 'Gift booster' })
               : t('boosters.mult_label', { defaultValue: 'Rocket booster' })}
@@ -379,8 +388,16 @@ const Clicker: React.FC = () => {
               ? t('boosters.coin_label', { defaultValue: 'Gift booster' })
               : t('boosters.mult_label', { defaultValue: 'Rocket booster' })}
           >
-            {spawned.kind === 'coins' ? '🎁' : '🚀'}
-          </button>
+            <span
+              style={{
+                textShadow:
+                  '0 0 10px rgba(0,240,255,0.7), 0 0 18px rgba(0,240,255,0.45), 0 0 28px rgba(0,240,255,0.35)',
+                display: 'inline-block',
+              }}
+            >
+              {spawned.kind === 'coins' ? '🎁' : '🚀'}
+            </span>
+          </div>
         )}
 
         {floatingTexts.map((text) => (
@@ -406,9 +423,9 @@ const Clicker: React.FC = () => {
             100% { opacity: 0; transform: translate(-50%, -100%) scale(1.2); }
           }
           @keyframes pulsePop {
-            0%   { transform: translate(-50%, -50%) scale(1); box-shadow: 0 0 0 0 rgba(0,240,255,0.0); }
-            50%  { transform: translate(-50%, -50%) scale(1.1); box-shadow: 0 0 18px 6px rgba(0,240,255,0.35); }
-            100% { transform: translate(-50%, -50%) scale(1); box-shadow: 0 0 0 0 rgba(0,240,255,0.0); }
+            0%   { transform: translate(-50%, -50%) scale(1); }
+            50%  { transform: translate(-50%, -50%) scale(1.12); }
+            100% { transform: translate(-50%, -50%) scale(1); }
           }
           .booster-pulse {
             animation: pulsePop 0.9s ease-in-out infinite;
@@ -416,6 +433,7 @@ const Clicker: React.FC = () => {
         `}</style>
       </div>
 
+      {/* Заглушка для кнопки задания */}
       {!challengeLoading && (
         <div className="mt-4 w-full max-w-md">
           <button
@@ -436,6 +454,7 @@ const Clicker: React.FC = () => {
 };
 
 export default Clicker;
+
 
 
 
