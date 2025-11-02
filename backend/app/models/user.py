@@ -39,6 +39,10 @@ class User(Base):
     energy_upgrade_count = Column(Integer, default=0)
     last_energy_upgrade = Column(DateTime, nullable=True)
     partner_task_claimed_id = Column(String(64), nullable=True, index=True)
+    booster_success_count = Column(Integer, default=0, nullable=False)
+    booster_success_updated_at = Column(DateTime, nullable=True)
+    temp_click_multiplier = Column(Integer, default=1, nullable=False)
+    temp_click_multiplier_expires_at = Column(DateTime, nullable=True)
     
     
 
