@@ -117,7 +117,12 @@
     "empty": "Пока нет активных дропов.",
     "dropFallback": "Дроп",
     "partnerLine": "Партнёр: {{partner}} · Скидка: {{percent}}%",
-    "codeLine": "ID: {{code}}"
+    "codeLine": "ID: {{code}}",
+    "fundTitle": "GAP фонд",
+    "fundTotal": "Всего собрано: {{amount}} $GAP",
+    "partnersTitle": "Балансы партнёров",
+    "partnersEmpty": "Партнёров пока нет",
+    "partnerBalance": "Баланс: {{amount}} $GAP"
   },
   "actions": { "close": "Закрыть", "copy": "Копировать" },
   "alerts": { "copied": "ID скопирован" },
