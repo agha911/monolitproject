@@ -23,9 +23,31 @@ type ChallengeDay = {
 // 🔒 Kill switch: отключаем челлендж
 const CHALLENGE_HARD_DISABLED = true;
 
+// ---- boosters settings ----
+const DAILY_CLAIM_LIMIT = 3;
+const SPAWN_SHOW_MS = 4500;                 // сколько висит бустер
+const RESPAWN_MISSED_MIN_H = 1;             // если не пойман — через 1–2 часа повтор
+const RESPAWN_MISSED_MAX_H = 2;
+const RESPAWN_CLAIMED_MIN_H = 6;            // если пойман — следующая попытка через 6–10 часов
+const RESPAWN_CLAIMED_MAX_H = 10;
+
 type SpawnedBooster =
   | { kind: 'coins'; id: number; x: number; y: number; expiresAt: number }
   | { kind: 'mult'; id: number; x: number; y: number; expiresAt: number };
+
+// утилиты даты и стораджа (по локальным суткам устройства)
+const todayKey = () => {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${dd}`;
+};
+const lsKey = (base: string) => `gappick:${base}:${todayKey()}`;
+const randHours = (minH: number, maxH: number) => {
+  const ms = (minH * 3600 + Math.random() * (maxH - minH) * 3600) * 1000;
+  return Math.round(ms);
+};
 
 const Clicker: React.FC = () => {
   const { t } = useTranslation();
@@ -51,10 +73,34 @@ const Clicker: React.FC = () => {
   // челлендж (отключен kill switch'ом)
   const [challengeLoading] = useState(false);
 
-  // boosters UI state
+  // ---- boosters UI/logic state ----
   const [spawned, setSpawned] = useState<SpawnedBooster | null>(null);
   const [tempMultUntil, setTempMultUntil] = useState<number | null>(null);
   const spawnTimer = useRef<number | null>(null);
+
+  // учёт попыток (успешных активаций) за сегодня и «когда можно снова показывать»
+  const [claimsUsed, setClaimsUsed] = useState<number>(() => {
+    const raw = localStorage.getItem(lsKey('boosters:claimsUsed'));
+    return raw ? Number(raw) || 0 : 0;
+  });
+  const [nextSpawnAt, setNextSpawnAt] = useState<number>(() => {
+    const raw = localStorage.getItem(lsKey('boosters:nextSpawnAt'));
+    return raw ? Number(raw) || 0 : 0;
+  });
+
+  // сброс локальных ключей при смене суток
+  useEffect(() => {
+    const id = window.setInterval(() => {
+      // чтение любым образом «пробуждает» смену ключей при новых todayKey()
+      // если дата изменилась — просто скинем состояния в 0 по новой датe
+      const k1 = lsKey('boosters:claimsUsed');
+      const k2 = lsKey('boosters:nextSpawnAt');
+      // если в стейте старые ключи — перезагрузим значения из LS (скорее всего их нет)
+      if (!localStorage.getItem(k1)) setClaimsUsed(0);
+      if (!localStorage.getItem(k2)) setNextSpawnAt(0);
+    }, 60_000);
+    return () => window.clearInterval(id);
+  }, []);
 
   useEffect(() => {
     WebApp.ready();
@@ -214,22 +260,43 @@ const Clicker: React.FC = () => {
     canSend: energy > 0
   });
 
-  // шанс появления бустера при клике
-  const maybeSpawnBooster = () => {
-    if (spawned) return; // только один одновременно
-    if (Math.random() < 0.04) {
-      const kind: 'coins' | 'mult' = Math.random() < 0.5 ? 'coins' : 'mult';
-      const x = 10 + Math.random() * 80;
-      const y = 10 + Math.random() * 80;
-      const id = Date.now() + Math.random();
-      const expiresAt = Date.now() + 4000; // 4s
-      setSpawned({ kind, id, x, y, expiresAt } as SpawnedBooster);
+  // ---- boosters scheduling ----
+  const canShowBoosterNow = () => {
+    if (spawned) return false;
+    if (claimsUsed >= DAILY_CLAIM_LIMIT) return false;
+    if (tempMultiplierActive > 1) return false; // не показываем второй, пока активен множитель
+    const now = Date.now();
+    return now >= nextSpawnAt;
+  };
 
-      if (spawnTimer.current) window.clearTimeout(spawnTimer.current);
-      spawnTimer.current = window.setTimeout(() => {
-        setSpawned((cur) => (cur && cur.id === id ? null : cur));
-      }, 4000) as unknown as number;
-    }
+  const scheduleNextSpawn = (msFromNow: number) => {
+    const at = Date.now() + msFromNow;
+    setNextSpawnAt(at);
+    localStorage.setItem(lsKey('boosters:nextSpawnAt'), String(at));
+  };
+
+  const spawnBooster = () => {
+    // показываем ровно 1 бустер, 50/50 тип
+    const kind: 'coins' | 'mult' = Math.random() < 0.5 ? 'coins' : 'mult';
+    const x = 10 + Math.random() * 80;
+    const y = 10 + Math.random() * 80;
+    const id = Date.now() + Math.random();
+    const expiresAt = Date.now() + SPAWN_SHOW_MS;
+    setSpawned({ kind, id, x, y, expiresAt });
+
+    if (spawnTimer.current) window.clearTimeout(spawnTimer.current);
+    spawnTimer.current = window.setTimeout(() => {
+      // если не успели кликнуть — попытка НЕ сгорает
+      setSpawned((cur) => (cur && cur.id === id ? null : cur));
+      // назначаем повтор через 1–2 часа
+      scheduleNextSpawn(randHours(RESPAWN_MISSED_MIN_H, RESPAWN_MISSED_MAX_H));
+    }, SPAWN_SHOW_MS) as unknown as number;
+  };
+
+  const maybeSpawnBooster = () => {
+    if (!canShowBoosterNow()) return;
+    // спавним только при кликах, когда «пришло время»
+    spawnBooster();
   };
 
   const handleBoosterClick = async (b: SpawnedBooster) => {
@@ -248,11 +315,18 @@ const Clicker: React.FC = () => {
         if (data.status === 'ok') {
           const granted = Number(data.granted ?? 50000);
           setTotalXp((prev) => prev + granted);
-          alert(t('boosters.coin_granted', { defaultValue: 'Bonus +50K added!' }));
+
+          // +1 к использованным за сегодня
+          const used = Math.min(DAILY_CLAIM_LIMIT, claimsUsed + 1);
+          setClaimsUsed(used);
+          localStorage.setItem(lsKey('boosters:claimsUsed'), String(used));
+
+          // растягиваем: следующая попытка через 6–10 часов
+          scheduleNextSpawn(randHours(RESPAWN_CLAIMED_MIN_H, RESPAWN_CLAIMED_MAX_H));
         } else if (data.status === 'daily_limit_reached') {
-          // игнорируем без алертов
-        } else {
-          throw new Error(data.message || 'unknown');
+          // всё, на сегодня хватит
+          setClaimsUsed(DAILY_CLAIM_LIMIT);
+          localStorage.setItem(lsKey('boosters:claimsUsed'), String(DAILY_CLAIM_LIMIT));
         }
       } else {
         const res = await fetch(`${API_BASE_URL}/api/boosters/claim/multiplier`, {
@@ -265,21 +339,30 @@ const Clicker: React.FC = () => {
         if (data.status === 'ok') {
           const expires = data.expires_at ? new Date(data.expires_at).getTime() : Date.now() + 15000;
           setTempMultUntil(expires);
+
+          // +1 к использованным за сегодня
+          const used = Math.min(DAILY_CLAIM_LIMIT, claimsUsed + 1);
+          setClaimsUsed(used);
+          localStorage.setItem(lsKey('boosters:claimsUsed'), String(used));
+
+          // растягиваем: следующая попытка через 6–10 часов
+          scheduleNextSpawn(randHours(RESPAWN_CLAIMED_MIN_H, RESPAWN_CLAIMED_MAX_H));
         } else if (data.status === 'daily_limit_reached') {
-          // игнорируем
-        } else {
-          throw new Error(data.message || 'unknown');
+          setClaimsUsed(DAILY_CLAIM_LIMIT);
+          localStorage.setItem(lsKey('boosters:claimsUsed'), String(DAILY_CLAIM_LIMIT));
         }
       }
     } catch (e) {
       console.warn('Booster claim error', e);
+      // при ошибке запроса не сжигаем попытку — дайте ещё шанс через 1–2 часа
+      scheduleNextSpawn(randHours(RESPAWN_MISSED_MIN_H, RESPAWN_MISSED_MAX_H));
     }
   };
 
   const handleMultiClick = (x: number, y: number) => {
     if (!telegramUser || loading || energy <= 0) return;
 
-    // шанс всплытия бустера
+    // если пора — показываем бустер (строго по расписанию)
     maybeSpawnBooster();
 
     const spend = Math.min(effectiveBoost, energy);
@@ -297,7 +380,7 @@ const Clicker: React.FC = () => {
     addClicks(spend);
   };
 
-  // счетчик для x10 бейджа
+  // счётчик секунд для бейджа x10
   const [multCountdown, setMultCountdown] = useState<number>(0);
   useEffect(() => {
     if (!tempMultUntil) {
@@ -313,6 +396,15 @@ const Clicker: React.FC = () => {
     const id = window.setInterval(tick, 250);
     return () => window.clearInterval(id);
   }, [tempMultUntil]);
+
+  // если впервые за день зашли и nextSpawnAt не задан — поставим окно появления в ближайшие 1–2 часа,
+  // чтобы бустер не висел сразу, а появился позже
+  useEffect(() => {
+    if (nextSpawnAt === 0) {
+      scheduleNextSpawn(randHours(RESPAWN_MISSED_MIN_H, RESPAWN_MISSED_MAX_H));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const energyInt = Math.floor(smoothEnergy);
 
@@ -363,7 +455,7 @@ const Clicker: React.FC = () => {
           <MainButton energy={energyInt} onMultiClick={handleMultiClick} />
         </div>
 
-        {/* всплывающие бустеры — чистые эмодзи 🎁/🚀 без фона */}
+        {/* всплывающие бустеры — чистые эмодзи 🎁/🚀 без фона, с мягкой пульсацией */}
         {spawned && (
           <div
             role="button"
