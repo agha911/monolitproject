@@ -24,9 +24,9 @@ type ChallengeDay = {
 const CHALLENGE_HARD_DISABLED = true;
 
 // ---- boosters settings ----
-const DAILY_CLAIM_LIMIT = 3;
+const DAILY_CLAIM_LIMIT_PER_TYPE = 3;       // ← по 3 на каждый тип (🎁 и 🚀)
 const SPAWN_SHOW_MS = 4500;                 // сколько висит бустер
-// ↓ все окна появления сокращены до ровно 1 часа
+// ↓ окна появления: ровно 1 час
 const RESPAWN_MISSED_MIN_H = 1;             // если не пойман — через 1 час
 const RESPAWN_MISSED_MAX_H = 1;
 const RESPAWN_CLAIMED_MIN_H = 1;            // если пойман — следующая попытка через 1 час
@@ -79,9 +79,13 @@ const Clicker: React.FC = () => {
   const [tempMultUntil, setTempMultUntil] = useState<number | null>(null);
   const spawnTimer = useRef<number | null>(null);
 
-  // учёт попыток (успешных активаций) за сегодня и «когда можно снова показывать»
-  const [claimsUsed, setClaimsUsed] = useState<number>(() => {
-    const raw = localStorage.getItem(lsKey('boosters:claimsUsed'));
+  // раздельный учёт попыток по типам за сегодня + «когда можно снова показывать»
+  const [coinsClaimsUsed, setCoinsClaimsUsed] = useState<number>(() => {
+    const raw = localStorage.getItem(lsKey('boosters:coinsClaimsUsed'));
+    return raw ? Number(raw) || 0 : 0;
+  });
+  const [multClaimsUsed, setMultClaimsUsed] = useState<number>(() => {
+    const raw = localStorage.getItem(lsKey('boosters:multClaimsUsed'));
     return raw ? Number(raw) || 0 : 0;
   });
   const [nextSpawnAt, setNextSpawnAt] = useState<number>(() => {
@@ -92,10 +96,12 @@ const Clicker: React.FC = () => {
   // сброс локальных ключей при смене суток
   useEffect(() => {
     const id = window.setInterval(() => {
-      const k1 = lsKey('boosters:claimsUsed');
-      const k2 = lsKey('boosters:nextSpawnAt');
-      if (!localStorage.getItem(k1)) setClaimsUsed(0);
-      if (!localStorage.getItem(k2)) setNextSpawnAt(0);
+      const k1 = lsKey('boosters:coinsClaimsUsed');
+      const k2 = lsKey('boosters:multClaimsUsed');
+      const k3 = lsKey('boosters:nextSpawnAt');
+      if (!localStorage.getItem(k1)) setCoinsClaimsUsed(0);
+      if (!localStorage.getItem(k2)) setMultClaimsUsed(0);
+      if (!localStorage.getItem(k3)) setNextSpawnAt(0);
     }, 60_000);
     return () => window.clearInterval(id);
   }, []);
@@ -259,9 +265,13 @@ const Clicker: React.FC = () => {
   });
 
   // ---- boosters scheduling ----
+  const allLimitsReached =
+    coinsClaimsUsed >= DAILY_CLAIM_LIMIT_PER_TYPE &&
+    multClaimsUsed >= DAILY_CLAIM_LIMIT_PER_TYPE;
+
   const canShowBoosterNow = () => {
     if (spawned) return false;
-    if (claimsUsed >= DAILY_CLAIM_LIMIT) return false;
+    if (allLimitsReached) return false;
     if (tempMultiplierActive > 1) return false; // не показываем второй, пока активен множитель
     const now = Date.now();
     return now >= nextSpawnAt;
@@ -274,8 +284,13 @@ const Clicker: React.FC = () => {
   };
 
   const spawnBooster = () => {
-    // показываем ровно 1 бустер, 50/50 тип
-    const kind: 'coins' | 'mult' = Math.random() < 0.5 ? 'coins' : 'mult';
+    // выбираем тип так, чтобы не предлагать исчерпанный
+    const possible: Array<'coins' | 'mult'> = [];
+    if (coinsClaimsUsed < DAILY_CLAIM_LIMIT_PER_TYPE) possible.push('coins');
+    if (multClaimsUsed < DAILY_CLAIM_LIMIT_PER_TYPE) possible.push('mult');
+    if (possible.length === 0) return;
+
+    const kind = possible[Math.floor(Math.random() * possible.length)];
     const x = 10 + Math.random() * 80;
     const y = 10 + Math.random() * 80;
     const id = Date.now() + Math.random();
@@ -286,7 +301,7 @@ const Clicker: React.FC = () => {
     spawnTimer.current = window.setTimeout(() => {
       // если не успели кликнуть — попытка НЕ сгорает
       setSpawned((cur) => (cur && cur.id === id ? null : cur));
-      // назначаем повтор через 1 час
+      // повтор через 1 час
       scheduleNextSpawn(randHours(RESPAWN_MISSED_MIN_H, RESPAWN_MISSED_MAX_H));
     }, SPAWN_SHOW_MS) as unknown as number;
   };
@@ -314,17 +329,16 @@ const Clicker: React.FC = () => {
           const granted = Number(data.granted ?? 50000);
           setTotalXp((prev) => prev + granted);
 
-          // +1 к использованным за сегодня
-          const used = Math.min(DAILY_CLAIM_LIMIT, claimsUsed + 1);
-          setClaimsUsed(used);
-          localStorage.setItem(lsKey('boosters:claimsUsed'), String(used));
+          // +1 к использованным по типу 🎁
+          const used = Math.min(DAILY_CLAIM_LIMIT_PER_TYPE, coinsClaimsUsed + 1);
+          setCoinsClaimsUsed(used);
+          localStorage.setItem(lsKey('boosters:coinsClaimsUsed'), String(used));
 
           // следующая попытка через 1 час
           scheduleNextSpawn(randHours(RESPAWN_CLAIMED_MIN_H, RESPAWN_CLAIMED_MAX_H));
         } else if (data.status === 'daily_limit_reached') {
-          // всё, на сегодня хватит
-          setClaimsUsed(DAILY_CLAIM_LIMIT);
-          localStorage.setItem(lsKey('boosters:claimsUsed'), String(DAILY_CLAIM_LIMIT));
+          setCoinsClaimsUsed(DAILY_CLAIM_LIMIT_PER_TYPE);
+          localStorage.setItem(lsKey('boosters:coinsClaimsUsed'), String(DAILY_CLAIM_LIMIT_PER_TYPE));
         }
       } else {
         const res = await fetch(`${API_BASE_URL}/api/boosters/claim/multiplier`, {
@@ -338,16 +352,16 @@ const Clicker: React.FC = () => {
           const expires = data.expires_at ? new Date(data.expires_at).getTime() : Date.now() + 15000;
           setTempMultUntil(expires);
 
-          // +1 к использованным за сегодня
-          const used = Math.min(DAILY_CLAIM_LIMIT, claimsUsed + 1);
-          setClaimsUsed(used);
-          localStorage.setItem(lsKey('boosters:claimsUsed'), String(used));
+          // +1 к использованным по типу 🚀
+          const used = Math.min(DAILY_CLAIM_LIMIT_PER_TYPE, multClaimsUsed + 1);
+          setMultClaimsUsed(used);
+          localStorage.setItem(lsKey('boosters:multClaimsUsed'), String(used));
 
           // следующая попытка через 1 час
           scheduleNextSpawn(randHours(RESPAWN_CLAIMED_MIN_H, RESPAWN_CLAIMED_MAX_H));
         } else if (data.status === 'daily_limit_reached') {
-          setClaimsUsed(DAILY_CLAIM_LIMIT);
-          localStorage.setItem(lsKey('boosters:claimsUsed'), String(DAILY_CLAIM_LIMIT));
+          setMultClaimsUsed(DAILY_CLAIM_LIMIT_PER_TYPE);
+          localStorage.setItem(lsKey('boosters:multClaimsUsed'), String(DAILY_CLAIM_LIMIT_PER_TYPE));
         }
       }
     } catch (e) {
@@ -543,6 +557,7 @@ const Clicker: React.FC = () => {
 };
 
 export default Clicker;
+
 
 
 
