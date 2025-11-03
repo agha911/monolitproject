@@ -26,10 +26,11 @@ const CHALLENGE_HARD_DISABLED = true;
 // ---- boosters settings ----
 const DAILY_CLAIM_LIMIT = 3;
 const SPAWN_SHOW_MS = 4500;                 // сколько висит бустер
-const RESPAWN_MISSED_MIN_H = 1;             // если не пойман — через 1–2 часа повтор
-const RESPAWN_MISSED_MAX_H = 2;
-const RESPAWN_CLAIMED_MIN_H = 6;            // если пойман — следующая попытка через 6–10 часов
-const RESPAWN_CLAIMED_MAX_H = 10;
+// ↓ все окна появления сокращены до ровно 1 часа
+const RESPAWN_MISSED_MIN_H = 1;             // если не пойман — через 1 час
+const RESPAWN_MISSED_MAX_H = 1;
+const RESPAWN_CLAIMED_MIN_H = 1;            // если пойман — следующая попытка через 1 час
+const RESPAWN_CLAIMED_MAX_H = 1;
 
 type SpawnedBooster =
   | { kind: 'coins'; id: number; x: number; y: number; expiresAt: number }
@@ -91,11 +92,8 @@ const Clicker: React.FC = () => {
   // сброс локальных ключей при смене суток
   useEffect(() => {
     const id = window.setInterval(() => {
-      // чтение любым образом «пробуждает» смену ключей при новых todayKey()
-      // если дата изменилась — просто скинем состояния в 0 по новой датe
       const k1 = lsKey('boosters:claimsUsed');
       const k2 = lsKey('boosters:nextSpawnAt');
-      // если в стейте старые ключи — перезагрузим значения из LS (скорее всего их нет)
       if (!localStorage.getItem(k1)) setClaimsUsed(0);
       if (!localStorage.getItem(k2)) setNextSpawnAt(0);
     }, 60_000);
@@ -288,7 +286,7 @@ const Clicker: React.FC = () => {
     spawnTimer.current = window.setTimeout(() => {
       // если не успели кликнуть — попытка НЕ сгорает
       setSpawned((cur) => (cur && cur.id === id ? null : cur));
-      // назначаем повтор через 1–2 часа
+      // назначаем повтор через 1 час
       scheduleNextSpawn(randHours(RESPAWN_MISSED_MIN_H, RESPAWN_MISSED_MAX_H));
     }, SPAWN_SHOW_MS) as unknown as number;
   };
@@ -321,7 +319,7 @@ const Clicker: React.FC = () => {
           setClaimsUsed(used);
           localStorage.setItem(lsKey('boosters:claimsUsed'), String(used));
 
-          // растягиваем: следующая попытка через 6–10 часов
+          // следующая попытка через 1 час
           scheduleNextSpawn(randHours(RESPAWN_CLAIMED_MIN_H, RESPAWN_CLAIMED_MAX_H));
         } else if (data.status === 'daily_limit_reached') {
           // всё, на сегодня хватит
@@ -345,7 +343,7 @@ const Clicker: React.FC = () => {
           setClaimsUsed(used);
           localStorage.setItem(lsKey('boosters:claimsUsed'), String(used));
 
-          // растягиваем: следующая попытка через 6–10 часов
+          // следующая попытка через 1 час
           scheduleNextSpawn(randHours(RESPAWN_CLAIMED_MIN_H, RESPAWN_CLAIMED_MAX_H));
         } else if (data.status === 'daily_limit_reached') {
           setClaimsUsed(DAILY_CLAIM_LIMIT);
@@ -354,7 +352,7 @@ const Clicker: React.FC = () => {
       }
     } catch (e) {
       console.warn('Booster claim error', e);
-      // при ошибке запроса не сжигаем попытку — дайте ещё шанс через 1–2 часа
+      // при ошибке запроса не сжигаем попытку — дайте ещё шанс через 1 час
       scheduleNextSpawn(randHours(RESPAWN_MISSED_MIN_H, RESPAWN_MISSED_MAX_H));
     }
   };
@@ -397,8 +395,7 @@ const Clicker: React.FC = () => {
     return () => window.clearInterval(id);
   }, [tempMultUntil]);
 
-  // если впервые за день зашли и nextSpawnAt не задан — поставим окно появления в ближайшие 1–2 часа,
-  // чтобы бустер не висел сразу, а появился позже
+  // если впервые за день зашли и nextSpawnAt не задан — поставим окно появления в ближайший час
   useEffect(() => {
     if (nextSpawnAt === 0) {
       scheduleNextSpawn(randHours(RESPAWN_MISSED_MIN_H, RESPAWN_MISSED_MAX_H));
@@ -546,6 +543,7 @@ const Clicker: React.FC = () => {
 };
 
 export default Clicker;
+
 
 
 
