@@ -217,10 +217,10 @@ const Clicker: React.FC = () => {
     sessionId,
     onReconcile,
     enabled: seqReady && !!telegramUser,
-    flushEveryMs: 200,
-    threshold: 50,
+    flushEveryMs: 120,
+    threshold: 240,
     initialSeq: Math.max(serverSeq ?? 0, initialLocalSeq),
-    maxBatch: 50,
+    maxBatch: 480,
     lockKey: userId,
     seqStorageKey: seqStorageKey as any,
     canSend: energy > 0
