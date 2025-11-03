@@ -44,19 +44,36 @@ def _same_utc_date(a: Optional[datetime], b: datetime) -> bool:
 
 # ——— internal helpers ———
 
-async def _ensure_daily_window(user: User, now_utc: datetime) -> None:
+def _ensure_daily_window_coin(user: User, now_utc: datetime) -> None:
     """
-    Если счётчик бустеров не за сегодня — обнуляем.
+    Сбрасывает суточный счётчик монетных бустеров, если дата сменилась.
+    Требуемые поля (уже добавлены в модель User):
+      - coin_booster_success_count: int
+      - coin_booster_updated_at: datetime | None
     """
-    if not _same_utc_date(getattr(user, "booster_success_updated_at", None), now_utc):
-        user.booster_success_count = 0
-        user.booster_success_updated_at = now_utc
+    if not _same_utc_date(getattr(user, "coin_booster_updated_at", None), now_utc):
+        user.coin_booster_success_count = 0
+        user.coin_booster_updated_at = now_utc
 
 
-async def _maybe_expire_multiplier(user: User, now_utc: datetime) -> None:
+def _ensure_daily_window_mult(user: User, now_utc: datetime) -> None:
+    """
+    Сбрасывает суточный счётчик бустеров-множителей, если дата сменилась.
+    Требуемые поля:
+      - mult_booster_success_count: int
+      - mult_booster_updated_at: datetime | None
+    """
+    if not _same_utc_date(getattr(user, "mult_booster_updated_at", None), now_utc):
+        user.mult_booster_success_count = 0
+        user.mult_booster_updated_at = now_utc
+
+
+def _maybe_expire_multiplier(user: User, now_utc: datetime) -> None:
     """
     Сбрасывает временный множитель, если истёк.
-    Нормализуем время из БД к наивному UTC перед сравнением.
+    Требуемые поля:
+      - temp_click_multiplier: int
+      - temp_click_multiplier_expires_at: datetime | None
     """
     exp = _to_naive_utc(getattr(user, "temp_click_multiplier_expires_at", None))
     if exp and now_utc >= exp:
@@ -64,16 +81,16 @@ async def _maybe_expire_multiplier(user: User, now_utc: datetime) -> None:
         user.temp_click_multiplier_expires_at = None
 
 
-# ——— public API ———
+# ——— public API (раздельные лимиты по типам) ———
 
-async def can_claim_today(
+async def can_claim_today_coin(
     session: AsyncSession,
     *,
     user_id: int,
-    daily_limit: int = 3
+    daily_limit: int = 3,
 ) -> Tuple[bool, int]:
     """
-    Проверяет, можно ли сегодня ещё получить бустер.
+    Проверяет возможность получения монетного бустера за сегодня.
     Возвращает (ok, remaining).
     """
     now = _utcnow()
@@ -81,8 +98,28 @@ async def can_claim_today(
     if not user:
         return False, 0
 
-    await _ensure_daily_window(user, now)
-    remaining = max(0, daily_limit - int(user.booster_success_count or 0))
+    _ensure_daily_window_coin(user, now)
+    remaining = max(0, daily_limit - int(user.coin_booster_success_count or 0))
+    return (remaining > 0), remaining
+
+
+async def can_claim_today_mult(
+    session: AsyncSession,
+    *,
+    user_id: int,
+    daily_limit: int = 3,
+) -> Tuple[bool, int]:
+    """
+    Проверяет возможность получения бустера-множителя за сегодня.
+    Возвращает (ok, remaining).
+    """
+    now = _utcnow()
+    user = await get_user_for_update(session, user_id)
+    if not user:
+        return False, 0
+
+    _ensure_daily_window_mult(user, now)
+    remaining = max(0, daily_limit - int(user.mult_booster_success_count or 0))
     return (remaining > 0), remaining
 
 
@@ -94,32 +131,33 @@ async def claim_coin_booster(
     daily_limit: int = 3,
 ) -> Dict[str, Any]:
     """
-    Выдаёт одноразовый бустер «+amount GAP».
-    Учитывает дневной лимит успешных бустеров и авто-сброс по дате (UTC).
+    Выдаёт одноразовый бустер «+amount GAP» (🎁).
+    Учитывает дневной лимит ИМЕННО для монетных бустеров.
     """
     now = _utcnow()
     user = await get_user_for_update(session, user_id)
     if not user:
         return {"status": "user_not_found"}
 
-    # авто-сброс дневного окна и просроченного множителя
-    await _ensure_daily_window(user, now)
-    await _maybe_expire_multiplier(user, now)
+    # авто-сброс окна и проверка мультипликатора
+    _ensure_daily_window_coin(user, now)
+    _maybe_expire_multiplier(user, now)
 
-    used = int(user.booster_success_count or 0)
+    used = int(user.coin_booster_success_count or 0)
     if used >= daily_limit:
         return {"status": "daily_limit_reached", "used": used, "limit": daily_limit}
 
-    # начисляем монеты и фиксируем успешный бустер
+    # начисляем монеты и фиксируем успешный монетный бустер
     user.total_xp = int(user.total_xp or 0) + int(amount)
-    user.booster_success_count = used + 1
-    user.booster_success_updated_at = now
+    user.coin_booster_success_count = used + 1
+    user.coin_booster_updated_at = now
 
     await session.flush()
     return {
         "status": "ok",
+        "type": "coins",
         "granted": amount,
-        "booster_success_count": user.booster_success_count,
+        "used": user.coin_booster_success_count,
         "daily_limit": daily_limit,
         "total_xp": user.total_xp,
     }
@@ -134,47 +172,47 @@ async def claim_multiplier_booster(
     daily_limit: int = 3,
 ) -> Dict[str, Any]:
     """
-    Активирует временный множитель клика.
-    Если множитель уже активен, продлевает его до max(now + duration, текущее expires).
-    Все времена сравниваются в наивном UTC.
+    Активирует (или продлевает) бустер-множитель (🚀).
+    Лимит — ТОЛЬКО по бустерам-множителям. Продление активного эффекта
+    не тратит суточную попытку.
     """
     now = _utcnow()
     user = await get_user_for_update(session, user_id)
     if not user:
         return {"status": "user_not_found"}
 
-    await _ensure_daily_window(user, now)
-    await _maybe_expire_multiplier(user, now)
+    _ensure_daily_window_mult(user, now)
+    _maybe_expire_multiplier(user, now)
 
     current_exp = _to_naive_utc(getattr(user, "temp_click_multiplier_expires_at", None))
-
-    # Если активен — возможен «продлитель»
     new_expires = now + timedelta(seconds=max(1, int(duration_seconds)))
-    if current_exp and now < current_exp:
-        # Не укорачиваем действующий
-        if new_expires < current_exp:
-            new_expires = current_exp
 
-    used = int(user.booster_success_count or 0)
-    if (not current_exp or now >= current_exp) and used >= daily_limit:
-        # Применяем дневной лимит только при НОВОМ старте, а не при продлении активного
+    # если активен — не укорачиваем
+    if current_exp and now < current_exp and new_expires < current_exp:
+        new_expires = current_exp
+
+    used = int(user.mult_booster_success_count or 0)
+    starting_new = (not current_exp) or (now >= current_exp)
+
+    if starting_new and used >= daily_limit:
         return {"status": "daily_limit_reached", "used": used, "limit": daily_limit}
 
     # Включаем/продлеваем множитель
     user.temp_click_multiplier = int(multiplier)
     user.temp_click_multiplier_expires_at = new_expires
 
-    # Фиксируем успешный бустер в суточном лимите только при новом старте
-    if not current_exp or now >= current_exp:
-        user.booster_success_count = used + 1
-        user.booster_success_updated_at = now
+    # Новая активация — засчитываем попытку
+    if starting_new:
+        user.mult_booster_success_count = used + 1
+        user.mult_booster_updated_at = now
 
     await session.flush()
     return {
         "status": "ok",
+        "type": "mult",
         "multiplier": user.temp_click_multiplier,
-        "expires_at": new_expires.isoformat() + "Z",  # фронту удобно
-        "booster_success_count": user.booster_success_count,
+        "expires_at": new_expires.isoformat() + "Z",
+        "used": user.mult_booster_success_count,
         "daily_limit": daily_limit,
         "already_active": bool(current_exp and now < current_exp),
     }
@@ -183,14 +221,14 @@ async def claim_multiplier_booster(
 async def read_effective_multiplier(session: AsyncSession, *, user_id: int) -> int:
     """
     Возвращает фактический множитель (учитывая авто-сброс по истечению).
-    Полезно при обработке кликов.
     """
     now = _utcnow()
     user = await get_user_for_update(session, user_id)
     if not user:
         return 1
 
-    await _maybe_expire_multiplier(user, now)
+    _maybe_expire_multiplier(user, now)
     await session.flush()
     return int(user.temp_click_multiplier or 1)
+
 
