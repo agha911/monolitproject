@@ -1,7 +1,7 @@
 from sqlalchemy import Column, Integer, String, DateTime, JSON, ForeignKey, Boolean
 from sqlalchemy.orm import relationship
 from app.database import Base  # ✅ используем общую базу
-from datetime import datetime, Date
+from datetime import datetime, date
 from sqlalchemy import BigInteger
 
 class User(Base):
