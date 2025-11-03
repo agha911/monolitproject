@@ -43,6 +43,9 @@ class User(Base):
     booster_success_updated_at = Column(DateTime, nullable=True)
     temp_click_multiplier = Column(Integer, default=1, nullable=False)
     temp_click_multiplier_expires_at = Column(DateTime, nullable=True)
+    daily_booster_claims_coins = Column(Integer, nullable=False, default=0, server_default="0")
+    daily_booster_claims_mult = Column(Integer, nullable=False, default=0, server_default="0")
+    boosters_last_reset = Column(Date, nullable=False, default=date.today)
     
     
 
