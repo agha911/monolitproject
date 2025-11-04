@@ -15,13 +15,22 @@ type SpawnedBooster =
   | { kind: 'coins'; id: number; x: number; y: number; expiresAt: number }
   | { kind: 'mult'; id: number; x: number; y: number; expiresAt: number };
 
+const ACTIVE_CLICK_WINDOW_MS = 800; // пока идут активные клики — показываем сырое значение энергии
+
 const Clicker: React.FC = () => {
   const { t } = useTranslation();
 
   const [telegramUser, setTelegramUser] = useState<any | null>(null);
   const [totalXp, setTotalXp] = useState(0);
   const [energy, setEnergy] = useState(1000);
-  const smoothEnergy = useAnimatedInt(energy, { speedPerUnit: 8, minDuration: 120, maxDuration: 600 });
+
+  // Быстрый и короткий смуз: только когда клики утихли
+  const smoothEnergy = useAnimatedInt(energy, {
+    speedPerUnit: 30,
+    minDuration: 40,
+    maxDuration: 160,
+  });
+
   const [maxEnergy, setMaxEnergy] = useState(1000);
   const [lastEnergyUpdate, setLastEnergyUpdate] = useState<Date | null>(null);
   const [timeToFullEnergy, setTimeToFullEnergy] = useState<string | null>(null);
@@ -36,6 +45,18 @@ const Clicker: React.FC = () => {
   const [spawned, setSpawned] = useState<SpawnedBooster | null>(null);
   const spawnTimer = useRef<number | null>(null);
   const [tempMultUntil, setTempMultUntil] = useState<number | null>(null);
+
+  // активность кликов: во время активных кликов отображаем «сырую» энергию без сглаживания
+  const lastClickAtRef = useRef<number>(0);
+  const [isActivelyClicking, setIsActivelyClicking] = useState(false);
+  useEffect(() => {
+    const id = window.setInterval(() => {
+      const active = Date.now() - lastClickAtRef.current < ACTIVE_CLICK_WINDOW_MS;
+      setIsActivelyClicking(active);
+    }, 60);
+    return () => window.clearInterval(id);
+  }, []);
+  const displayEnergy = isActivelyClicking ? energy : smoothEnergy;
 
   // суточные счётчики по типам (для UI; лимиты всё равно на бэке)
   const todayStr = new Date().toDateString();
@@ -217,10 +238,10 @@ const Clicker: React.FC = () => {
     sessionId,
     onReconcile,
     enabled: seqReady && !!telegramUser,
-    flushEveryMs: 120,
-    threshold: 240,
+    flushEveryMs: 100,   // чаще, чтобы энергия на сервере быстрее синхронизировалась
+    threshold: 300,
     initialSeq: Math.max(serverSeq ?? 0, initialLocalSeq),
-    maxBatch: 480,
+    maxBatch: 500,       // под твой серверный лимит 500
     lockKey: userId,
     seqStorageKey: seqStorageKey as any,
     canSend: energy > 0
@@ -311,10 +332,14 @@ const Clicker: React.FC = () => {
   const handleMultiClick = (x: number, y: number) => {
     if (!telegramUser || loading || energy <= 0) return;
 
+    // отметить активность кликов
+    lastClickAtRef.current = Date.now();
+
     // показываем бустер, если ещё не появлялся в этом сеансе (по одному каждого вида)
     trySpawnBoosterForSession();
 
-    const spend = Math.min(clickBoost * (tempMultUntil && Date.now() < tempMultUntil ? 10 : 1), energy);
+    const mult = tempMultUntil && Date.now() < tempMultUntil ? 10 : 1;
+    const spend = Math.min(clickBoost * mult, energy);
     if (spend <= 0) return;
 
     setTotalXp((prev) => prev + spend);
@@ -346,7 +371,7 @@ const Clicker: React.FC = () => {
     return () => window.clearInterval(id);
   }, [tempMultUntil]);
 
-  const energyInt = Math.floor(smoothEnergy);
+  const energyInt = Math.floor(displayEnergy);
 
   return (
     <div className="w-full min-h-screen bg-[#131f2f] text-center flex flex-col items-center justify-start pt-8 px-4 text-[#00f0ff]">
@@ -374,7 +399,7 @@ const Clicker: React.FC = () => {
         )}
       </div>
 
-      {/* 🆕 бейджи прогресса бустеров за сегодня */}
+      {/* бейджи прогресса бустеров за сегодня */}
       <div className="mb-3 flex items-center gap-2 text-xs">
         <span
           className={`px-2 py-1 rounded-full border ${
@@ -405,7 +430,7 @@ const Clicker: React.FC = () => {
         <div className="w-full h-4 bg-[#0d273d] rounded overflow-hidden shadow-inner">
           <div
             className="h-full bg-gradient-to-r from-[#7af9ff] to-[#00f0ff]"
-            style={{ width: `${Math.min((smoothEnergy / maxEnergy) * 100, 100)}%`, transition: "none" }}
+            style={{ width: `${Math.min((displayEnergy / maxEnergy) * 100, 100)}%`, transition: isActivelyClicking ? 'none' : 'width 120ms linear' }}
           />
         </div>
         {energy < maxEnergy && timeToFullEnergy && (
