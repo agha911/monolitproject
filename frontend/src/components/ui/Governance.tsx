@@ -1,161 +1,373 @@
-// src/components/Governance.tsx
-import React from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
+import WebApp from '@twa-dev/sdk';
+import { useTranslation } from 'react-i18next';
+import API_BASE_URL from '../config';
 
-const Governance: React.FC = () => {
+type DaoOptionArt = {
+  id: number;
+  label: string | null;
+  art_work_id: number | null;
+  art_title: string | null;
+  art_image_url: string | null;
+  art_author_telegram_id: number | null;
+};
+
+type DaoProposal = {
+  id: number;
+  title: string;
+  description: string;
+  starts_at: string;
+  ends_at: string;
+  options: DaoOptionArt[];
+};
+
+type VoteItem = {
+  option_id: number;
+  weight: number;
+};
+
+type VoteResponse = {
+  status: string;
+  used_weight: number;
+  balance: number;
+};
+
+const DaoPage: React.FC = () => {
+  const { t } = useTranslation();
+
+  const [telegramUser, setTelegramUser] = useState<any | null>(null);
+
+  const [proposals, setProposals] = useState<DaoProposal[]>([]);
+  const [loadingProposals, setLoadingProposals] = useState(true);
+
+  const [balance, setBalance] = useState<number>(0);          // текущий баланс $GAP пользователя
+  const [loadingBalance, setLoadingBalance] = useState(true);
+
+  const [votes, setVotes] = useState<Record<number, number>>({}); // option_id -> weight (локальное распределение)
+  const [submitting, setSubmitting] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  // инициализация Telegram WebApp
+  useEffect(() => {
+    WebApp.ready();
+    const user = WebApp.initDataUnsafe?.user;
+    if (user) {
+      setTelegramUser(user);
+    }
+  }, []);
+
+  const initData = WebApp.initData;
+
+  // загрузка баланса пользователя
+  useEffect(() => {
+    if (!initData) return;
+
+    (async () => {
+      try {
+        setLoadingBalance(true);
+        const res = await fetch(`${API_BASE_URL}/api/game/progress`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ init_data: initData }),
+        });
+        const data = await res.json();
+        setBalance(Number(data.total_xp ?? 0));
+      } catch (e) {
+        console.error('Ошибка загрузки баланса для DAO:', e);
+      } finally {
+        setLoadingBalance(false);
+      }
+    })();
+  }, [initData]);
+
+  // загрузка активных предложений
+  useEffect(() => {
+    (async () => {
+      try {
+        setLoadingProposals(true);
+        const res = await fetch(`${API_BASE_URL}/api/dao/proposals/active`);
+        if (!res.ok) {
+          throw new Error(`HTTP ${res.status}`);
+        }
+        const data: DaoProposal[] = await res.json();
+        setProposals(data || []);
+      } catch (e) {
+        console.error('Ошибка загрузки DAO-предложений:', e);
+      } finally {
+        setLoadingProposals(false);
+      }
+    })();
+  }, []);
+
+  // для простоты — считаем, что голосуем по первому активному предложению
+  const selectedProposal = useMemo(
+    () => (proposals.length > 0 ? proposals[0] : null),
+    [proposals]
+  );
+
+  // текущая суммарная локальная "ставка" голосов
+  const usedLocally = useMemo(() => {
+    return Object.values(votes).reduce((sum, w) => sum + w, 0);
+  }, [votes]);
+
+  const remaining = Math.max(0, balance - usedLocally);
+
+  const adjustVote = (optionId: number, delta: number) => {
+    if (!selectedProposal) return;
+    setError(null);
+    setMessage(null);
+
+    setVotes((prev) => {
+      const current = prev[optionId] || 0;
+      let next = current + delta;
+      if (next < 0) next = 0;
+
+      // лимит по балансу на фронте
+      const newTotal = usedLocally - current + next;
+      if (newTotal > balance) {
+        // не даём выходить за баланс
+        return prev;
+      }
+
+      return { ...prev, [optionId]: next };
+    });
+  };
+
+  const handleSubmit = async () => {
+    if (!selectedProposal) return;
+    if (!initData) {
+      setError('init_data_missing');
+      return;
+    }
+
+    const items: VoteItem[] = Object.entries(votes)
+      .filter(([, w]) => w > 0)
+      .map(([id, w]) => ({ option_id: Number(id), weight: w }));
+
+    if (items.length === 0) {
+      setError(t('dao.no_votes_selected', { defaultValue: 'Вы не распределили голоса' }));
+      return;
+    }
+
+    setSubmitting(true);
+    setError(null);
+    setMessage(null);
+
+    try {
+      const res = await fetch(
+        `${API_BASE_URL}/api/dao/proposals/${selectedProposal.id}/vote`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ init_data: initData, votes: items }),
+        }
+      );
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        const detail = (data && data.detail) || `HTTP ${res.status}`;
+        setError(
+          t('dao.vote_error', {
+            defaultValue: 'Ошибка при отправке голоса: {{detail}}',
+            detail: String(detail),
+          })
+        );
+        return;
+      }
+
+      const data: VoteResponse = await res.json();
+      if (data.status === 'ok') {
+        setMessage(
+          t('dao.vote_success', {
+            defaultValue: 'Голоса учтены. Использовано {{used}} из {{balance}} $GAP.',
+            used: data.used_weight,
+            balance: data.balance,
+          })
+        );
+        // после успешного голосования можем обновить баланс локально
+        setBalance(data.balance);
+        // и сбросить локальное распределение
+        setVotes({});
+      } else {
+        setError(
+          t('dao.vote_error_status', {
+            defaultValue: 'Ошибка: {{status}}',
+            status: data.status,
+          })
+        );
+      }
+    } catch (e: any) {
+      console.error('DAO vote error:', e);
+      setError(
+        t('dao.vote_error', {
+          defaultValue: 'Ошибка при отправке голоса: {{detail}}',
+          detail: e?.message || 'unknown',
+        })
+      );
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
   return (
-    <div className="relative w-full min-h-screen bg-[#0d1624] text-[#c9f6ff] px-4 pt-8 pb-28 flex flex-col items-center overflow-hidden">
-      {/* ==== Animated Background Layers ==== */}
-      {/* radial blobs */}
-      <div className="pointer-events-none absolute inset-0 -z-10 overflow-hidden">
-        <div className="absolute -top-20 -left-24 w-80 h-80 rounded-full opacity-[0.18] blur-3xl bg-[conic-gradient(at_top_right,_#00f0ff_0%,_#7af9ff_25%,_transparent_60%)] animate-blob-slow" />
-        <div className="absolute -bottom-24 -right-24 w-96 h-96 rounded-full opacity-[0.14] blur-3xl bg-[conic-gradient(at_bottom_left,_#00f0ff_0%,_#7af9ff_30%,_transparent_70%)] animate-blob-slower" />
-        <div className="absolute top-1/3 left-1/2 -translate-x-1/2 w-[36rem] h-[36rem] rounded-full opacity-[0.08] blur-[90px] bg-[radial-gradient(circle,_#00f0ff33,_transparent_60%)] animate-blob-very-slow" />
-      </div>
+    <div className="min-h-screen bg-[#131f2f] text-[#00f0ff] px-4 py-6 flex flex-col items-center">
+      <h1 className="text-2xl font-bold mb-2 text-center drop-shadow-md">
+        {t('dao.title', { defaultValue: 'DAO səsvermə' })}
+      </h1>
 
-      {/* animated grid */}
-      <div className="pointer-events-none absolute inset-0 -z-10 opacity-[0.12]">
-        <div className="absolute inset-0 bg-[linear-gradient(#1a2a40_1px,transparent_1px),linear-gradient(90deg,#1a2a40_1px,transparent_1px)] bg-[size:40px_40px] animate-grid-shift" />
-      </div>
+      <p className="text-sm text-[#7ee9ff] mb-4 text-center max-w-md">
+        {t('dao.subtitle', {
+          defaultValue:
+            'Gappick DAO: Səsin çəkisi — sənin $GAP balansındır. Hər 1 $GAP = 1 səs vahidi.',
+        })}
+      </p>
 
-      {/* fireflies */}
-      <div className="pointer-events-none absolute inset-0 -z-10">
-        {[...Array(10)].map((_, i) => (
-          <span
-            key={i}
-            className="absolute w-1.5 h-1.5 rounded-full bg-[#7af9ff] opacity-70 animate-firefly"
-            style={{
-              top: `${Math.random() * 100}%`,
-              left: `${Math.random() * 100}%`,
-              animationDelay: `${Math.random() * 6}s`,
-              animationDuration: `${6 + Math.random() * 6}s`,
-              filter: 'drop-shadow(0 0 6px #00f0ff)',
-            }}
-          />
-        ))}
-      </div>
-
-      {/* Header */}
-      <div className="w-full max-w-xl text-center">
-        <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-[#0e2238cc] border border-[#1f3b57] text-xs tracking-wide backdrop-blur-[2px]">
-          <span className="w-2 h-2 rounded-full bg-[#00f0ff] animate-pulse" />
-          Coming soon
+      <div className="w-full max-w-md bg-[#0e1a2b] border border-[#00f0ff40] rounded-xl p-3 mb-4">
+        <div className="text-xs text-[#7ee9ff] mb-1">
+          {t('dao.balance_label', { defaultValue: 'Sənin balansın' })}
         </div>
-        <h1 className="mt-3 text-2xl font-bold text-[#7af9ff] drop-shadow-[0_0_8px_#00f0ff40]">
-          DAO — birlikdə qərar vermək
-        </h1>
-        <p className="mt-2 text-sm text-[#9feaff]">
-          DAO, fərdi yox, kollektiv qərarların üstünlüyünü ifadə edən bir yanaşmadır.
-          Burada qaydalar şəffaf, nəticələr isə hamıya açıq olur.
-        </p>
-      </div>
-
-      {/* Core cards */}
-      <div className="mt-6 grid grid-cols-1 sm:grid-cols-2 gap-3 w-full max-w-xl">
-        <div className="p-4 rounded-2xl bg-[#0e2238]/90 border border-[#1f3b57] shadow-[0_0_16px_#00f0ff10] backdrop-blur-[2px]">
-          <div className="text-[#7af9ff] font-semibold">Kollektiv güc</div>
-          <p className="mt-1 text-sm text-[#c9f6ffcc]">
-            Fərqlilikdən - birliyə. icmanın qərarları əsasdır. Hər kəsin səsi ümumi istiqaməti formalaşdırır.
-          </p>
-        </div>
-        <div className="p-4 rounded-2xl bg-[#0e2238]/90 border border-[#1f3b57] shadow-[0_0_16px_#00f0ff10] backdrop-blur-[2px]">
-          <div className="text-[#7af9ff] font-semibold">Şəffaflıq</div>
-          <p className="mt-1 text-sm text-[#c9f6ffcc]">
-            Qaydalar açıq şəkildə elan olunur və hər kəs nəticələri görə bilir.
-          </p>
-        </div>
-        <div className="p-4 rounded-2xl bg-[#0e2238]/90 border border-[#1f3b57] shadow-[0_0_16px_#00f0ff10] backdrop-blur-[2px] sm:col-span-2">
-          <div className="text-[#7af9ff] font-semibold">Yeni müsabiqə — tezliklə</div>
-          <p className="mt-1 text-sm text-[#c9f6ffcc]">
-            Qısa müddətdə start götürəcək xüsusi bir müsabiqə hazırlanır.
-            Təfərrüatlar açıqlanmayıb, amma izləməyə dəyər.
-          </p>
-          <div className="mt-3 flex items-center gap-2">
-            <span className="text-xs px-2 py-1 rounded-lg bg-[#10263d] border border-[#1f3b57]">#teaser</span>
-            <span className="text-xs px-2 py-1 rounded-lg bg-[#10263d] border border-[#1f3b57]">#community</span>
+        <div className="flex items-baseline justify-between">
+          <div className="text-lg font-semibold">
+            {loadingBalance ? '…' : `${balance.toLocaleString()} $GAP`}
+          </div>
+          <div className="text-xs text-[#a0f6ff]">
+            {t('dao.remaining', {
+              defaultValue: 'Bu səsvermə üçün qalan: {{value}}',
+              value: remaining.toLocaleString(),
+            })}{' '}
+            $GAP
           </div>
         </div>
       </div>
 
-      {/* Coming soon actions */}
-      <div className="mt-6 w-full max-w-xl">
-        <div className="p-4 rounded-2xl bg-[#0e2238]/90 border border-[#1f3b57] backdrop-blur-[2px]">
-          <div className="text-sm text-[#9feaff]">
-            İlk səsvermə: <span className="text-[#c9f6ff]">hazırlıq mərhələsi</span>
-          </div>
-          <div className="mt-3 flex gap-2">
-            <button
-              disabled
-              className="flex-1 px-4 py-2 rounded-xl bg-[#0d273d] border border-[#1f3b57] text-[#7aa1b7] opacity-60 cursor-not-allowed"
-              title="Səsvermə tezliklə aktivləşəcək"
-            >
-              🗳️ Səs ver (tezliklə)
-            </button>
-          </div>
+      {loadingProposals && (
+        <div className="text-sm text-[#7ee9ff] mt-4">
+          {t('dao.loading', { defaultValue: 'Səsvermə yüklənir…' })}
         </div>
-      </div>
+      )}
 
-      {/* FAQ-lite */}
-      <div className="mt-6 w-full max-w-xl space-y-2">
-        <details className="group rounded-2xl bg-[#0e2238]/90 border border-[#1f3b57] p-4 backdrop-blur-[2px]">
-          <summary className="cursor-pointer select-none list-none flex items-center justify-between">
-            <span className="text-[#7af9ff] font-medium">DAO nədir?</span>
-            <span className="text-[#9feaff] group-open:rotate-180 transition">▾</span>
-          </summary>
-          <p className="mt-2 text-sm text-[#c9f6ffcc]">
-            DAO — qaydaları kodlaşdırılmış və hamı tərəfindən qəbul olunan bir idarəetmə formasıdır.
-            Qərarlar şəffaf şəkildə qəbul olunur.
-          </p>
-        </details>
+      {!loadingProposals && !selectedProposal && (
+        <div className="text-sm text-[#7ee9ff] mt-4 text-center">
+          {t('dao.no_active', {
+            defaultValue: 'Hazırda aktiv səsvermə yoxdur.',
+          })}
+        </div>
+      )}
 
-        <details className="group rounded-2xl bg-[#0e2238]/90 border border-[#1f3b57] p-4 backdrop-blur-[2px]">
-          <summary className="cursor-pointer select-none list-none flex items-center justify-between">
-            <span className="text-[#7af9ff] font-medium">Səsvermə necə keçiriləcək?</span>
-            <span className="text-[#9feaff] group-open:rotate-180 transition">▾</span>
-          </summary>
-          <p className="mt-2 text-sm text-[#c9f6ffcc]">
-            İştirak qaydaları ayrıca elan ediləcək. Hər bir üzv öz payı qədər təsir gücünə sahib olacaq.
-          </p>
-        </details>
-      </div>
+      {!loadingProposals && selectedProposal && (
+        <div className="w-full max-w-md bg-[#0e1a2b] border border-[#00f0ff40] rounded-2xl p-4 mt-2">
+          <div className="mb-2">
+            <h2 className="text-lg font-semibold text-[#7ee9ff]">
+              {selectedProposal.title}
+            </h2>
+            {selectedProposal.description && (
+              <p className="text-xs text-[#a0f6ff] mt-1 whitespace-pre-line">
+                {selectedProposal.description}
+              </p>
+            )}
+          </div>
 
-      {/* Inline keyframes for animations */}
-      <style>{`
-        @keyframes blob-slow {
-          0% { transform: translate(0,0) scale(1); }
-          50% { transform: translate(20px, -10px) scale(1.05); }
-          100% { transform: translate(0,0) scale(1); }
-        }
-        @keyframes blob-slower {
-          0% { transform: translate(0,0) scale(1); }
-          50% { transform: translate(-25px, 15px) scale(1.08); }
-          100% { transform: translate(0,0) scale(1); }
-        }
-        @keyframes blob-very-slow {
-          0% { transform: translate(-10px, 10px) scale(1); }
-          50% { transform: translate(15px, -15px) scale(1.04); }
-          100% { transform: translate(-10px, 10px) scale(1); }
-        }
-        .animate-blob-slow { animation: blob-slow 18s ease-in-out infinite; }
-        .animate-blob-slower { animation: blob-slower 26s ease-in-out infinite; }
-        .animate-blob-very-slow { animation: blob-very-slow 36s ease-in-out infinite; }
+          <div className="mt-3 space-y-3">
+            {selectedProposal.options.map((opt) => {
+              const current = votes[opt.id] || 0;
+              return (
+                <div
+                  key={opt.id}
+                  className="bg-[#111f33] border border-[#1f3b57] rounded-xl p-3 flex gap-3"
+                >
+                  <div className="w-16 h-16 rounded-lg overflow-hidden flex-shrink-0 bg-[#0d273d] flex items-center justify-center">
+                    {opt.art_image_url ? (
+                      <img
+                        src={opt.art_image_url}
+                        alt={opt.art_title ?? opt.label ?? ''}
+                        className="w-full h-full object-cover"
+                      />
+                    ) : (
+                      <span className="text-xs text-[#7ee9ff] px-1 text-center">
+                        {t('dao.no_image', { defaultValue: 'İllüstrasiya yoxdur' })}
+                      </span>
+                    )}
+                  </div>
 
-        @keyframes grid-shift {
-          0% { background-position: 0 0, 0 0; }
-          100% { background-position: 40px 40px, 40px 40px; }
-        }
-        .animate-grid-shift { animation: grid-shift 20s linear infinite; }
+                  <div className="flex-1 flex flex-col justify-between">
+                    <div>
+                      <div className="text-sm font-semibold text-white">
+                        {opt.art_title || opt.label || t('dao.option_no_title', { defaultValue: 'Variant' })}
+                      </div>
+                      {opt.art_author_telegram_id && (
+                        <div className="text-[11px] text-[#7ee9ff] mt-0.5">
+                          {t('dao.author_label', { defaultValue: 'Müəllif (TG ID):' })}{' '}
+                          {opt.art_author_telegram_id}
+                        </div>
+                      )}
+                    </div>
+                    <div className="mt-2 flex items-center justify-between">
+                      <div className="text-xs text-[#a0f6ff]">
+                        {t('dao.votes_for_option', {
+                          defaultValue: 'Bu işə ayırdığın səs:',
+                        })}{' '}
+                        <span className="font-semibold text-[#00f0ff]">
+                          {current}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <button
+                          className="w-7 h-7 rounded-full bg-[#0d273d] border border-[#1f3b57] text-[#7ee9ff] text-sm flex items-center justify-center active:scale-95"
+                          onClick={() => adjustVote(opt.id, -1)}
+                          disabled={current <= 0 || submitting}
+                        >
+                          −
+                        </button>
+                        <button
+                          className="w-7 h-7 rounded-full bg-[#00f0ff] text-[#0e1a2b] text-sm font-bold flex items-center justify-center active:scale-95 disabled:opacity-40"
+                          onClick={() => adjustVote(opt.id, +1)}
+                          disabled={remaining <= 0 || submitting}
+                        >
+                          +
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
 
-        @keyframes firefly {
-          0%   { transform: translate(0,0); opacity: .7; }
-          25%  { transform: translate(10px,-6px); opacity: .9; }
-          50%  { transform: translate(-6px,8px); opacity: .65; }
-          75%  { transform: translate(8px,4px); opacity: .85; }
-          100% { transform: translate(0,0); opacity: .7; }
-        }
-        .animate-firefly { animation: firefly 8s ease-in-out infinite; }
-      `}</style>
+          <button
+            className="mt-4 w-full py-2.5 rounded-xl bg-[#00f0ff] text-[#0e1a2b] font-semibold text-sm shadow-[0_0_12px_#00f0ff55] active:scale-95 disabled:opacity-40"
+            onClick={handleSubmit}
+            disabled={submitting || usedLocally <= 0}
+          >
+            {submitting
+              ? t('dao.submitting', { defaultValue: 'Səs göndərilir…' })
+              : t('dao.submit', { defaultValue: 'Səs vermək' })}
+          </button>
+
+          {usedLocally > 0 && (
+            <div className="mt-2 text-[11px] text-[#a0f6ff] text-center">
+              {t('dao.local_used', {
+                defaultValue: 'Bu sessiyada ayırdığın cəmi: {{value}} $GAP',
+                value: usedLocally,
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
+      {error && (
+        <div className="mt-4 text-xs text-center text-red-300 max-w-md">
+          {error}
+        </div>
+      )}
+      {message && (
+        <div className="mt-4 text-xs text-center text-[#a0f6ff] max-w-md">
+          {message}
+        </div>
+      )}
     </div>
   );
 };
 
-export default Governance;
+export default DaoPage;
+
