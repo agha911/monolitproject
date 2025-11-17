@@ -30,7 +30,7 @@ from app.referral_utils.referral import credit_referral_share
 from app.routers import referral as referral_router
 from app.routers import store_drops, user_card, partner_drops
 from app.routers import boosters
-
+from app.routers import dao as dao_router
 
 # ---------------- logging setup ----------------
 
@@ -506,7 +506,7 @@ app.include_router(store_drops.router)
 app.include_router(user_card.router)
 app.include_router(partner_drops.router)
 app.include_router(boosters.router)
-
+app.include_router(dao_router.router)
 
 # ---------------- background ----------------
 
