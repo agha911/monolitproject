@@ -47,29 +47,35 @@ async def boosters_claim_coins(
     await session.commit()
 
     status = res.get("status")
+
     if status == "ok":
-        used_today = int(res.get("booster_success_count", 0))
+        # 👇 здесь было "booster_success_count" — такого ключа нет
+        used_today = int(res.get("used", 0))
         remaining = max(0, COIN_DAILY_LIMIT - used_today)
         return {
             "status": "ok",
+            "type": "coins",
             "granted": res.get("granted", COIN_BOOST_AMOUNT),
             "total_xp": res.get("total_xp"),
             "used_today": used_today,
             "remaining_today": remaining,
             "daily_limit": COIN_DAILY_LIMIT,
-            "type": "coins",
         }
+
     if status == "daily_limit_reached":
         return {
             "status": "daily_limit_reached",
+            "type": "coins",
             "used_today": int(res.get("used", COIN_DAILY_LIMIT)),
             "remaining_today": 0,
             "daily_limit": COIN_DAILY_LIMIT,
-            "type": "coins",
         }
+
     if status == "user_not_found":
         raise HTTPException(status_code=404, detail="user_not_found")
+
     raise HTTPException(status_code=400, detail=status)
+
 
 
 @router.post("/claim/multiplier")
