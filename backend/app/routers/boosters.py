@@ -1,24 +1,29 @@
-# app/routers/boosters.py
 from fastapi import APIRouter, Depends, HTTPException, Body
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_async_session
-from app.utils import parse_telegram_user_id
 from app.crud import user as crud_user
 from app.crud.boosters import (
     claim_coin_booster,
     claim_multiplier_booster,
 )
+from app.utils import parse_telegram_user_id
 
-router = APIRouter(prefix="/api/boosters", tags=["boosters"])
+router = APIRouter(
+    prefix="/api/boosters",
+    tags=["boosters"],
+)
 
-# Можно вынести в конфиг
-COIN_DAILY_LIMIT = 3          # лимит СЕГОДНЯ на бустеры монет
-MULT_DAILY_LIMIT = 3          # лимит СЕГОДНЯ на бустеры множителя
-COIN_BOOST_AMOUNT = 50_000
-MULTIPLIER_VALUE = 10
-MULTIPLIER_DURATION_SEC = 15
+# Константы бустеров — должны совпадать с фронтом
+COIN_BOOST_AMOUNT = 50_000      # 🎁 +50k GAP
+COIN_DAILY_LIMIT = 3            # до 3 подарочных бустеров в сутки
 
+MULT_FACTOR = 10                # 🚀 множитель x10
+MULT_DURATION_SECONDS = 15      # до 15 секунд
+MULT_DAILY_LIMIT = 3            # до 3 мульти-бустеров в сутки
+
+
+# ───────────────── БУСТЕР МОНЕТ (🎁) ─────────────────
 
 @router.post("/claim/coins")
 async def boosters_claim_coins(
@@ -27,7 +32,7 @@ async def boosters_claim_coins(
 ):
     """
     Активировать бустер «+50 000 GAP».
-    Считает собственный дневной лимит (COIN_DAILY_LIMIT).
+    Считает СВОЙ дневной лимит (COIN_DAILY_LIMIT), независимый от бустера множителя.
     """
     init_data = payload.get("init_data")
     if not init_data:
@@ -49,24 +54,25 @@ async def boosters_claim_coins(
     status = res.get("status")
 
     if status == "ok":
-        # 👇 здесь было "booster_success_count" — такого ключа нет
+        # ⚠️ важно: используем те ключи, которые реально возвращает crud-функция
         used_today = int(res.get("used", 0))
         remaining = max(0, COIN_DAILY_LIMIT - used_today)
         return {
             "status": "ok",
             "type": "coins",
-            "granted": res.get("granted", COIN_BOOST_AMOUNT),
-            "total_xp": res.get("total_xp"),
+            "granted": int(res.get("granted", COIN_BOOST_AMOUNT)),
+            "total_xp": int(res.get("total_xp", 0)),
             "used_today": used_today,
             "remaining_today": remaining,
             "daily_limit": COIN_DAILY_LIMIT,
         }
 
     if status == "daily_limit_reached":
+        used_today = int(res.get("used", COIN_DAILY_LIMIT))
         return {
             "status": "daily_limit_reached",
             "type": "coins",
-            "used_today": int(res.get("used", COIN_DAILY_LIMIT)),
+            "used_today": used_today,
             "remaining_today": 0,
             "daily_limit": COIN_DAILY_LIMIT,
         }
@@ -74,9 +80,11 @@ async def boosters_claim_coins(
     if status == "user_not_found":
         raise HTTPException(status_code=404, detail="user_not_found")
 
-    raise HTTPException(status_code=400, detail=status)
+    # на всякий случай
+    raise HTTPException(status_code=400, detail=str(status))
 
 
+# ───────────────── БУСТЕР МНОЖИТЕЛЯ (🚀) ─────────────────
 
 @router.post("/claim/multiplier")
 async def boosters_claim_multiplier(
@@ -84,9 +92,8 @@ async def boosters_claim_multiplier(
     session: AsyncSession = Depends(get_async_session),
 ):
     """
-    Активировать временный множитель клика (по умолчанию x10 на 15 секунд).
-    Считает собственный дневной лимит (MULT_DAILY_LIMIT).
-    Если активен — продлеваем до max(now+duration, текущее expires_at).
+    Активировать бустер «x10 на 15 секунд».
+    Считает СВОЙ дневной лимит (MULT_DAILY_LIMIT), независимый от монетного бустера.
     """
     init_data = payload.get("init_data")
     if not init_data:
@@ -100,33 +107,41 @@ async def boosters_claim_multiplier(
     res = await claim_multiplier_booster(
         session=session,
         user_id=user.id,
-        multiplier=MULTIPLIER_VALUE,
-        duration_seconds=MULTIPLIER_DURATION_SEC,
+        factor=MULT_FACTOR,
+        duration_seconds=MULT_DURATION_SECONDS,
         daily_limit=MULT_DAILY_LIMIT,
     )
     await session.commit()
 
     status = res.get("status")
+
     if status == "ok":
-        used_today = int(res.get("booster_success_count", 0))
+        # crud-функция должна вернуть expires_at (datetime) в ISO или мы сами конвертим
+        expires_at = res.get("expires_at")  # ожидаем ISO-строку
+        used_today = int(res.get("used", 0))
         remaining = max(0, MULT_DAILY_LIMIT - used_today)
         return {
             "status": "ok",
-            "multiplier": res.get("multiplier", MULTIPLIER_VALUE),
-            "expires_at": res.get("expires_at"),
+            "type": "multiplier",
+            "factor": int(res.get("factor", MULT_FACTOR)),
+            "expires_at": expires_at,  # фронт берёт это поле
             "used_today": used_today,
             "remaining_today": remaining,
             "daily_limit": MULT_DAILY_LIMIT,
-            "type": "multiplier",
         }
+
     if status == "daily_limit_reached":
+        used_today = int(res.get("used", MULT_DAILY_LIMIT))
         return {
             "status": "daily_limit_reached",
-            "used_today": int(res.get("used", MULT_DAILY_LIMIT)),
+            "type": "multiplier",
+            "used_today": used_today,
             "remaining_today": 0,
             "daily_limit": MULT_DAILY_LIMIT,
-            "type": "multiplier",
         }
+
     if status == "user_not_found":
         raise HTTPException(status_code=404, detail="user_not_found")
-    raise HTTPException(status_code=400, detail=status)
+
+    raise HTTPException(status_code=400, detail=str(status))
+
