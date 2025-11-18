@@ -7,30 +7,13 @@ import { useClickBuffer, FlushResponse } from '../hooks/useClickBuffer';
 import { useAnimatedInt } from '../hooks/useAnimatedInt';
 import UserCard from './UserCard';
 
-type ChallengeDay = {
-  day_index: number;
-  tiktok_url: string;
-  question: string;
-  option_a: string;
-  option_b: string;
-  option_c: string;
-  option_d: string;
-  reward_watch: number;
-  reward_answer: number;
-  is_active: boolean;
-};
-
-// 🔒 Kill switch: отключаем челлендж
-const CHALLENGE_HARD_DISABLED = true;
-
 // ---- boosters settings ----
-const DAILY_CLAIM_LIMIT_COINS = 3;
-const DAILY_CLAIM_LIMIT_MULT = 3;
-const SPAWN_SHOW_MS = 4500; // сколько висит бустер
+const DAILY_CLAIM_LIMIT_PER_TYPE = 3; // по 3 на каждый тип (🎁 и 🚀)
+const SPAWN_SHOW_MS = 4500;           // сколько висит бустер после появления
 
 type SpawnedBooster =
-  | { kind: 'coins'; id: number; x: number; y: number }
-  | { kind: 'mult'; id: number; x: number; y: number };
+  | { kind: 'coins'; id: number; x: number; y: number; expiresAt: number }
+  | { kind: 'mult'; id: number; x: number; y: number; expiresAt: number };
 
 const Clicker: React.FC = () => {
   const { t } = useTranslation();
@@ -38,11 +21,7 @@ const Clicker: React.FC = () => {
   const [telegramUser, setTelegramUser] = useState<any | null>(null);
   const [totalXp, setTotalXp] = useState(0);
   const [energy, setEnergy] = useState(1000);
-  const smoothEnergy = useAnimatedInt(energy, {
-    speedPerUnit: 8,
-    minDuration: 120,
-    maxDuration: 600,
-  });
+  const smoothEnergy = useAnimatedInt(energy, { speedPerUnit: 8, minDuration: 120, maxDuration: 600 });
   const [maxEnergy, setMaxEnergy] = useState(1000);
   const [lastEnergyUpdate, setLastEnergyUpdate] = useState<Date | null>(null);
   const [timeToFullEnergy, setTimeToFullEnergy] = useState<string | null>(null);
@@ -53,21 +32,42 @@ const Clicker: React.FC = () => {
   const [seqReady, setSeqReady] = useState(false);
   const [showUserCard, setShowUserCard] = useState(false);
 
-  // челлендж (отключен kill switch'ом)
-  const [challengeLoading] = useState(false);
-
-  // ---- boosters UI / logic ----
-  const [spawnedCoins, setSpawnedCoins] = useState<SpawnedBooster | null>(null);
-  const [spawnedMult, setSpawnedMult] = useState<SpawnedBooster | null>(null);
-  const coinsTimerRef = useRef<number | null>(null);
-  const multTimerRef = useRef<number | null>(null);
-
-  // сколько раз пользователь уже ВЗЯЛ бустер за сессию (для отображения бейджа)
-  const [coinsClaimsUsed, setCoinsClaimsUsed] = useState(0);
-  const [multClaimsUsed, setMultClaimsUsed] = useState(0);
-
-  // временный множитель x10: храним момент окончания действия
+  // бустеры
+  const [spawned, setSpawned] = useState<SpawnedBooster | null>(null);
+  const spawnTimer = useRef<number | null>(null);
   const [tempMultUntil, setTempMultUntil] = useState<number | null>(null);
+
+  // суточные счётчики по типам (для UI; лимиты всё равно на бэке)
+  const todayStr = new Date().toDateString();
+  const coinsKey = `gappick:boosters:coinsClaimsUsed:${todayStr}`;
+  const multKey  = `gappick:boosters:multClaimsUsed:${todayStr}`;
+
+  const [coinsClaimsUsed, setCoinsClaimsUsed] = useState<number>(() => {
+    const raw = localStorage.getItem(coinsKey);
+    return raw ? Number(raw) || 0 : 0;
+  });
+  const [multClaimsUsed, setMultClaimsUsed] = useState<number>(() => {
+    const raw = localStorage.getItem(multKey);
+    return raw ? Number(raw) || 0 : 0;
+  });
+
+  // флаги «в этом сеансе уже показывали»
+  const [sessionCoinsSpawned, setSessionCoinsSpawned] = useState(false);
+  const [sessionMultSpawned, setSessionMultSpawned] = useState(false);
+
+  // авто-обновление суточных счётчиков при смене даты (раз в минуту)
+  useEffect(() => {
+    const id = window.setInterval(() => {
+      const nowStr = new Date().toDateString();
+      const cKey = `gappick:boosters:coinsClaimsUsed:${nowStr}`;
+      const mKey = `gappick:boosters:multClaimsUsed:${nowStr}`;
+      const cRaw = localStorage.getItem(cKey);
+      const mRaw = localStorage.getItem(mKey);
+      setCoinsClaimsUsed(cRaw ? Number(cRaw) || 0 : 0);
+      setMultClaimsUsed(mRaw ? Number(mRaw) || 0 : 0);
+    }, 60_000);
+    return () => clearInterval(id);
+  }, []);
 
   useEffect(() => {
     WebApp.ready();
@@ -79,7 +79,6 @@ const Clicker: React.FC = () => {
   const userId = telegramUser?.id ? String(telegramUser.id) : 'guest';
   const sessionId = useMemo(() => `${userId}-${Date.now()}`, [userId]);
   const seqStorageKey = useMemo(() => `gappick:lastSeq:${userId}`, [userId]);
-
   const initialLocalSeq = useMemo(() => {
     try {
       const saved = localStorage.getItem(seqStorageKey);
@@ -89,7 +88,6 @@ const Clicker: React.FC = () => {
     }
   }, [seqStorageKey]);
 
-  // инициализация пользователя + прогресс
   useEffect(() => {
     if (!telegramUser) return;
 
@@ -116,9 +114,7 @@ const Clicker: React.FC = () => {
 
         const s = Number(data.last_client_seq ?? 0);
         setServerSeq(s);
-        try {
-          localStorage.setItem(seqStorageKey, String(s));
-        } catch {}
+        try { localStorage.setItem(seqStorageKey, String(s)); } catch {}
 
         setSeqReady(true);
         setLoading(false);
@@ -129,7 +125,6 @@ const Clicker: React.FC = () => {
     })();
   }, [telegramUser, seqStorageKey]);
 
-  // периодическое обновление энергии и прогресса
   useEffect(() => {
     const interval = setInterval(async () => {
       if (!telegramUser || energy >= maxEnergy) return;
@@ -149,9 +144,7 @@ const Clicker: React.FC = () => {
         const s = Number(data.last_client_seq ?? 0);
         if (serverSeq === null || s > serverSeq) {
           setServerSeq(s);
-          try {
-            localStorage.setItem(seqStorageKey, String(s));
-          } catch {}
+          try { localStorage.setItem(seqStorageKey, String(s)); } catch {}
           setSeqReady(true);
         }
       } catch (err) {
@@ -162,7 +155,6 @@ const Clicker: React.FC = () => {
     return () => clearInterval(interval);
   }, [telegramUser, energy, maxEnergy, serverSeq, seqStorageKey]);
 
-  // таймер до полного восстановления энергии
   useEffect(() => {
     const interval = setInterval(() => {
       if (!lastEnergyUpdate || energy >= maxEnergy) {
@@ -190,17 +182,17 @@ const Clicker: React.FC = () => {
   }, [lastEnergyUpdate, energy, maxEnergy]);
 
   const onReconcile = async (data: FlushResponse) => {
-    if (data.status === 'ok') {
+    if (data.status === "ok") {
       setEnergy(data.energy);
       setTotalXp(data.total_xp);
       setServerSeq(Number(data.server_seq ?? 0));
-    } else if (data.status === 'noop') {
+    } else if (data.status === "noop") {
       return;
     } else {
       try {
         const res = await fetch(`${API_BASE_URL}/api/game/progress`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ init_data: WebApp.initData }),
         });
         const p = await res.json();
@@ -211,76 +203,64 @@ const Clicker: React.FC = () => {
         setClickBoost((p.click_boost_level ?? 0) + 1);
         setServerSeq(Number(p.last_client_seq ?? 0));
       } catch (e) {
-        console.warn('Xəta sonrası yeniləmə alınmadı', e);
+        console.warn("Xəta sonrası yeniləmə alınmadı", e);
       }
     }
   };
 
-  // временный множитель x10: если активен — умножаем клики
-  const multiplierFactor = 10;
-  const tempMultiplierActive =
-    tempMultUntil !== null && Date.now() < tempMultUntil ? multiplierFactor : 1;
-
-  const effectiveBoostPerTap = clickBoost * tempMultiplierActive;
+  // временный множитель x10, если активирован бустер
+  const tempMultiplierActive = tempMultUntil !== null && Date.now() < tempMultUntil ? 10 : 1;
+  const effectiveBoost = clickBoost * tempMultiplierActive;
 
   const { addClicks } = useClickBuffer({
     initData: WebApp.initData,
     sessionId,
     onReconcile,
     enabled: seqReady && !!telegramUser,
-    flushEveryMs: 200,
-    threshold: 500,         // увеличенный пакет для x10
+    flushEveryMs: 120,
+    threshold: 240,
     initialSeq: Math.max(serverSeq ?? 0, initialLocalSeq),
-    maxBatch: 500,
+    maxBatch: 480,
     lockKey: userId,
     seqStorageKey: seqStorageKey as any,
-    canSend: energy > 0,
+    canSend: energy > 0
   });
 
-  // ----- SPAWN ЛОГИКА: по 1 бустеру каждого типа на сессию -----
+  // ======== упрощённый спавн: по одному бустеру каждого типа за сеанс ========
+  const trySpawnBoosterForSession = () => {
+    if (spawned) return; // уже показан
+    if (tempMultiplierActive > 1) return; // если x10 активен — не показываем второй одновременно
 
-  useEffect(() => {
-    if (!telegramUser) return;
+    // приоритет: сначала 🎁, потом 🚀
+    if (!sessionCoinsSpawned && coinsClaimsUsed < DAILY_CLAIM_LIMIT_PER_TYPE) {
+      spawnOne('coins');
+      setSessionCoinsSpawned(true);
+      return;
+    }
+    if (!sessionMultSpawned && multClaimsUsed < DAILY_CLAIM_LIMIT_PER_TYPE) {
+      spawnOne('mult');
+      setSessionMultSpawned(true);
+      return;
+    }
+  };
 
-    // Спауним оба бустера один раз за сессию, в случайных местах
-    // Появляются без таймера, а когда пользователь кликает по кнопке — он просто их увидит
-    const spawn = () => {
-      if (!spawnedCoins) {
-        const x = 15 + Math.random() * 20; // чуть левее центра
-        const y = 20 + Math.random() * 60;
-        const id = Date.now() + Math.random();
-        setSpawnedCoins({ kind: 'coins', id, x, y });
-        if (coinsTimerRef.current) window.clearTimeout(coinsTimerRef.current);
-        coinsTimerRef.current = window.setTimeout(() => {
-          setSpawnedCoins((cur) => (cur && cur.id === id ? null : cur));
-        }, SPAWN_SHOW_MS) as unknown as number;
-      }
-      if (!spawnedMult) {
-        const x = 65 + Math.random() * 20; // чуть правее центра
-        const y = 20 + Math.random() * 60;
-        const id = Date.now() + Math.random();
-        setSpawnedMult({ kind: 'mult', id, x, y });
-        if (multTimerRef.current) window.clearTimeout(multTimerRef.current);
-        multTimerRef.current = window.setTimeout(() => {
-          setSpawnedMult((cur) => (cur && cur.id === id ? null : cur));
-        }, SPAWN_SHOW_MS) as unknown as number;
-      }
-    };
+  const spawnOne = (kind: 'coins' | 'mult') => {
+    const x = 10 + Math.random() * 80;
+    const y = 10 + Math.random() * 80;
+    const id = Date.now() + Math.random();
+    const expiresAt = Date.now() + SPAWN_SHOW_MS;
+    setSpawned({ kind, id, x, y, expiresAt });
 
-    spawn();
-
-    return () => {
-      if (coinsTimerRef.current) window.clearTimeout(coinsTimerRef.current);
-      if (multTimerRef.current) window.clearTimeout(multTimerRef.current);
-    };
-  }, [telegramUser]); // на каждую новую сессию WebApp — заново
+    if (spawnTimer.current) window.clearTimeout(spawnTimer.current);
+    spawnTimer.current = window.setTimeout(() => {
+      // если не успели кликнуть — просто скрываем, второй попытки в этом сеансе не даём
+      setSpawned((cur) => (cur && cur.id === id ? null : cur));
+    }, SPAWN_SHOW_MS) as unknown as number;
+  };
 
   const handleBoosterClick = async (b: SpawnedBooster) => {
+    setSpawned(null);
     if (!telegramUser) return;
-
-    // убираем с экрана
-    if (b.kind === 'coins') setSpawnedCoins(null);
-    if (b.kind === 'mult') setSpawnedMult(null);
 
     try {
       if (b.kind === 'coins') {
@@ -291,13 +271,16 @@ const Clicker: React.FC = () => {
         });
         if (!res.ok) throw new Error('bad_response');
         const data = await res.json();
-
         if (data.status === 'ok') {
           const granted = Number(data.granted ?? 50000);
           setTotalXp((prev) => prev + granted);
 
-          const used = Number(data.used_today ?? data.booster_success_count ?? 0);
-          setCoinsClaimsUsed(Math.min(DAILY_CLAIM_LIMIT_COINS, used));
+          const used = Math.min(DAILY_CLAIM_LIMIT_PER_TYPE, coinsClaimsUsed + 1);
+          setCoinsClaimsUsed(used);
+          localStorage.setItem(coinsKey, String(used));
+        } else if (data.status === 'daily_limit_reached') {
+          setCoinsClaimsUsed(DAILY_CLAIM_LIMIT_PER_TYPE);
+          localStorage.setItem(coinsKey, String(DAILY_CLAIM_LIMIT_PER_TYPE));
         }
       } else {
         const res = await fetch(`${API_BASE_URL}/api/boosters/claim/multiplier`, {
@@ -307,31 +290,33 @@ const Clicker: React.FC = () => {
         });
         if (!res.ok) throw new Error('bad_response');
         const data = await res.json();
-
         if (data.status === 'ok') {
-          // 🔑 КЛЮЧЕВОЕ МЕСТО: включаем x10 ДО истечения времени
-          const expiresMs = data.expires_at
-            ? new Date(data.expires_at).getTime()
-            : Date.now() + 15_000;
-          setTempMultUntil(expiresMs);
+          const expires = data.expires_at ? new Date(data.expires_at).getTime() : Date.now() + 15000;
+          setTempMultUntil(expires);
 
-          const used = Number(data.used_today ?? data.booster_success_count ?? 0);
-          setMultClaimsUsed(Math.min(DAILY_CLAIM_LIMIT_MULT, used));
+          const used = Math.min(DAILY_CLAIM_LIMIT_PER_TYPE, multClaimsUsed + 1);
+          setMultClaimsUsed(used);
+          localStorage.setItem(multKey, String(used));
+        } else if (data.status === 'daily_limit_reached') {
+          setMultClaimsUsed(DAILY_CLAIM_LIMIT_PER_TYPE);
+          localStorage.setItem(multKey, String(DAILY_CLAIM_LIMIT_PER_TYPE));
         }
       }
     } catch (e) {
       console.warn('Booster claim error', e);
+      // ошибки не дают второй шанс в этом сеансе — это часть упрощённой логики
     }
   };
 
-  // обработка кликов по главной кнопке
   const handleMultiClick = (x: number, y: number) => {
     if (!telegramUser || loading || energy <= 0) return;
 
-    const spend = Math.min(effectiveBoostPerTap, energy);
+    // показываем бустер, если ещё не появлялся в этом сеансе (по одному каждого вида)
+    trySpawnBoosterForSession();
+
+    const spend = Math.min(clickBoost * (tempMultUntil && Date.now() < tempMultUntil ? 10 : 1), energy);
     if (spend <= 0) return;
 
-    // локально сразу показываем эффект
     setTotalXp((prev) => prev + spend);
     setEnergy((prev) => Math.max(0, prev - spend));
 
@@ -341,11 +326,10 @@ const Clicker: React.FC = () => {
       setFloatingTexts((prev) => prev.filter((t) => t.id !== id));
     }, 1000);
 
-    // на бэк отправляем уже «усиленные» клики
     addClicks(spend);
   };
 
-  // счётчик секунд до конца x10 для бейджа
+  // счётчик секунд для бейджа x10
   const [multCountdown, setMultCountdown] = useState<number>(0);
   useEffect(() => {
     if (!tempMultUntil) {
@@ -366,7 +350,7 @@ const Clicker: React.FC = () => {
 
   return (
     <div className="w-full min-h-screen bg-[#131f2f] text-center flex flex-col items-center justify-start pt-8 px-4 text-[#00f0ff]">
-      {/* Кнопка «Карта пользователя» в левом верхнем углу */}
+      {/* Кнопка «Карта пользователя» */}
       <button
         className="fixed top-3 left-3 z-50 w-9 h-9 rounded-full bg-black/80 text-white shadow flex items-center justify-center active:scale-95"
         onClick={() => setShowUserCard(true)}
@@ -374,28 +358,43 @@ const Clicker: React.FC = () => {
         title={t('userCard.open', { defaultValue: 'User card' })}
       >
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
-          <path
-            d="M12 12c2.761 0 5-2.686 5-6s-2.239-6-5-6-5 2.686-5 6 2.239 6 5 6Zm0 2c-4.418 0-8 2.91-8 6.5V22h16v-1.5C20 16.91 16.418 14 12 14Z"
-            fill="currentColor"
-          />
+          <path d="M12 12c2.761 0 5-2.686 5-6s-2.239-6-5-6-5 2.686-5 6 2.239 6 5 6Zm0 2c-4.418 0-8 2.91-8 6.5V22h16v-1.5C20 16.91 16.418 14 12 14Z" fill="currentColor"/>
         </svg>
       </button>
 
       <h2 className="text-2xl font-bold mb-2 drop-shadow-md">$GAP: {totalXp}</h2>
 
-      {/* Бустеры / усилители */}
-      <div className="text-xs text-[#7ee9ff] mb-1 flex items-center gap-2">
-        <span>
-          x{clickBoost} {t('boost', { defaultValue: 'boost' })}
-        </span>
+      {/* строка буста и временного x10 */}
+      <div className="text-sm text-[#7ee9ff] mb-1 flex items-center gap-2">
+        <span>x{clickBoost} {t('boost', { defaultValue: 'boost' })}</span>
         {tempMultiplierActive > 1 && (
-          <span className="px-2 py-0.5 rounded-full bg-[#00f0ff] text-[#0e1a2b] text-[10px] font-bold">
+          <span className="px-2 py-0.5 rounded-full bg-[#00f0ff] text-[#0e1a2b] text-xs font-bold">
             x10 · {multCountdown}s
           </span>
         )}
-        {/* Бейджи использованных бустеров за день (только UI, без строгой логики дат) */}
-        <span className="ml-2 text-[10px] text-[#9eeeff]">
-          🎁 {coinsClaimsUsed}/{DAILY_CLAIM_LIMIT_COINS} · 🚀 {multClaimsUsed}/{DAILY_CLAIM_LIMIT_MULT}
+      </div>
+
+      {/* 🆕 бейджи прогресса бустеров за сегодня */}
+      <div className="mb-3 flex items-center gap-2 text-xs">
+        <span
+          className={`px-2 py-1 rounded-full border ${
+            coinsClaimsUsed >= DAILY_CLAIM_LIMIT_PER_TYPE
+              ? 'opacity-60 border-[#2b526e] text-[#6ea6c7]'
+              : 'border-[#1f3b57] text-[#a0f6ff]'
+          }`}
+          title="Gift boosters today"
+        >
+          🎁 {coinsClaimsUsed}/{DAILY_CLAIM_LIMIT_PER_TYPE}
+        </span>
+        <span
+          className={`px-2 py-1 rounded-full border ${
+            multClaimsUsed >= DAILY_CLAIM_LIMIT_PER_TYPE
+              ? 'opacity-60 border-[#2b526e] text-[#6ea6c7]'
+              : 'border-[#1f3b57] text-[#a0f6ff]'
+          }`}
+          title="Rocket boosters today"
+        >
+          🚀 {multClaimsUsed}/{DAILY_CLAIM_LIMIT_PER_TYPE}
         </span>
       </div>
 
@@ -406,10 +405,7 @@ const Clicker: React.FC = () => {
         <div className="w-full h-4 bg-[#0d273d] rounded overflow-hidden shadow-inner">
           <div
             className="h-full bg-gradient-to-r from-[#7af9ff] to-[#00f0ff]"
-            style={{
-              width: `${Math.min((smoothEnergy / maxEnergy) * 100, 100)}%`,
-              transition: 'none',
-            }}
+            style={{ width: `${Math.min((smoothEnergy / maxEnergy) * 100, 100)}%`, transition: "none" }}
           />
         </div>
         {energy < maxEnergy && timeToFullEnergy && (
@@ -424,34 +420,30 @@ const Clicker: React.FC = () => {
           <MainButton energy={energyInt} onMultiClick={handleMultiClick} />
         </div>
 
-        {/* всплывающие бустеры 🎁 / 🚀 без фона, с мягкой пульсацией */}
-        {spawnedCoins && (
+        {/* всплывающие бустеры — чистые эмодзи 🎁/🚀 без фона, с мягкой пульсацией */}
+        {spawned && (
           <div
             role="button"
             tabIndex={0}
             className="absolute z-50 text-4xl select-none booster-pulse"
             style={{
-              left: `${spawnedCoins.x}%`,
-              top: `${spawnedCoins.y}%`,
+              left: `${spawned.x}%`,
+              top: `${spawned.y}%`,
               transform: 'translate(-50%, -50%)',
               pointerEvents: 'auto',
               userSelect: 'none',
               lineHeight: 1,
-              filter:
-                'drop-shadow(0 0 10px rgba(0,240,255,0.6)) drop-shadow(0 0 18px rgba(0,240,255,0.35))',
+              filter: 'drop-shadow(0 0 10px rgba(0,240,255,0.6)) drop-shadow(0 0 18px rgba(0,240,255,0.35))',
             }}
             onMouseDown={(e) => e.stopPropagation()}
-            onClick={(e) => {
-              e.stopPropagation();
-              handleBoosterClick(spawnedCoins);
-            }}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' || e.key === ' ') {
-                e.preventDefault();
-                e.stopPropagation();
-                handleBoosterClick(spawnedCoins);
-              }
-            }}
+            onClick={(e) => { e.stopPropagation(); handleBoosterClick(spawned); }}
+            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); handleBoosterClick(spawned); } }}
+            aria-label={spawned.kind === 'coins'
+              ? t('boosters.coin_label', { defaultValue: 'Gift booster' })
+              : t('boosters.mult_label', { defaultValue: 'Rocket booster' })}
+            title={spawned.kind === 'coins'
+              ? t('boosters.coin_label', { defaultValue: 'Gift booster' })
+              : t('boosters.mult_label', { defaultValue: 'Rocket booster' })}
           >
             <span
               style={{
@@ -460,47 +452,7 @@ const Clicker: React.FC = () => {
                 display: 'inline-block',
               }}
             >
-              🎁
-            </span>
-          </div>
-        )}
-
-        {spawnedMult && (
-          <div
-            role="button"
-            tabIndex={0}
-            className="absolute z-50 text-4xl select-none booster-pulse"
-            style={{
-              left: `${spawnedMult.x}%`,
-              top: `${spawnedMult.y}%`,
-              transform: 'translate(-50%, -50%)',
-              pointerEvents: 'auto',
-              userSelect: 'none',
-              lineHeight: 1,
-              filter:
-                'drop-shadow(0 0 10px rgba(0,240,255,0.6)) drop-shadow(0 0 18px rgba(0,240,255,0.35))',
-            }}
-            onMouseDown={(e) => e.stopPropagation()}
-            onClick={(e) => {
-              e.stopPropagation();
-              handleBoosterClick(spawnedMult);
-            }}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' || e.key === ' ') {
-                e.preventDefault();
-                e.stopPropagation();
-                handleBoosterClick(spawnedMult);
-              }
-            }}
-          >
-            <span
-              style={{
-                textShadow:
-                  '0 0 10px rgba(0,240,255,0.7), 0 0 18px rgba(0,240,255,0.45), 0 0 28px rgba(0,240,255,0.35)',
-                display: 'inline-block',
-              }}
-            >
-              🚀
+              {spawned.kind === 'coins' ? '🎁' : '🚀'}
             </span>
           </div>
         )}
@@ -538,28 +490,12 @@ const Clicker: React.FC = () => {
         `}</style>
       </div>
 
-      {/* Заглушка для кнопки задания */}
-      {!challengeLoading && (
-        <div className="mt-4 w-full max-w-md">
-          <button
-            className="w-full px-4 py-2 rounded-xl bg-[#0d273d] text-[#7aa1b7] border border-[#1f3b57] opacity-60 cursor-not-allowed"
-            disabled
-          >
-            🎥 Günün tapşırığı (deaktivdir)
-          </button>
-          <div className="mt-2 text-[11px] text-[#7aa1b7]">
-            Turnir başa çatıb. Yeni tapşırıqlar tezliklə əlavə olunacaq.
-          </div>
-        </div>
-      )}
-
       {showUserCard && <UserCard onClose={() => setShowUserCard(false)} />}
     </div>
   );
 };
 
 export default Clicker;
-
 
 
 
