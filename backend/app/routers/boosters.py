@@ -107,7 +107,7 @@ async def boosters_claim_multiplier(
     res = await claim_multiplier_booster(
         session=session,
         user_id=user.id,
-        factor=MULT_FACTOR,
+        multiplier=MULT_FACTOR,
         duration_seconds=MULT_DURATION_SECONDS,
         daily_limit=MULT_DAILY_LIMIT,
     )
