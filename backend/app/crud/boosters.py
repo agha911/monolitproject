@@ -13,8 +13,8 @@ log = logging.getLogger("app.boosters")
 # ───── helpers: время / даты ─────
 
 def _utcnow() -> datetime:
-    """Возвращаем timezone-aware UTC datetime."""
-    return datetime.utcnow().replace(tzinfo=timezone.utc)
+    """Возвращает *naive* UTC-datetime, совместимый с БД."""
+    return datetime.utcnow().replace(tzinfo=None)
 
 
 def _to_naive_utc(dt: Optional[datetime]) -> Optional[datetime]:
