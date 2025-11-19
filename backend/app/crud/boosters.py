@@ -171,49 +171,55 @@ async def claim_multiplier_booster(
     daily_limit: int = 3,
 ) -> Dict[str, Any]:
     """
-    Выдаёт бустер-множитель клика (🚀), например: x10 на duration_seconds.
-    Использует СВОЙ дневной лимит (daily_booster_claims_mult).
+    Бустер-множитель клика (🚀): ставит temp_click_multiplier = multiplier
+    и temp_click_multiplier_expires_at = now + duration_seconds.
 
-    Логика:
-      - сбрасываем окно по дням (оба счётчика, через _ensure_boosters_daily_window);
-      - проверяем дневной лимит ИМЕННО для множителя;
-      - если лимит не превышен:
-          * выставляем temp_click_multiplier и expires_at;
-          * инкрементируем daily_booster_claims_mult;
-          * синхронизируем booster_success_count для фронта.
+    ВАЖНО:
+    - дневной лимит считаем по полю daily_booster_claims_mult
+      (отдельно от монетного бустера);
+    - boosters_last_reset + _ensure_boosters_daily_window() сбрасывают
+      daily_booster_claims_coins / daily_booster_claims_mult раз в сутки;
+    - для фронта возвращаем поля в СТАРОМ формате:
+      type="mult", multiplier, expires_at, booster_success_count.
     """
     now = _utcnow()
     user = await get_user_for_update(session, user_id)
     if not user:
         return {"status": "user_not_found"}
 
+    # сбрасываем дневные счётчики, если наступил новый день
     _ensure_boosters_daily_window(user, now)
+    # если старый множитель уже истёк — обнуляем его
     _maybe_expire_multiplier(user, now)
 
-    used_mult = int(getattr(user, "daily_booster_claims_mult", 0) or 0)
-    if used_mult >= daily_limit:
+    used_today = int(getattr(user, "daily_booster_claims_mult", 0) or 0)
+    if used_today >= daily_limit:
         log.info(
             "boosters.mult.daily_limit_reached | user_id=%s used=%s limit=%s",
             user.id,
-            used_mult,
+            used_today,
             daily_limit,
         )
-        _sync_booster_success_counter(user, now)
         return {
             "status": "daily_limit_reached",
-            "used": used_mult,
+            "used": used_today,
             "limit": daily_limit,
         }
 
-    # активируем множитель
-    user.temp_click_multiplier = int(multiplier)
-    user.temp_click_multiplier_expires_at = _to_naive_utc(
-        now + timedelta(seconds=duration_seconds)
-    )
-    user.daily_booster_claims_mult = used_mult + 1
+    # текущий экспир для флага already_active (как было раньше)
+    current_exp = _to_naive_utc(getattr(user, "temp_click_multiplier_expires_at", None))
+    new_expires = now + timedelta(seconds=duration_seconds)
 
-    # синхронизация общего счётчика
-    _sync_booster_success_counter(user, now)
+    # устанавливаем новый множитель
+    user.temp_click_multiplier = int(multiplier)
+    user.temp_click_multiplier_expires_at = new_expires
+
+    # обновляем дневной счётчик именно для множителя
+    user.daily_booster_claims_mult = used_today + 1
+
+    # поддерживаем старое поле "booster_success_count" как общий агрегат
+    user.booster_success_count = int(getattr(user, "booster_success_count", 0) or 0) + 1
+    user.booster_success_updated_at = now
 
     await session.flush()
 
@@ -222,25 +228,26 @@ async def claim_multiplier_booster(
         "telegram_id": getattr(user, "telegram_id", None),
         "multiplier": multiplier,
         "duration_seconds": duration_seconds,
-        "expires_at": user.temp_click_multiplier_expires_at,
-        "used_mult_today": user.daily_booster_claims_mult,
-        "mult_limit": daily_limit,
-        "booster_success_count": user.booster_success_count,
+        "expires_at": new_expires,
+        "used_today": user.daily_booster_claims_mult,
+        "daily_limit": daily_limit,
     }
     log.info("boosters.mult.ok | %s", log_info)
 
+    # ВАЖНО: форма ответа совместима со старым фронтом
     return {
         "status": "ok",
-        "type": "multiplier",
+        "type": "mult",  # как раньше
         "multiplier": multiplier,
-        "expires_at": user.temp_click_multiplier_expires_at.isoformat()
-        if user.temp_click_multiplier_expires_at
-        else None,
+        "expires_at": new_expires.isoformat() + "Z",
+        # счётчик для фронта (он читает booster_success_count):
+        "booster_success_count": user.daily_booster_claims_mult,
+        # можно также вернуть и «used», если где-то логика ещё опирается
         "used": user.daily_booster_claims_mult,
-        # для совместимости с текущими роутами:
-        "booster_success_count": user.booster_success_count,
         "daily_limit": daily_limit,
+        "already_active": bool(current_exp and now < current_exp),
     }
+
 
 
 
