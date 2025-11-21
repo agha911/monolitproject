@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import WebApp from '@twa-dev/sdk';
 import { useTranslation } from 'react-i18next';
-import API_BASE_URL from './config';
+import API_BASE_URL from '../config';
 
 type DaoOption = {
   id: number;
