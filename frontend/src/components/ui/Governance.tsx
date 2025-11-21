@@ -36,14 +36,21 @@ type VoteResponse = {
 const resolveImageUrl = (src: string | null): string | null => {
   if (!src) return null;
 
-  // абсолютный URL — отдаем как есть
-  if (/^https?:\/\//i.test(src)) return src;
+  // Если пришёл абсолютный URL — забираем только path, чтобы всегда грузить
+  // картинку с ТЕКУЩЕГО домена фронта (origin), а не зашитого в БД.
+  try {
+    if (/^https?:\/\//i.test(src)) {
+      const u = new URL(src);
+      return u.pathname || null; // например: "/mascot-bw.png"
+    }
+  } catch {
+    // если URL сломан — просто идём дальше и пытаемся работать как с относительным
+  }
 
-  // иначе добавляем ведущий слэш, если его нет
+  // Относительный путь — гарантируем ведущий слэш
   if (!src.startsWith('/')) src = '/' + src;
 
-  // Vercel domain
-  return `https://monolitproject-5g7v-gfeee6mo9-aghas-projects-b4f0bbbd.vercel.app${src}`;
+  return src; // браузер сам подставит текущий origin
 };
 // ------------------------------------------------------------------
 
