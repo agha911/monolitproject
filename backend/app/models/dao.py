@@ -1,5 +1,3 @@
-# app/models/dao.py
-
 from sqlalchemy import (
     Column,
     Integer,
@@ -7,7 +5,9 @@ from sqlalchemy import (
     String,
     Text,
     DateTime,
+    Boolean,
     ForeignKey,
+    JSON,
 )
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
@@ -19,22 +19,29 @@ class ArtWork(Base):
     """
     Арт-работа конкурса.
     Таблица: art_works
+
+    Приведена к схеме, которую использует CRUD:
+      - external_id
+      - title
+      - image_url
+      - author_telegram_id
+      - meta (JSON)
     """
     __tablename__ = "art_works"
 
     id = Column(Integer, primary_key=True, index=True)
-    author_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
 
-    # кто автор (можем не использовать, если автор не из Gappick)
-    author = relationship("User", backref="art_works", lazy="joined", foreign_keys=[author_user_id])
+    # внешний идентификатор (например, код группы/раунда и т.п.)
+    external_id = Column(String(128), nullable=True, unique=True)
 
-    author_name = Column(String(255))              # произвольное имя автора (из формы)
-    title = Column(String(255), nullable=False)    # название работы
-    image_url = Column(Text, nullable=False)       # ссылка на картинку (CDN / Telegram / S3 и т.п.)
-    description = Column(Text)                     # доп. описание
-    round = Column(String(50))                     # например 'final', 'semi', 'group_a'
-    short_code = Column(String(32), unique=True)   # удобный короткий код (A12, B07 и т.д.)
-    status = Column(String(20), nullable=False, default="active")  # active / hidden / disqualified
+    title = Column(String(255), nullable=False)
+    image_url = Column(Text, nullable=True)
+
+    # автор из Telegram (если автор — пользователь Gappick)
+    author_telegram_id = Column(BigInteger, nullable=True, index=True)
+
+    # любое доп. описание/метаданные (раунд, статус, короткий код, и т.п.)
+    meta = Column(JSON, nullable=True)
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
@@ -43,18 +50,30 @@ class DaoProposal(Base):
     """
     Один "пропозал" (голосование DAO).
     Таблица: dao_proposals
+
+    Приведена к схеме, которую использует CRUD:
+      - title, description
+      - starts_at, ends_at
+      - snapshot_at
+      - is_active
     """
     __tablename__ = "dao_proposals"
 
     id = Column(Integer, primary_key=True, index=True)
-    slug = Column(String(64), nullable=False, unique=True)  # 'art-final-2025'
-    title = Column(String(255), nullable=False)
-    description = Column(Text)
-    type = Column(String(50), nullable=False, default="art_contest")  # на будущее под другие типы
-    status = Column(String(20), nullable=False, default="draft")      # draft / open / closed
 
+    title = Column(String(255), nullable=False)
+    description = Column(Text, nullable=False)
+
+    # Окно голосования
+    starts_at = Column(DateTime(timezone=True), nullable=False)
+    ends_at = Column(DateTime(timezone=True), nullable=False)
+
+    # На будущее, если захотим "снимать снапшот" баланса
     snapshot_at = Column(DateTime(timezone=True), nullable=True)
-    closes_at = Column(DateTime(timezone=True), nullable=True)
+
+    # Используется в list_active_proposals / cast_vote
+    is_active = Column(Boolean, nullable=False, default=True)
+
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     # связи
@@ -76,17 +95,30 @@ class DaoOption(Base):
     """
     Вариант голосования внутри одного пропозала.
     Для арт-конкурса каждая опция обычно привязана к ArtWork.
-    Таблица: dao_options
+
+    Приведена к схеме, которую использует CRUD:
+      - art_work_id
+      - label (подпись, если нужна)
     """
     __tablename__ = "dao_options"
 
     id = Column(Integer, primary_key=True, index=True)
-    proposal_id = Column(Integer, ForeignKey("dao_proposals.id", ondelete="CASCADE"), nullable=False)
-    art_work_id = Column(Integer, ForeignKey("art_works.id", ondelete="SET NULL"), nullable=True)
 
-    # Можно хранить свой title, либо всегда брать из art_work.title
-    title = Column(String(255), nullable=True)
-    order_index = Column(Integer, nullable=False, default=0)
+    proposal_id = Column(
+        Integer,
+        ForeignKey("dao_proposals.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+
+    art_work_id = Column(
+        Integer,
+        ForeignKey("art_works.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+
+    # Текстовая подпись варианта (можно не использовать, если всё из ArtWork)
+    label = Column(String(255), nullable=True)
+
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     proposal = relationship("DaoProposal", back_populates="options")
@@ -109,9 +141,22 @@ class DaoVote(Base):
     __tablename__ = "dao_votes"
 
     id = Column(BigInteger, primary_key=True, index=True)
-    proposal_id = Column(Integer, ForeignKey("dao_proposals.id", ondelete="CASCADE"), nullable=False)
-    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
-    option_id = Column(Integer, ForeignKey("dao_options.id", ondelete="CASCADE"), nullable=False)
+
+    proposal_id = Column(
+        Integer,
+        ForeignKey("dao_proposals.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    user_id = Column(
+        Integer,
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    option_id = Column(
+        Integer,
+        ForeignKey("dao_options.id", ondelete="CASCADE"),
+        nullable=False,
+    )
 
     # Вес = количество $GAP, которое пользователь поставил за эту опцию
     weight = Column(BigInteger, nullable=False)
@@ -121,3 +166,4 @@ class DaoVote(Base):
     proposal = relationship("DaoProposal", back_populates="votes")
     option = relationship("DaoOption", back_populates="votes")
     user = relationship("User", backref="dao_votes")
+
