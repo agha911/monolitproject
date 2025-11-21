@@ -1,434 +1,415 @@
-import React, { useEffect, useState, useMemo } from "react";
-import WebApp from "@twa-dev/sdk";
-import { useTranslation } from "react-i18next";
-import API_BASE_URL from "../config";
+import React, { useEffect, useState, useMemo } from 'react';
+import WebApp from '@twa-dev/sdk';
+import { useTranslation } from 'react-i18next';
+import API_BASE_URL from '../config';
 
-// ---- types ----
-
-type DaoOption = {
+type DaoOptionArt = {
   id: number;
-  label: string;
-  image_url?: string | null;
-  total_votes: number;
+  label: string | null;
+  art_work_id: number | null;
+  art_title: string | null;
+  art_image_url: string | null;
+  art_author_telegram_id: number | null;
 };
 
 type DaoProposal = {
   id: number;
   title: string;
   description: string;
-  status: string;
-  starts_at: string | null;
-  ends_at: string | null;
-  created_at: string;
-  options: DaoOption[];
+  starts_at: string;
+  ends_at: string;
+  options: DaoOptionArt[];
 };
 
-type VotePower = {
-  total_power: number;
-  available_power: number;
-  used_power: number;
-  locked_power: number;
-};
-
-type OptionVote = {
+type VoteItem = {
   option_id: number;
-  votes: number;
+  weight: number;
 };
 
-const Governance: React.FC = () => {
+type VoteResponse = {
+  status: string;
+  used_weight: number;
+  balance: number;
+};
+
+// хелпер для нормализации URL картинки
+const FRONT_BASE_URL =
+  'https://monolitproject-5g7v-gfeee6mo9-aghas-projects-b4f0bbbd.vercel.app';
+
+const resolveImageUrl = (src: string | null): string | null => {
+  if (!src) return null;
+  // уже абсолютный URL
+  if (/^https?:\/\//i.test(src)) return src;
+  // начинается с / – считаем, что это путь от корня фронта
+  if (src.startsWith('/')) return `${FRONT_BASE_URL}${src}`;
+  // иначе относительный путь
+  return `${FRONT_BASE_URL}/${src}`;
+};
+
+const DaoPage: React.FC = () => {
   const { t } = useTranslation();
 
-  const [proposal, setProposal] = useState<DaoProposal | null>(null);
-  const [power, setPower] = useState<VotePower | null>(null);
-  const [selectedVotes, setSelectedVotes] = useState<Record<number, number>>({});
-  const [loading, setLoading] = useState(true);
+  const [telegramUser, setTelegramUser] = useState<any | null>(null);
+
+  const [proposals, setProposals] = useState<DaoProposal[]>([]);
+  const [loadingProposals, setLoadingProposals] = useState(true);
+
+  const [balance, setBalance] = useState<number>(0); // текущий баланс $GAP пользователя
+  const [loadingBalance, setLoadingBalance] = useState(true);
+
+  const [votes, setVotes] = useState<Record<number, number>>({}); // option_id -> weight (локальное распределение)
   const [submitting, setSubmitting] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const telegramUser = WebApp?.initDataUnsafe?.user;
+  // инициализация Telegram WebApp
+  useEffect(() => {
+    WebApp.ready();
+    const user = WebApp.initDataUnsafe?.user;
+    if (user) {
+      setTelegramUser(user);
+    }
+  }, []);
 
-  const totalSelected = useMemo(
-    () => Object.values(selectedVotes).reduce((sum, v) => sum + (v || 0), 0),
-    [selectedVotes]
+  const initData = WebApp.initData;
+
+  // загрузка баланса пользователя
+  useEffect(() => {
+    if (!initData) return;
+
+    (async () => {
+      try {
+        setLoadingBalance(true);
+        const res = await fetch(`${API_BASE_URL}/api/game/progress`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ init_data: initData }),
+        });
+        const data = await res.json();
+        setBalance(Number(data.total_xp ?? 0));
+      } catch (e) {
+        console.error('Ошибка загрузки баланса для DAO:', e);
+      } finally {
+        setLoadingBalance(false);
+      }
+    })();
+  }, [initData]);
+
+  // загрузка активных предложений
+  useEffect(() => {
+    (async () => {
+      try {
+        setLoadingProposals(true);
+        const res = await fetch(`${API_BASE_URL}/api/dao/proposals/active`);
+        if (!res.ok) {
+          throw new Error(`HTTP ${res.status}`);
+        }
+        const data: DaoProposal[] = await res.json();
+        setProposals(data || []);
+      } catch (e) {
+        console.error('Ошибка загрузки DAO-предложений:', e);
+      } finally {
+        setLoadingProposals(false);
+      }
+    })();
+  }, []);
+
+  // для простоты — считаем, что голосуем по первому активному предложению
+  const selectedProposal = useMemo(
+    () => (proposals.length > 0 ? proposals[0] : null),
+    [proposals]
   );
 
-  const availablePower = power?.available_power ?? 0;
+  // текущая суммарная локальная "ставка" голосов
+  const usedLocally = useMemo(() => {
+    return Object.values(votes).reduce((sum, w) => sum + w, 0);
+  }, [votes]);
 
-  // ----- helpers -----
+  const remaining = Math.max(0, balance - usedLocally);
 
-  const getInitData = () => WebApp.initData || window.Telegram?.WebApp?.initData || "";
+  // старый +/- оставляем на всякий случай (вдруг пригодится где-то ещё)
+  const adjustVote = (optionId: number, delta: number) => {
+    if (!selectedProposal) return;
+    setError(null);
+    setMessage(null);
 
-  const resetSelection = (opts: DaoOption[]) => {
-    const initial: Record<number, number> = {};
-    for (const o of opts) initial[o.id] = 0;
-    setSelectedVotes(initial);
-  };
-
-  // применяем пресет (0/10/25/50/100% от доступной мощности)
-  const applyPreset = (percent: number) => {
-    if (!proposal || !power) return;
-    if (percent <= 0) {
-      resetSelection(proposal.options);
-      return;
-    }
-    const targetTotal = Math.floor(availablePower * (percent / 100));
-    if (targetTotal <= 0) {
-      resetSelection(proposal.options);
-      return;
-    }
-
-    const optionCount = proposal.options.length || 1;
-    const basePerOption = Math.floor(targetTotal / optionCount);
-    let remainder = targetTotal - basePerOption * optionCount;
-
-    const next: Record<number, number> = {};
-    for (const opt of proposal.options) {
-      let v = basePerOption;
-      if (remainder > 0) {
-        v += 1;
-        remainder -= 1;
-      }
-      next[opt.id] = v;
-    }
-    setSelectedVotes(next);
-  };
-
-  const handleChangeVotes = (optionId: number, delta: number) => {
-    if (!power) return;
-    setSelectedVotes((prev) => {
+    setVotes((prev) => {
       const current = prev[optionId] || 0;
-      let nextValue = current + delta;
-      if (nextValue < 0) nextValue = 0;
+      let next = current + delta;
+      if (next < 0) next = 0;
 
-      // не даём превысить availablePower суммарно
-      const otherSum = Object.entries(prev)
-        .filter(([id]) => Number(id) !== optionId)
-        .reduce((sum, [, v]) => sum + (v || 0), 0);
+      const usedWithoutThis = Object.entries(prev).reduce((sum, [id, w]) => {
+        return sum + (Number(id) === optionId ? 0 : w);
+      }, 0);
 
-      const maxForThis = Math.max(0, availablePower - otherSum);
-      if (nextValue > maxForThis) nextValue = maxForThis;
+      if (usedWithoutThis + next > balance) {
+        return prev;
+      }
 
-      return { ...prev, [optionId]: nextValue };
+      return { ...prev, [optionId]: next };
     });
   };
 
-  // ----- load data -----
+  // новый ввод: установка голоса как % от общего баланса
+  const setVotePercent = (optionId: number, fraction: number) => {
+    if (!selectedProposal) return;
+    setError(null);
+    setMessage(null);
 
-  useEffect(() => {
-    const load = async () => {
-      try {
-        setLoading(true);
-        setError(null);
+    setVotes((prev) => {
+      const target = Math.floor(balance * fraction);
 
-        // 1. активные предложения
-        const res = await fetch(`${API_BASE_URL}/api/dao/proposals/active`);
-        if (!res.ok) {
-          throw new Error(`active_proposals_http_${res.status}`);
-        }
-        const proposals: DaoProposal[] = await res.json();
+      const usedWithoutThis = Object.entries(prev).reduce((sum, [id, w]) => {
+        return sum + (Number(id) === optionId ? 0 : w);
+      }, 0);
 
-        if (!proposals.length) {
-          setProposal(null);
-          setPower(null);
-          setLoading(false);
-          return;
-        }
+      const maxForThisOption = Math.max(0, balance - usedWithoutThis);
+      const next = Math.min(target, maxForThisOption);
 
-        const p = proposals[0];
-        setProposal(p);
-        resetSelection(p.options);
-
-        // 2. голосовой вес пользователя
-        const powerRes = await fetch(
-          `${API_BASE_URL}/api/dao/proposals/${p.id}/power`,
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ init_data: getInitData() }),
-          }
-        );
-        if (!powerRes.ok) {
-          throw new Error(`power_http_${powerRes.status}`);
-        }
-        const powerData: VotePower = await powerRes.json();
-        setPower(powerData);
-      } catch (e) {
-        console.error("Governance load error", e);
-        setError(t("governance.error", { defaultValue: "Xəta baş verdi" }));
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    load();
-  }, [t]);
+      return {
+        ...prev,
+        [optionId]: next,
+      };
+    });
+  };
 
   const handleSubmit = async () => {
-    if (!proposal || !power) return;
-    const votes: OptionVote[] = Object.entries(selectedVotes)
-      .map(([optionId, v]) => ({
-        option_id: Number(optionId),
-        votes: Number(v) || 0,
-      }))
-      .filter((v) => v.votes > 0);
+    if (!selectedProposal) return;
+    if (!initData) {
+      setError('init_data_missing');
+      return;
+    }
 
-    if (!votes.length) return;
-    if (totalSelected > availablePower) return;
+    const items: VoteItem[] = Object.entries(votes)
+      .filter(([, w]) => w > 0)
+      .map(([id, w]) => ({ option_id: Number(id), weight: w }));
 
-    try:
-      setSubmitting(true);
-      setError(null);
+    if (items.length === 0) {
+      setError(t('dao.no_votes_selected', { defaultValue: 'Вы не распределили голоса' }));
+      return;
+    }
 
+    setSubmitting(true);
+    setError(null);
+    setMessage(null);
+
+    try {
       const res = await fetch(
-        `${API_BASE_URL}/api/dao/proposals/${proposal.id}/vote`,
+        `${API_BASE_URL}/api/dao/proposals/${selectedProposal.id}/vote`,
         {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            init_data: getInitData(),
-            option_votes: votes,
-          }),
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ init_data: initData, votes: items }),
         }
       );
-      if (!res.ok) {
-        throw new Error(`vote_http_${res.status}`);
-      }
-      const data = await res.json();
-      console.log("Vote result", data);
 
-      // после голосования перезагружаем power и обнуляем локальный выбор
-      const powerRes = await fetch(
-        `${API_BASE_URL}/api/dao/proposals/${proposal.id}/power`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ init_data: getInitData() }),
-        }
-      );
-      if (powerRes.ok) {
-        const powerData: VotePower = await powerRes.json();
-        setPower(powerData);
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        const detail = (data && data.detail) || `HTTP ${res.status}`;
+        setError(
+          t('dao.vote_error', {
+            defaultValue: 'Ошибка при отправке голоса: {{detail}}',
+            detail: String(detail),
+          })
+        );
+        return;
       }
-      resetSelection(proposal.options);
-    } catch (e) {
-      console.error("Vote submit error", e);
-      setError(t("governance.error", { defaultValue: "Xəta baş verdi" }));
+
+      const data: VoteResponse = await res.json();
+      if (data.status === 'ok') {
+        setMessage(
+          t('dao.vote_success', {
+            defaultValue: 'Голоса учтены. Использовано {{used}} из {{balance}} $GAP.',
+            used: data.used_weight,
+            balance: data.balance,
+          })
+        );
+        setBalance(data.balance);
+        setVotes({});
+      } else {
+        setError(
+          t('dao.vote_error_status', {
+            defaultValue: 'Ошибка: {{status}}',
+            status: data.status,
+          })
+        );
+      }
+    } catch (e: any) {
+      console.error('DAO vote error:', e);
+      setError(
+        t('dao.vote_error', {
+          defaultValue: 'Ошибка при отправке голоса: {{detail}}',
+          detail: e?.message || 'unknown',
+        })
+      );
     } finally {
       setSubmitting(false);
     }
   };
 
-  // ----- render -----
-
-  if (loading) {
-    return (
-      <div className="w-full min-h-screen flex items-center justify-center bg-[#131f2f] text-[#00f0ff]">
-        {t("governance.loading", { defaultValue: "Yüklənir..." })}
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div className="w-full min-h-screen flex flex-col items-center justify-center bg-[#131f2f] text-center text-[#00f0ff] px-4">
-        <div className="text-lg font-semibold mb-2">
-          {t("governance.error_title", { defaultValue: "Xəta baş verdi" })}
-        </div>
-        <div className="text-sm text-[#8bdcff] mb-4">
-          {t("governance.error_subtitle", {
-            defaultValue: "Bir az sonra yenidən yoxlayın.",
-          })}
-        </div>
-        <button
-          onClick={() => window.location.reload()}
-          className="px-4 py-2 rounded-xl bg-[#00f0ff] text-[#0b1220] font-semibold"
-        >
-          {t("governance.retry", { defaultValue: "Yenidən cəhd et" })}
-        </button>
-      </div>
-    );
-  }
-
-  if (!proposal) {
-    return (
-      <div className="w-full min-h-screen flex flex-col items-center justify-center bg-[#131f2f] text-center text-[#00f0ff] px-4">
-        <div className="text-lg font-semibold mb-2">
-          {t("governance.empty_title", {
-            defaultValue: "Hazırda aktiv səsvermə yoxdur",
-          })}
-        </div>
-        <div className="text-sm text-[#8bdcff]">
-          {t("governance.empty_subtitle", {
-            defaultValue: "Yeni səsvermələr tezliklə əlavə olunacaq.",
-          })}
-        </div>
-      </div>
-    );
-  }
-
   return (
-    <div className="w-full min-h-screen bg-[#131f2f] text-[#00f0ff] px-4 py-6 flex flex-col items-center">
-      <div className="w-full max-w-md">
-        <h1 className="text-2xl font-bold mb-2 drop-shadow">
-          {t("governance.title", { defaultValue: "Gappick DAO səsverməsi" })}
-        </h1>
-        <p className="text-sm text-[#8bdcff] mb-4">
-          {proposal.title}
-        </p>
+    <div className="min-h-screen bg-[#131f2f] text-[#00f0ff] px-4 py-6 flex flex-col items-center">
+      <h1 className="text-2xl font-bold mb-2 text-center drop-shadow-md">
+        {t('dao.title', { defaultValue: 'DAO səsvermə' })}
+      </h1>
 
-        {/* power info */}
-        {power && (
-          <div className="mb-4 p-3 rounded-xl bg-[#0b1724] border border-[#1f3b57] text-xs text-[#a4e4ff]">
-            <div className="flex justify-between mb-1">
-              <span>{t("governance.power_total", { defaultValue: "Ümumi səs gücü" })}</span>
-              <span>{power.total_power}</span>
-            </div>
-            <div className="flex justify-between mb-1">
-              <span>{t("governance.power_available", { defaultValue: "Mövcud səs gücü" })}</span>
-              <span>{power.available_power}</span>
-            </div>
-            <div className="flex justify-between">
-              <span>{t("governance.power_used", { defaultValue: "Artıq istifadə olunub" })}</span>
-              <span>{power.used_power}</span>
-            </div>
+      <p className="text-sm text-[#7ee9ff] mb-4 text-center max-w-md">
+        {t('dao.subtitle', {
+          defaultValue:
+            'Gappick DAO: Səsin çəkisi — sənin $GAP balansındır. Hər 1 $GAP = 1 səs vahidi.',
+        })}
+      </p>
+
+      <div className="w-full max-w-md bg-[#0e1a2b] border border-[#00f0ff40] rounded-xl p-3 mb-4">
+        <div className="text-xs text-[#7ee9ff] mb-1">
+          {t('dao.balance_label', { defaultValue: 'Sənin balansın' })}
+        </div>
+        <div className="flex items-baseline justify-between">
+          <div className="text-lg font-semibold">
+            {loadingBalance ? '…' : `${balance.toLocaleString()} $GAP`}
           </div>
-        )}
+          <div className="text-xs text-[#a0f6ff]">
+            {t('dao.remaining', {
+              defaultValue: 'Bu səsvermə üçün qalan: {{value}}',
+              value: remaining.toLocaleString(),
+            })}{' '}
+            $GAP
+          </div>
+        </div>
+      </div>
 
-        {/* presets */}
-        {power && (
-          <div className="mb-4">
-            <div className="text-xs text-[#8bdcff] mb-1">
-              {t("governance.presets_label", {
-                defaultValue: "Səs gücünü tez seç:",
-              })}
-            </div>
-            <div className="flex flex-wrap gap-2">
-              {[0, 10, 25, 50, 100].map((p) => (
-                <button
-                  key={p}
-                  type="button"
-                  onClick={() => applyPreset(p)}
-                  className="px-2 py-1 rounded-full bg-[#0b1724] border border-[#1f3b57] text-xs hover:border-[#00f0ff] active:scale-95 transition"
+      {loadingProposals && (
+        <div className="text-sm text-[#7ee9ff] mt-4">
+          {t('dao.loading', { defaultValue: 'Səsvermə yüklənir…' })}
+        </div>
+      )}
+
+      {!loadingProposals && !selectedProposal && (
+        <div className="text-sm text-[#7ee9ff] mt-4 text-center">
+          {t('dao.no_active', {
+            defaultValue: 'Hazırda aktiv səsvermə yoxdur.',
+          })}
+        </div>
+      )}
+
+      {!loadingProposals && selectedProposal && (
+        <div className="w-full max-w-md bg-[#0e1a2b] border border-[#00f0ff40] rounded-2xl p-4 mt-2">
+          <div className="mb-2">
+            <h2 className="text-lg font-semibold text-[#7ee9ff]">
+              {selectedProposal.title}
+            </h2>
+            {selectedProposal.description && (
+              <p className="text-xs text-[#a0f6ff] mt-1 whitespace-pre-line">
+                {selectedProposal.description}
+              </p>
+            )}
+          </div>
+
+          <div className="mt-3 space-y-3">
+            {selectedProposal.options.map((opt) => {
+              const current = votes[opt.id] || 0;
+              const imgSrc = resolveImageUrl(opt.art_image_url);
+
+              return (
+                <div
+                  key={opt.id}
+                  className="bg-[#111f33] border border-[#1f3b57] rounded-xl p-3 flex gap-3"
                 >
-                  {p}%
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* options */}
-        <div className="space-y-3 mb-4">
-          {proposal.options.map((opt) => {
-            const value = selectedVotes[opt.id] || 0;
-            const imgSrc = opt.image_url || undefined;
-            return (
-              <div
-                key={opt.id}
-                className="p-3 rounded-xl bg-[#0b1724] border border-[#1f3b57] flex gap-3"
-              >
-                {imgSrc && (
-                  <div className="w-16 h-16 rounded-lg overflow-hidden flex-shrink-0 border border-[#1f3b57] bg-black/40">
-                    <img
-                      src={imgSrc}
-                      alt={opt.label}
-                      className="w-full h-full object-cover"
-                    />
+                  <div className="w-16 h-16 rounded-lg overflow-hidden flex-shrink-0 bg-[#0d273d] flex items-center justify-center">
+                    {imgSrc ? (
+                      <img
+                        src={imgSrc}
+                        alt={opt.art_title ?? opt.label ?? ''}
+                        className="w-full h-full object-cover"
+                      />
+                    ) : (
+                      <span className="text-xs text-[#7ee9ff] px-1 text-center">
+                        {t('dao.no_image', { defaultValue: 'İllüstrasiya yoxdur' })}
+                      </span>
+                    )}
                   </div>
-                )}
-                <div className="flex-1">
-                  <div className="text-sm font-semibold mb-1">{opt.label}</div>
-                  <div className="text-[11px] text-[#8bdcff] mb-2">
-                    {t("governance.option_total_votes", {
-                      defaultValue: "Toplam səs:",
-                    })}{" "}
-                    {opt.total_votes}
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => handleChangeVotes(opt.id, -100)}
-                      className="px-2 py-1 rounded-lg bg-[#09101b] text-xs"
-                    >
-                      -100
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleChangeVotes(opt.id, -10)}
-                      className="px-2 py-1 rounded-lg bg-[#09101b] text-xs"
-                    >
-                      -10
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleChangeVotes(opt.id, -1)}
-                      className="px-2 py-1 rounded-lg bg-[#09101b] text-xs"
-                    >
-                      -1
-                    </button>
 
-                    <div className="flex-1 text-center text-sm font-semibold">
-                      {value}
+                  <div className="flex-1 flex flex-col justify-between">
+                    <div>
+                      <div className="text-sm font-semibold text-white">
+                        {opt.art_title ||
+                          opt.label ||
+                          t('dao.option_no_title', { defaultValue: 'Variant' })}
+                      </div>
+                      {opt.art_author_telegram_id && (
+                        <div className="text-[11px] text-[#7ee9ff] mt-0.5">
+                          {t('dao.author_label', { defaultValue: 'Müəllif (TG ID):' })}{' '}
+                          {opt.art_author_telegram_id}
+                        </div>
+                      )}
                     </div>
-
-                    <button
-                      type="button"
-                      onClick={() => handleChangeVotes(opt.id, +1)}
-                      className="px-2 py-1 rounded-lg bg-[#09101b] text-xs"
-                    >
-                      +1
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleChangeVotes(opt.id, +10)}
-                      className="px-2 py-1 rounded-lg bg-[#09101b] text-xs"
-                    >
-                      +10
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleChangeVotes(opt.id, +100)}
-                      className="px-2 py-1 rounded-lg bg-[#09101b] text-xs"
-                    >
-                      +100
-                    </button>
+                    <div className="mt-2 flex items-center justify-between gap-2">
+                      <div className="text-xs text-[#a0f6ff]">
+                        {t('dao.votes_for_option', {
+                          defaultValue: 'Bu işə ayırdığın səs:',
+                        })}{' '}
+                        <span className="font-semibold text-[#00f0ff]">
+                          {current.toLocaleString()}
+                        </span>
+                      </div>
+                      {/* Пресеты 10 / 25 / 50 / 100 % */}
+                      <div className="flex flex-wrap items-center gap-1 justify-end">
+                        {[0.1, 0.25, 0.5, 1].map((fraction) => (
+                          <button
+                            key={fraction}
+                            className="px-2 py-1 rounded-full bg-[#0d273d] border border-[#1f3b57] text-[10px] text-[#7ee9ff] flex items-center justify-center active:scale-95 disabled:opacity-40"
+                            onClick={() => setVotePercent(opt.id, fraction)}
+                            disabled={submitting || balance <= 0}
+                          >
+                            {Math.round(fraction * 100)}%
+                          </button>
+                        ))}
+                      </div>
+                    </div>
                   </div>
                 </div>
-              </div>
-            );
-          })}
-        </div>
-
-        {/* summary + submit */}
-        {power && (
-          <div className="mb-2 text-xs text-[#8bdcff]">
-            {t("governance.total_selected", {
-              defaultValue: "Seçilmiş səs sayı:",
-            })}{" "}
-            {totalSelected} / {availablePower}
+              );
+            })}
           </div>
-        )}
 
-        <button
-          type="button"
-          disabled={submitting || !power || totalSelected <= 0 || totalSelected > availablePower}
-          onClick={handleSubmit}
-          className={`w-full py-2 mt-2 rounded-xl font-semibold ${
-            submitting || !power || totalSelected <= 0 || totalSelected > availablePower
-              ? "bg-[#1a2a3d] text-[#5d7c91] cursor-not-allowed"
-              : "bg-[#00f0ff] text-[#0b1220] hover:opacity-90 active:scale-[0.98]"
-          } transition`}
-        >
-          {submitting
-            ? t("governance.submitting", { defaultValue: "Göndərilir..." })
-            : t("governance.submit", { defaultValue: "Səs ver" })}
-        </button>
-      </div>
+          <button
+            className="mt-4 w-full py-2.5 rounded-xl bg-[#00f0ff] text-[#0e1a2b] font-semibold text-sm shadow-[0_0_12px_#00f0ff55] active:scale-95 disabled:opacity-40"
+            onClick={handleSubmit}
+            disabled={submitting || usedLocally <= 0}
+          >
+            {submitting
+              ? t('dao.submitting', { defaultValue: 'Səs göndərilir…' })
+              : t('dao.submit', { defaultValue: 'Səs vermək' })}
+          </button>
+
+          {usedLocally > 0 && (
+            <div className="mt-2 text-[11px] text-[#a0f6ff] text-center">
+              {t('dao.local_used', {
+                defaultValue: 'Bu sessiyada ayırdığın cəmi: {{value}} $GAP',
+                value: usedLocally.toLocaleString(),
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
+      {error && (
+        <div className="mt-4 text-xs text-center text-red-300 max-w-md">
+          {error}
+        </div>
+      )}
+      {message && (
+        <div className="mt-4 text-xs text-center text-[#a0f6ff] max-w-md">
+          {message}
+        </div>
+      )}
     </div>
   );
 };
 
-export default Governance;
+export default DaoPage;
+
+
 
 
 
