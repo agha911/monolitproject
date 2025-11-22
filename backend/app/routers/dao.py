@@ -166,12 +166,17 @@ async def vote_for_proposal(
     session: AsyncSession = Depends(get_async_session),
 ):
     """
-    Голосование пользователя за варианты DAO.
-    Без использования async with session.begin(), чтобы избежать ошибки
-    'A transaction is already begun on this Session'.
-    """
+    Принять голоса пользователя по одному голосованию.
 
-    # --- разбор init_data ---
+    Логика:
+    - init_data → telegram_id → User
+    - проверяем, что proposal активен
+    - проверяем, что option_id принадлежат proposal
+    - вызываем cast_vote для каждой опции
+    - commit / rollback без session.begin(), чтобы не ловить
+      `A transaction is already begun on this Session`
+    """
+    # --- находим пользователя по init_data ---
     try:
         telegram_id = int(parse_telegram_user_id(payload.init_data))
     except Exception:
@@ -181,37 +186,34 @@ async def vote_for_proposal(
     if not user:
         raise HTTPException(status_code=404, detail="user_not_found")
 
+    user_id = int(user.id)  # сохраняем простое значение, чтобы не трогать ORM в except
+
     if not payload.votes:
         raise HTTPException(status_code=400, detail="empty_votes")
 
-    # --- грузим предложение ---
+    # --- загружаем предложение ---
     proposal = await _load_proposal_or_404(session, proposal_id)
+    proposal_id_int = int(proposal.id)
 
-    # --- грузим опции ---
-    options = await crud_dao.list_options_for_proposal(session, proposal_id)
-    options_map = {o.id: o for o in options}
+    # --- загружаем опции и мапим по id ---
+    options = await crud_dao.list_options_for_proposal(session, proposal_id_int)
+    options_map: Dict[int, DaoOption] = {o.id: o for o in options}
 
-    # проверка соответствия option_id
-    for vote in payload.votes:
-        if vote.option_id not in options_map:
+    # проверяем, что все option_id принадлежат этому proposal
+    for v in payload.votes:
+        if v.option_id not in options_map:
             raise HTTPException(
                 status_code=400,
-                detail=f"option_not_in_proposal:{vote.option_id}",
+                detail=f"option_not_in_proposal:{v.option_id}",
             )
 
     from sqlalchemy import exc as sa_exc
 
-    # ---------------------------
-    #  ГЛАВНАЯ ЧАСТЬ — ТРАНЗАКЦИЯ
-    # ---------------------------
+    # --- основная часть без session.begin() ---
     try:
-        # Начинаем вручную (без session.begin())
-        await session.begin()
-
-        # лочим пользователя
-        db_user = await crud_user.get_user_for_update(session, user.id)
+        # блокируем пользователя (как в clicker)
+        db_user = await crud_user.get_user_for_update(session, user_id)
         if not db_user:
-            await session.rollback()
             raise HTTPException(status_code=404, detail="user_not_found")
 
         # применяем все голоса
@@ -225,29 +227,38 @@ async def vote_for_proposal(
                 weight=v.weight,
             )
 
-        # коммитим транзакцию
+        # фиксируем изменения
         await session.commit()
 
+    except HTTPException:
+        # если где-то внутри мы кинули HTTPException — просто откатываем и пробрасываем
+        await session.rollback()
+        raise
+
     except ValueError as e:
+        # ValueError — это наши бизнес-ошибки из cast_vote (например insufficient_balance)
         await session.rollback()
         raise HTTPException(status_code=400, detail=str(e))
 
     except sa_exc.SQLAlchemyError:
+        # всё остальное — настоящие DB-ошибки
         await session.rollback()
         log.exception(
             "dao.vote.db_error | proposal_id=%s user_id=%s votes=%s",
-            proposal_id,
-            user.id if user else None,
+            proposal_id_int,
+            user_id,
             [(v.option_id, v.weight) for v in payload.votes],
         )
         raise HTTPException(status_code=500, detail="db_error_internal")
 
-    # транзакция завершена — считаем итог
+    # --- если мы здесь — всё успешно закоммичено ---
     used_weight = await crud_dao.get_user_vote_total_weight(
         session,
-        proposal_id=proposal.id,
-        user_id=user.id,
+        proposal_id=proposal_id_int,
+        user_id=user_id,
     )
+
+    # показываем актуальный баланс (на голосование мы его не уменьшаем)
     balance = int(user.total_xp or 0)
 
     return VoteResponse(
