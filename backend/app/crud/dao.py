@@ -254,53 +254,74 @@ async def cast_vote(
     option: DaoOption,
     user: User,
     weight: int,
-) -> DaoVote:
+) -> DaoVote | None:
     """
-    Основная логика голосования:
-    - проверка временного окна (starts_at/ends_at, is_active);
-    - проверка, что option принадлежит этому proposal;
-    - лимит: суммарный вес голосов пользователя по этому proposal
-      не может превышать его текущий total_xp;
-    - создаём запись в DaoVote.
-    Коммита здесь НЕТ — его делает вызывающий код.
+    Устанавливает голос пользователя за КОНКРЕТНУЮ опцию.
+
+    ВАЖНО:
+      - `weight` трактуем как *конечный вес* по этой опции (а не дельту).
+      - На уровне БД есть UNIQUE(proposal_id, user_id, option_id),
+        поэтому мы делаем upsert: update / insert / delete.
+
+    Правила:
+      - weight < 0 → ValueError("weight_must_be_non_negative")
+      - sum(weights по другим опциям) + weight <= user.total_xp,
+        иначе ValueError("not_enough_balance")
+      - если weight == 0 → удаляем голос по этой опции (если был).
     """
-    now = datetime.utcnow()
+    if weight < 0:
+        raise ValueError("weight_must_be_non_negative")
 
-    if not proposal.is_active:
-        raise ValueError("proposal_not_active")
-    if now < proposal.starts_at:
-        raise ValueError("proposal_not_started")
-    if now > proposal.ends_at:
-        raise ValueError("proposal_ended")
+    user_id = int(user.id)
+    proposal_id = int(proposal.id)
+    option_id = int(option.id)
 
-    if option.proposal_id != proposal.id:
-        raise ValueError("option_not_belongs_to_proposal")
-
-    if weight <= 0:
-        raise ValueError("invalid_weight")
-
-    # лимит по монетам (простой вариант: берем текущий баланс total_xp)
-    user_balance = int(user.total_xp or 0)
-    if user_balance <= 0:
-        raise ValueError("insufficient_balance")
-
-    used_weight = await get_user_vote_total_weight(
-        session,
-        proposal_id=proposal.id,
-        user_id=user.id,
+    # Загружаем ВСЕ голоса пользователя по этому предложению
+    res = await session.execute(
+        select(DaoVote).where(
+            DaoVote.proposal_id == proposal_id,
+            DaoVote.user_id == user_id,
+        )
     )
+    existing_votes = list(res.scalars())
 
-    if used_weight + weight > user_balance:
-        # пользователь пытается проголосовать на вес,
-        # превышающий его текущий баланс $GAP
-        raise ValueError("weight_exceeds_balance")
+    # Находим голос именно по этой опции (если есть)
+    vote_for_option: DaoVote | None = None
+    other_total = 0
 
-    vote = DaoVote(
-        proposal_id=proposal.id,
-        option_id=option.id,
-        user_id=user.id,
-        weight=weight,
+    for v in existing_votes:
+        if v.option_id == option_id:
+            vote_for_option = v
+        else:
+            other_total += int(v.weight or 0)
+
+    # Проверяем лимит: остальные голоса + новый weight по этой опции
+    # не должны превышать текущий total_xp пользователя
+    total_xp = int(user.total_xp or 0)
+    if other_total + weight > total_xp:
+        raise ValueError("not_enough_balance")
+
+    # Если вес 0 — удаляем голос по этой опции (если был) и выходим
+    if weight == 0:
+        if vote_for_option is not None:
+            await session.delete(vote_for_option)
+        return None
+
+    # Если голос по опции уже есть — обновляем weight
+    if vote_for_option is not None:
+        vote_for_option.weight = int(weight)
+        # created_at можно не трогать — оставить момент первого голосования
+        # или, если хочешь, обновить:
+        # vote_for_option.created_at = datetime.utcnow()
+        return vote_for_option
+
+    # Иначе — создаём новую запись
+    new_vote = DaoVote(
+        proposal_id=proposal_id,
+        user_id=user_id,
+        option_id=option_id,
+        weight=int(weight),
+        # created_at не выставляем руками — сработает server_default=now()
     )
-    session.add(vote)
-    await session.flush()
-    return vote
+    session.add(new_vote)
+    return new_vote
