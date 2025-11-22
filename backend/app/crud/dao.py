@@ -285,7 +285,6 @@ async def cast_vote(
             DaoVote.user_id == user.id,
             DaoVote.option_id == option.id,
         )
-        .with_for_update()
     )
 
     now = datetime.utcnow()
