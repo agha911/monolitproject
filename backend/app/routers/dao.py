@@ -16,7 +16,9 @@ from app.crud import user as crud_user
 from app.crud import dao as crud_dao
 from app.models.dao import DaoProposal, DaoOption, ArtWork
 from app.models.user import User
+import logging
 
+log = logging.getLogger("dao.vote")
 
 router = APIRouter(prefix="/api/dao", tags=["dao"])
 
@@ -237,9 +239,15 @@ async def vote_for_proposal(
     except ValueError as e:
         # наши ValueError из cast_vote — аккуратно в 400 с кодом
         raise HTTPException(status_code=400, detail=str(e))
-    except sa_exc.SQLAlchemyError:
-        # на всякий пожарный
-        raise HTTPException(status_code=500, detail="db_error")
+    except sa_exc.SQLAlchemyError as e:
+        # 🔥 ключевой момент
+        log.exception(
+            "dao.vote.db_error | proposal_id=%s user_id=%s votes=%s",
+            proposal_id,
+            user.id if user else None,
+            [(v.option_id, v.weight) for v in payload.votes],
+        )
+        raise HTTPException(status_code=500, detail="db_error_internal")
 
 
 # ─────────────────────────
