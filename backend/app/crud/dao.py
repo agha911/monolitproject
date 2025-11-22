@@ -255,14 +255,6 @@ async def cast_vote(
     user: User,
     weight: int,
 ) -> DaoVote:
-    """
-    Записать голос пользователя за конкретную опцию.
-
-    ✓ Проверяем, что вес > 0
-    ✓ Смотрим, сколько пользователь уже потратил голосов по ЭТОМУ proposal (кроме этой опции)
-    ✓ Не даём превысить текущий total_xp пользователя
-    ✓ Либо создаём новую запись DaoVote, либо обновляем существующую
-    """
 
     w = int(weight)
     if w <= 0:
@@ -270,7 +262,7 @@ async def cast_vote(
 
     user_balance = int(user.total_xp or 0)
 
-    # Сколько уже потрачено по этому proposal, КРОМЕ этой опции
+    # Сколько уже потрачено на другие опции — БЕЗ FOR UPDATE (ВАЖНО!)
     used_other = await session.scalar(
         select(func.coalesce(func.sum(DaoVote.weight), 0))
         .where(
@@ -278,16 +270,14 @@ async def cast_vote(
             DaoVote.user_id == user.id,
             DaoVote.option_id != option.id,
         )
-        .with_for_update()
     )
     used_other = int(used_other or 0)
 
-    # Проверяем лимит: уже потрачено + то, что хотим поставить сейчас
+    # Проверка лимита
     if used_other + w > user_balance:
-        # важно — бросаем ValueError, чтобы роутер превратил это в 400
         raise ValueError("insufficient_balance")
 
-    # Пытаемся найти существующий голос по этой опции
+    # Здесь оставляем FOR UPDATE — именно он нужен
     existing_vote = await session.scalar(
         select(DaoVote)
         .where(
@@ -301,12 +291,9 @@ async def cast_vote(
     now = datetime.utcnow()
 
     if existing_vote:
-        # просто обновляем вес (перезаписываем то, что пользователь выбрал для этой опции)
         existing_vote.weight = w
-        # created_at можно оставить как есть, или обновить — на твой вкус
         vote = existing_vote
     else:
-        # создаём новый голос
         vote = DaoVote(
             proposal_id=proposal.id,
             user_id=user.id,
@@ -315,9 +302,5 @@ async def cast_vote(
             created_at=now,
         )
         session.add(vote)
-
-    # flush НЕ обязателен здесь, т.к. ты и так делаешь commit в роутере,
-    # но можно оставить, чтобы ошибки вылезли сразу:
-    # await session.flush()
 
     return vote
