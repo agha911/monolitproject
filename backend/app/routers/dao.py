@@ -172,11 +172,10 @@ async def vote_for_proposal(
     - init_data → telegram_id → User
     - проверяем, что proposal активен
     - проверяем, что option_id принадлежат proposal
-    - вызываем cast_vote для каждой опции
-    - commit / rollback без session.begin(), чтобы не ловить
-      `A transaction is already begun on this Session`
+    - один раз фиксируем voting power пользователя для этого proposal
+    - вызываем cast_vote для каждой опции с ОДНИМ и тем же effective_balance
+    - commit / rollback без session.begin()
     """
-    # --- находим пользователя по init_data ---
     try:
         telegram_id = int(parse_telegram_user_id(payload.init_data))
     except Exception:
@@ -186,7 +185,7 @@ async def vote_for_proposal(
     if not user:
         raise HTTPException(status_code=404, detail="user_not_found")
 
-    user_id = int(user.id)  # сохраняем простое значение, чтобы не трогать ORM в except
+    user_id = int(user.id)
 
     if not payload.votes:
         raise HTTPException(status_code=400, detail="empty_votes")
@@ -209,14 +208,24 @@ async def vote_for_proposal(
 
     from sqlalchemy import exc as sa_exc
 
-    # --- основная часть без session.begin() ---
     try:
         # блокируем пользователя (как в clicker)
         db_user = await crud_user.get_user_for_update(session, user_id)
         if not db_user:
+            await session.rollback()
             raise HTTPException(status_code=404, detail="user_not_found")
 
-        # применяем все голоса
+        # ⚠️ КЛЮЧЕВОЕ МЕСТО:
+        # фиксируем voting power для ЭТОГО пользователя и ЭТОГО голосования
+        current_balance = int(db_user.total_xp or 0)
+        effective_balance = await crud_dao.get_user_effective_voting_balance(
+            session,
+            user_id=user_id,
+            proposal_id=proposal_id_int,
+            current_balance=current_balance,
+        )
+
+        # применяем все голоса в рамках одного зафиксированного лимита
         for v in payload.votes:
             opt = options_map[v.option_id]
             await crud_dao.cast_vote(
@@ -225,23 +234,20 @@ async def vote_for_proposal(
                 option=opt,
                 user=db_user,
                 weight=v.weight,
+                effective_balance=effective_balance,
             )
 
-        # фиксируем изменения
         await session.commit()
 
     except HTTPException:
-        # если где-то внутри мы кинули HTTPException — просто откатываем и пробрасываем
         await session.rollback()
         raise
 
     except ValueError as e:
-        # ValueError — это наши бизнес-ошибки из cast_vote (например insufficient_balance)
         await session.rollback()
         raise HTTPException(status_code=400, detail=str(e))
 
     except sa_exc.SQLAlchemyError:
-        # всё остальное — настоящие DB-ошибки
         await session.rollback()
         log.exception(
             "dao.vote.db_error | proposal_id=%s user_id=%s votes=%s",
@@ -258,7 +264,7 @@ async def vote_for_proposal(
         user_id=user_id,
     )
 
-    # показываем актуальный баланс (на голосование мы его не уменьшаем)
+    # На голосование баланс мы НЕ уменьшаем — показываем текущий total_xp
     balance = int(user.total_xp or 0)
 
     return VoteResponse(
