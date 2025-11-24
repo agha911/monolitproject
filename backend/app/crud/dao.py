@@ -254,18 +254,27 @@ async def cast_vote(
     option: DaoOption,
     user: User,
     weight: int,
+    effective_balance: int,
 ) -> DaoVote:
+    """
+    Записать голос пользователя за конкретную опцию.
+
+    ✓ Проверяем, что вес > 0
+    ✓ Смотрим, сколько пользователь уже потратил голосов по ЭТОМУ proposal (кроме этой опции)
+    ✓ Не даём превысить ЗАФИКСИРОВАННЫЙ effective_balance (а не текущий total_xp)
+    ✓ Либо создаём новую запись DaoVote, либо обновляем существующую
+    """
 
     w = int(weight)
     if w <= 0:
         raise ValueError("weight_must_be_positive")
 
-    user_balance = int(user.total_xp or 0)
+    # ⚠️ ВАЖНО: больше не берём user.total_xp, используем зафиксированный effective_balance
+    user_balance = int(effective_balance or 0)
 
-    # Сколько уже потрачено на другие опции — БЕЗ FOR UPDATE (ВАЖНО!)
+    # Сколько уже потрачено на другие опции (без этой)
     used_other = await session.scalar(
-        select(func.coalesce(func.sum(DaoVote.weight), 0))
-        .where(
+        select(func.coalesce(func.sum(DaoVote.weight), 0)).where(
             DaoVote.proposal_id == proposal.id,
             DaoVote.user_id == user.id,
             DaoVote.option_id != option.id,
@@ -273,14 +282,13 @@ async def cast_vote(
     )
     used_other = int(used_other or 0)
 
-    # Проверка лимита
+    # Проверка лимита относительно зафиксированного баланса
     if used_other + w > user_balance:
         raise ValueError("insufficient_balance")
 
-    # Здесь оставляем FOR UPDATE — именно он нужен
+    # Пытаемся найти существующий голос по этой опции
     existing_vote = await session.scalar(
-        select(DaoVote)
-        .where(
+        select(DaoVote).where(
             DaoVote.proposal_id == proposal.id,
             DaoVote.user_id == user.id,
             DaoVote.option_id == option.id,
