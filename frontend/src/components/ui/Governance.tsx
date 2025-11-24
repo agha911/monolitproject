@@ -3,6 +3,8 @@ import WebApp from '@twa-dev/sdk';
 import { useTranslation } from 'react-i18next';
 import API_BASE_URL from '../config';
 
+const CURRENT_PROPOSAL_ID = 1; // <-- вручную указываем ID голосования
+
 type DaoOptionArt = {
   id: number;
   label: string | null;
@@ -32,21 +34,36 @@ type VoteResponse = {
   balance: number;
 };
 
-// ==========================================================
-//              Корректная загрузка картинки
-// ==========================================================
+type DaoResultItem = {
+  option_id: number;
+  art_work_id: number | null;
+  label: string | null;
+  art_title: string | null;
+  art_image_url: string | null;
+  total_weight: number;
+  votes_count: number;
+};
+
+type DaoResultsOut = {
+  proposal_id: number;
+  title: string;
+  results: DaoResultItem[];
+};
+
+// ---------- картинка ----------
 const resolveImageUrl = (src: string | null): string | null => {
   if (!src) return null;
+
   try {
     if (/^https?:\/\//i.test(src)) {
       const u = new URL(src);
       return u.pathname || null;
     }
   } catch {}
+
   if (!src.startsWith('/')) src = '/' + src;
   return src;
 };
-// ==========================================================
 
 const DaoPage: React.FC = () => {
   const { t } = useTranslation();
@@ -56,21 +73,18 @@ const DaoPage: React.FC = () => {
   const [proposals, setProposals] = useState<DaoProposal[]>([]);
   const [loadingProposals, setLoadingProposals] = useState(true);
 
-  // 🔹 votingBalance — лимит голосов для ЭТОГО голосования
-  const [votingBalance, setVotingBalance] = useState<number>(0);
+  const [results, setResults] = useState<DaoResultsOut | null>(null);
+  const [loadingResults, setLoadingResults] = useState(false);
+
+  const [balance, setBalance] = useState<number>(0);
   const [loadingBalance, setLoadingBalance] = useState(true);
-
-  // 🔹 сколько уже потрачено по этому proposal (по данным бэка)
-  const [usedAlready, setUsedAlready] = useState<number>(0);
-
-  // 🔹 флаг: уже был успешный голос → дальше /game/progress не трогает лимит
-  const [hasVoted, setHasVoted] = useState<boolean>(false);
 
   const [votes, setVotes] = useState<Record<number, number>>({});
   const [submitting, setSubmitting] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  // Telegram init
   useEffect(() => {
     WebApp.ready();
     const user = WebApp.initDataUnsafe?.user;
@@ -79,7 +93,7 @@ const DaoPage: React.FC = () => {
 
   const initData = WebApp.initData;
 
-  // --- загрузка исходного баланса (до первого голосования он же лимит) ---
+  // загрузка баланса
   useEffect(() => {
     if (!initData) return;
 
@@ -92,19 +106,16 @@ const DaoPage: React.FC = () => {
           body: JSON.stringify({ init_data: initData }),
         });
         const data = await res.json();
-        // Пока пользователь ещё не голосовал — берём лимит из total_xp.
-        if (!hasVoted) {
-          setVotingBalance(Number(data.total_xp ?? 0));
-        }
+        setBalance(Number(data.total_xp ?? 0));
       } catch (e) {
         console.error('Ошибка загрузки баланса:', e);
       } finally {
         setLoadingBalance(false);
       }
     })();
-  }, [initData, hasVoted]);
+  }, [initData]);
 
-  // --- загрузка предложений ---
+  // загружаем активные голосования
   useEffect(() => {
     (async () => {
       try {
@@ -112,52 +123,53 @@ const DaoPage: React.FC = () => {
         const res = await fetch(`${API_BASE_URL}/api/dao/proposals/active`);
         const data: DaoProposal[] = await res.json();
         setProposals(data || []);
+
+        if (!data || data.length === 0) {
+          // --- голосование закончилось — грузим результаты ---
+          setLoadingResults(true);
+          const r = await fetch(
+            `${API_BASE_URL}/api/dao/proposals/${CURRENT_PROPOSAL_ID}/results`
+          );
+          if (r.ok) {
+            const rs: DaoResultsOut = await r.json();
+            setResults(rs);
+          }
+          setLoadingResults(false);
+        }
       } catch (e) {
-        console.error('Ошибка DAO:', e);
+        console.error('Ошибка загрузки голосований:', e);
       } finally {
         setLoadingProposals(false);
       }
     })();
   }, []);
 
-  const selectedProposal = useMemo(
-    () => (proposals.length > 0 ? proposals[0] : null),
-    [proposals]
-  );
+  const selectedProposal = proposals.length > 0 ? proposals[0] : null;
 
-  // Локально выбранные веса в текущей сессии (ещё не отправлены)
   const usedLocally = useMemo(
     () => Object.values(votes).reduce((s, w) => s + w, 0),
     [votes]
   );
+  const remaining = Math.max(0, balance - usedLocally);
 
-  // Реально доступно сейчас: лимит - уже потрачено - то, что пользователь сейчас раскидывает
-  const remaining = Math.max(0, votingBalance - usedAlready - usedLocally);
-
-  // ==========================================================
-  //          Пресеты с учётом уже потраченного usedAlready
-  // ==========================================================
+  // ---------- пресеты ----------
   const setVotePercent = (optionId: number, fraction: number) => {
     if (!selectedProposal) return;
     setError(null);
     setMessage(null);
 
     setVotes((prev) => {
-      const base = Math.max(0, votingBalance - usedAlready); // сколько вообще можно ещё раскидать
-      const target = Math.floor(base * fraction);
-
-      const usedWithoutThis = Object.entries(prev).reduce((sum, [id, w]) => {
-        return sum + (Number(id) === optionId ? 0 : w);
+      const target = Math.floor(balance * fraction);
+      const usedWithout = Object.entries(prev).reduce((s, [id, w]) => {
+        return s + (Number(id) === optionId ? 0 : w);
       }, 0);
 
-      const maxForThisOption = Math.max(0, base - usedWithoutThis);
-      const next = Math.min(target, maxForThisOption);
-
-      return { ...prev, [optionId]: next };
+      const maxAllowed = Math.max(0, balance - usedWithout);
+      return { ...prev, [optionId]: Math.min(target, maxAllowed) };
     });
   };
-  // ==========================================================
 
+  // ---------- отправка голоса ----------
   const handleSubmit = async () => {
     if (!selectedProposal) return;
     if (!initData) {
@@ -188,76 +200,85 @@ const DaoPage: React.FC = () => {
         }
       );
 
-      const data: VoteResponse & { detail?: string } = await res.json();
+      const data = await res.json();
 
-      if (res.ok && data.status === 'ok') {
-        // ✅ фиксируем, что пользователь уже голосовал
-        setHasVoted(true);
-
-        // ✅ используем used_weight с бэка — сколько всего по этому proposal потрачено
-        if (typeof data.used_weight === 'number') {
-          setUsedAlready(Number(data.used_weight));
-        }
-
-        // ✅ balance — это уже серверный "зафиксированный" лимит для этого голосования
-        if (typeof data.balance === 'number') {
-          setVotingBalance(Number(data.balance));
-        }
-
-        setMessage(
-          `Голоса учтены. Использовано ${data.used_weight.toLocaleString()} из ${data.balance.toLocaleString()} $GAP.`
-        );
-        setVotes({});
-      } else {
-        const statusText = data.status || data.detail || `HTTP ${res.status}`;
-        setError(`Ошибка при отправке голоса: ${statusText}`);
+      if (!res.ok) {
+        setError(`Ошибка: ${data.detail || 'unknown'}`);
+        return;
       }
+
+      setMessage(`Голоса учтены: ${data.used_weight.toLocaleString()} GAP`);
+      setVotes({});
     } catch (e: any) {
-      setError(`Ошибка: ${e?.message || 'unknown'}`);
+      setError(e?.message || 'vote_error');
     } finally {
       setSubmitting(false);
     }
   };
 
-  // ==========================================================
-  //                       UI
-  // ==========================================================
+  // =======================================================================================
+  //                                     UI
+  // =======================================================================================
 
   return (
     <div className="min-h-screen bg-[#131f2f] text-[#00f0ff] px-4 py-6 flex flex-col items-center">
-      <h1 className="text-2xl font-bold mb-2 text-center">
-        {t('dao.title', { defaultValue: 'DAO səsvermə' })}
-      </h1>
+      <h1 className="text-2xl font-bold mb-2">DAO səsvermə</h1>
 
-      <p className="text-sm text-[#7ee9ff] mb-4 text-center max-w-md">
-        Səsin çəkisi — sənin GAP balansındır. Bu səsvermə üçün limit bir dəfə sabitlənir.
-      </p>
+      {/* ==================== РЕЖИМ РЕЗУЛЬТАТОВ ==================== */}
+      {results && !selectedProposal && (
+        <div className="w-full max-w-md bg-[#0e1a2b] border border-[#00f0ff40] rounded-2xl p-4 mt-4">
+          <h2 className="text-lg font-semibold mb-3 text-[#7ee9ff]">
+            Nəticələr: {results.title}
+          </h2>
 
-      {/* Блок лимита голосов для ЭТОГО голосования */}
-      <div className="w-full max-w-md bg-[#0e1a2b] border border-[#00f0ff40] rounded-xl p-3 mb-4">
-        <div className="text-xs mb-1 text-[#7ee9ff]">
-          Bu səsvermə üçün GAP limiti
-        </div>
-        <div className="flex justify-between items-baseline">
-          <div className="text-lg font-semibold">
-            {loadingBalance ? '…' : `${votingBalance.toLocaleString()} $GAP`}
+          <div className="space-y-4">
+            {results.results.map((r) => {
+              const img = resolveImageUrl(r.art_image_url);
+              const total = results.results.reduce(
+                (s, x) => s + x.total_weight,
+                0
+              );
+              const percent = total ? Math.round((r.total_weight / total) * 100) : 0;
+
+              return (
+                <div
+                  key={r.option_id}
+                  className="bg-[#111f33] rounded-xl border border-[#1f3b57] p-3 flex gap-3"
+                >
+                  <div className="w-16 h-16 rounded-lg bg-[#0d273d] overflow-hidden flex items-center justify-center">
+                    {img ? (
+                      <img src={img} className="w-full h-full object-cover" />
+                    ) : (
+                      <span className="text-xs text-[#7ee9ff]">No image</span>
+                    )}
+                  </div>
+
+                  <div className="flex-1">
+                    <div className="text-white text-sm font-semibold">
+                      {r.art_title || r.label}
+                    </div>
+                    <div className="text-[#7ee9ff] text-xs mt-1">
+                      {r.total_weight.toLocaleString()} GAP ({percent}%)
+                    </div>
+                    <div className="text-[#7ee9ff80] text-[10px]">
+                      Səslərin sayı: {r.votes_count}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
           </div>
-          <div className="text-xs text-[#a0f6ff] text-right">
-            Artıq istifadə olunub: {usedAlready.toLocaleString()} $GAP
-            <br />
-            Qalan: {remaining.toLocaleString()} $GAP
-          </div>
         </div>
-      </div>
+      )}
 
-      {/* Основной блок */}
+      {/* ==================== РЕЖИМ ГОЛОСОВАНИЯ ==================== */}
       {!loadingProposals && selectedProposal && (
-        <div className="w-full max-w-md bg-[#0e1a2b] border border-[#00f0ff40] rounded-2xl p-4 mt-2">
+        <div className="w-full max-w-md bg-[#0e1a2b] border border-[#00f0ff40] rounded-2xl p-4 mt-4">
           <h2 className="text-lg font-semibold text-[#7ee9ff]">
             {selectedProposal.title}
           </h2>
 
-          <div className="mt-3 space-y-4">
+          <div className="mt-3 space-y-3">
             {selectedProposal.options.map((opt) => {
               const current = votes[opt.id] || 0;
               const imgSrc = resolveImageUrl(opt.art_image_url);
@@ -265,10 +286,9 @@ const DaoPage: React.FC = () => {
               return (
                 <div
                   key={opt.id}
-                  className="bg-[#111f33] border border-[#1f3b57] rounded-xl p-4 flex gap-4"
+                  className="bg-[#111f33] border border-[#1f3b57] rounded-xl p-3 flex gap-3"
                 >
-                  {/* картинка чуть крупнее */}
-                  <div className="w-20 h-20 rounded-lg overflow-hidden flex-shrink-0 bg-[#0d273d] flex items-center justify-center">
+                  <div className="w-16 h-16 rounded-lg overflow-hidden bg-[#0d273d] flex-shrink-0 flex items-center justify-center">
                     {imgSrc ? (
                       <img src={imgSrc} className="w-full h-full object-cover" />
                     ) : (
@@ -276,12 +296,12 @@ const DaoPage: React.FC = () => {
                     )}
                   </div>
 
-                  <div className="flex-1 flex flex-col justify-between">
+                  <div className="flex-1">
                     <div className="text-sm font-semibold text-white">
                       {opt.art_title || opt.label}
                     </div>
 
-                    <div className="mt-3 flex items-center justify-between gap-2">
+                    <div className="mt-2 flex items-center justify-between gap-2">
                       <div className="text-xs text-[#a0f6ff]">
                         Səs:{' '}
                         <span className="font-semibold">
@@ -289,14 +309,13 @@ const DaoPage: React.FC = () => {
                         </span>
                       </div>
 
-                      {/* пресеты 0 / 10 / 25 / 50 / 100 */}
-                      <div className="flex gap-1 flex-wrap">
+                      <div className="flex gap-1">
                         {[0, 0.1, 0.25, 0.5, 1].map((fraction) => (
                           <button
                             key={fraction}
                             onClick={() => setVotePercent(opt.id, fraction)}
-                            disabled={submitting || votingBalance - usedAlready <= 0}
-                            className="px-2 py-1 rounded-full bg-[#0d273d] border border-[#1f3b57] text-[10px] text-[#7ee9ff] active:scale-95"
+                            disabled={submitting || balance <= 0}
+                            className="px-2 py-1 rounded-full bg-[#0d273d] border border-[#1f3b57] text-[10px] text-[#7ee9ff]"
                           >
                             {Math.round(fraction * 100)}%
                           </button>
@@ -310,8 +329,8 @@ const DaoPage: React.FC = () => {
           </div>
 
           <button
-            className="mt-5 w-full py-3 rounded-xl bg-[#00f0ff] text-[#0e1a2b] font-semibold"
-            disabled={submitting || usedLocally <= 0 || votingBalance - usedAlready <= 0}
+            className="mt-4 w-full py-2.5 rounded-xl bg-[#00f0ff] text-[#0e1a2b] font-semibold"
+            disabled={submitting || usedLocally <= 0}
             onClick={handleSubmit}
           >
             Səs vermək
@@ -326,6 +345,7 @@ const DaoPage: React.FC = () => {
 };
 
 export default DaoPage;
+
 
 
 
