@@ -8,7 +8,7 @@ from typing import Optional, Sequence
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.dao import ArtWork, DaoProposal, DaoOption, DaoVote
+from app.models.dao import ArtWork, DaoProposal, DaoUserVotingPower, DaoOption, DaoVote
 from app.models.user import User
 
 
@@ -303,3 +303,77 @@ async def cast_vote(
         session.add(vote)
 
     return vote
+
+
+async def get_user_voting_power_row(
+    session: AsyncSession,
+    *,
+    user_id: int,
+    proposal_id: int,
+) -> Optional[DaoUserVotingPower]:
+    """
+    Вернуть запись voting power по (user, proposal), если уже существует.
+    """
+    stmt = (
+        select(DaoUserVotingPower)
+        .where(
+            DaoUserVotingPower.user_id == user_id,
+            DaoUserVotingPower.proposal_id == proposal_id,
+        )
+        .limit(1)
+    )
+    res = await session.execute(stmt)
+    return res.scalar_one_or_none()
+
+
+async def get_or_create_user_voting_power(
+    session: AsyncSession,
+    *,
+    user_id: int,
+    proposal_id: int,
+    current_balance: int,
+) -> DaoUserVotingPower:
+    """
+    Если для (user, proposal) ещё нет записи — создаём её
+    с base_balance = current_balance.
+
+    Если уже есть — просто возвращаем существующую.
+    """
+    row = await get_user_voting_power_row(
+        session,
+        user_id=user_id,
+        proposal_id=proposal_id,
+    )
+    if row:
+        return row
+
+    row = DaoUserVotingPower(
+        user_id=user_id,
+        proposal_id=proposal_id,
+        base_balance=int(current_balance),
+    )
+    session.add(row)
+    # flush, чтобы id и значения точно записались в текущей транзакции
+    await session.flush()
+    return row
+
+
+async def get_user_effective_voting_balance(
+    session: AsyncSession,
+    *,
+    user_id: int,
+    proposal_id: int,
+    current_balance: int,
+) -> int:
+    """
+    Вернуть "эффективный" баланс для голосования:
+    - если пользователь голосует впервые по этому proposal → фиксируем current_balance;
+    - если уже голосовал → возвращаем зафиксированный base_balance.
+    """
+    row = await get_or_create_user_voting_power(
+        session,
+        user_id=user_id,
+        proposal_id=proposal_id,
+        current_balance=current_balance,
+    )
+    return int(row.base_balance or 0)
