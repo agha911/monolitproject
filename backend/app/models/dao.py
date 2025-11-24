@@ -5,8 +5,10 @@ from sqlalchemy import (
     String,
     Text,
     DateTime,
+    func,
     Boolean,
     ForeignKey,
+    UniqueConstraint,
     JSON,
 )
 from sqlalchemy.orm import relationship
@@ -167,3 +169,45 @@ class DaoVote(Base):
     option = relationship("DaoOption", back_populates="votes")
     user = relationship("User", backref="dao_votes")
 
+
+class DaoUserVotingPower(Base):
+    """
+    Фиксируем баланс пользователя на момент первого голосования
+    по конкретному proposal.
+
+    base_balance — сколько $GAP было у пользователя в момент,
+    когда он впервые проголосовал по этому proposal.
+    Потом мы этот баланс используем как "потолок" для суммарного веса.
+    """
+    __tablename__ = "dao_user_voting_power"
+
+    id = Column(Integer, primary_key=True, index=True)
+
+    user_id = Column(
+        Integer,
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    proposal_id = Column(
+        Integer,
+        ForeignKey("dao_proposals.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    base_balance = Column(
+        BigInteger,
+        nullable=False,
+    )
+
+    created_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+    )
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "proposal_id", name="uq_user_proposal_power"),
+    )
