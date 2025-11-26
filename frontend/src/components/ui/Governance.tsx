@@ -3,7 +3,7 @@ import WebApp from '@twa-dev/sdk';
 import { useTranslation } from 'react-i18next';
 import API_BASE_URL from '../config';
 
-const CURRENT_PROPOSAL_ID = 1; // <-- вручную указываем ID голосования
+const CURRENT_PROPOSAL_ID = 2; // <-- вручную указываем ID голосования
 
 type DaoOptionArt = {
   id: number;
