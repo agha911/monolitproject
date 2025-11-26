@@ -385,3 +385,38 @@ async def get_user_effective_voting_balance(
         current_balance=current_balance,
     )
     return int(row.base_balance or 0)
+
+async def get_user_remaining_voting_balance(
+    session: AsyncSession,
+    *,
+    user_id: int,
+    proposal_id: int,
+    current_balance: int,
+) -> int:
+    """
+    Сколько монет осталось доступно для голосования по этому proposal.
+
+    1) Берём "эффективный" лимит (base_balance), зафиксированный при первом голосовании.
+    2) Считаем, сколько уже потрачено по этому proposal (sum(weight)).
+    3) Возвращаем max(0, лимит - потрачено).
+    """
+    # 1. Лимит (cap) — зафиксированный base_balance
+    cap = await get_user_effective_voting_balance(
+        session=session,
+        user_id=user_id,
+        proposal_id=proposal_id,
+        current_balance=current_balance,
+    )
+
+    # 2. Сколько уже потрачено по всем опциям в рамках этого голосования
+    used = await get_user_vote_total_weight(
+        session=session,
+        proposal_id=proposal_id,
+        user_id=user_id,
+    )
+
+    remaining = cap - used
+    if remaining < 0:
+        remaining = 0
+
+    return int(remaining)
