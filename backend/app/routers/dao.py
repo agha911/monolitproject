@@ -76,7 +76,8 @@ class DaoResultsOut(BaseModel):
     title: str
     results: List[DaoResultItem]
 
-
+class DaoVotingBalanceOut(BaseModel):
+    balance: int
 # ─────────────────────────
 # helpers
 # ─────────────────────────
