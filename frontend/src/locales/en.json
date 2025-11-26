@@ -136,5 +136,22 @@
   "shop_tab_drops": "Drops",
   "errors": {
   "drop_user_limit_reached": "You’ve already used this drop."
-}
+},
+  "title": "DAO Voting",
+  "results": {
+    "heading": "Results:",
+    "votes_count": "Number of votes:"
+  },
+  "no_image": "No image",
+  "vote_label": "Vote:",
+  "submit_button": "Submit vote",
+  "message": {
+    "votes_accepted": "Votes accepted: {{amount}} GAP"
+  },
+  "errors": {
+    "init_data_missing": "Failed to initialize Telegram WebApp",
+    "no_votes": "You haven't allocated any votes",
+    "server": "Error: {{detail}}",
+    "vote_error": "An error occurred while voting"
+  }
 }
