@@ -3,7 +3,7 @@ import WebApp from '@twa-dev/sdk';
 import { useTranslation } from 'react-i18next';
 import API_BASE_URL from '../config';
 
-const CURRENT_PROPOSAL_ID = 2; // ID текущего голосования
+const CURRENT_PROPOSAL_ID = 2; // <-- вручную указываем ID голосования
 
 type DaoOptionArt = {
   id: number;
@@ -28,6 +28,12 @@ type VoteItem = {
   weight: number;
 };
 
+type VoteResponse = {
+  status: string;
+  used_weight: number;
+  balance: number; // здесь ОСТАТОК DAO-баланса, не total_xp
+};
+
 type DaoResultItem = {
   option_id: number;
   art_work_id: number | null;
@@ -44,6 +50,7 @@ type DaoResultsOut = {
   results: DaoResultItem[];
 };
 
+// ---------- картинка ----------
 const resolveImageUrl = (src: string | null): string | null => {
   if (!src) return null;
 
@@ -61,28 +68,36 @@ const resolveImageUrl = (src: string | null): string | null => {
 const DaoPage: React.FC = () => {
   const { t } = useTranslation('dao');
 
+  const [telegramUser, setTelegramUser] = useState<any | null>(null);
+
   const [proposals, setProposals] = useState<DaoProposal[]>([]);
   const [loadingProposals, setLoadingProposals] = useState(true);
 
   const [results, setResults] = useState<DaoResultsOut | null>(null);
   const [loadingResults, setLoadingResults] = useState(false);
 
-  const [balance, setBalance] = useState<number>(0); // общий total_xp
-  const [votingBalance, setVotingBalance] = useState<number>(0); // доступно для голосования (voting_power)
+  // общий GAP (total_xp)
+  const [balance, setBalance] = useState<number>(0);
   const [loadingBalance, setLoadingBalance] = useState(true);
+
+  // DAO-баланс (остаток лимита по текущему голосованию)
+  const [votingBalance, setVotingBalance] = useState<number>(0);
 
   const [votes, setVotes] = useState<Record<number, number>>({});
   const [submitting, setSubmitting] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  // Telegram init
   useEffect(() => {
     WebApp.ready();
+    const user = WebApp.initDataUnsafe?.user;
+    if (user) setTelegramUser(user);
   }, []);
 
   const initData = WebApp.initData;
 
-  // Загрузка total_xp + DAO voting_balance (voting_power)
+  // ================= ЗАГРУЗКА БАЛАНСОВ =================
   useEffect(() => {
     if (!initData) return;
 
@@ -90,7 +105,7 @@ const DaoPage: React.FC = () => {
       try {
         setLoadingBalance(true);
 
-        // 1. Тянем общий GAP-баланс (total_xp)
+        // 1. Общий GAP-баланс (total_xp)
         const res = await fetch(`${API_BASE_URL}/api/game/progress`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -100,7 +115,7 @@ const DaoPage: React.FC = () => {
         const totalXp = Number(data.total_xp ?? 0);
         setBalance(totalXp);
 
-        // 2. Тянем DAO-баланс (voting_power / effective_balance) для текущего голосования
+        // 2. DAO-баланс (остаток лимита по текущему голосованию)
         try {
           const daoRes = await fetch(
             `${API_BASE_URL}/api/dao/proposals/${CURRENT_PROPOSAL_ID}/voting-balance`,
@@ -110,17 +125,19 @@ const DaoPage: React.FC = () => {
               body: JSON.stringify({ init_data: initData }),
             }
           );
+
           if (daoRes.ok) {
             const daoData = await daoRes.json();
             const eff = Number(daoData.balance ?? 0);
             setVotingBalance(eff >= 0 ? eff : 0);
           } else {
-            // если эндпоинт вдруг вернул ошибку — fallback к total_xp
-            setVotingBalance(totalXp);
+            console.warn('DAO voting-balance HTTP error:', daoRes.status);
+            // если эндпоинт не работает — честно показываем 0, а не total_xp
+            setVotingBalance(0);
           }
-        } catch {
-          // если не достучались до эндпоинта — fallback к total_xp
-          setVotingBalance(totalXp);
+        } catch (err) {
+          console.error('DAO voting-balance fetch failed:', err);
+          setVotingBalance(0);
         }
       } catch (e) {
         console.error('Ошибка загрузки баланса:', e);
@@ -132,7 +149,7 @@ const DaoPage: React.FC = () => {
     })();
   }, [initData]);
 
-  // Загрузка активных голосований / результатов
+  // ================= ЗАГРУЗКА АКТИВНЫХ ГОЛОСОВАНИЙ / РЕЗУЛЬТАТОВ =================
   useEffect(() => {
     (async () => {
       try {
@@ -142,6 +159,7 @@ const DaoPage: React.FC = () => {
         setProposals(data || []);
 
         if (!data || data.length === 0) {
+          // голосование закончилось — грузим результаты
           setLoadingResults(true);
           const r = await fetch(
             `${API_BASE_URL}/api/dao/proposals/${CURRENT_PROPOSAL_ID}/results`
@@ -167,9 +185,11 @@ const DaoPage: React.FC = () => {
     [votes]
   );
 
-  const effectiveBalance = votingBalance; // теперь это чистый DAO-баланс
+  // effectiveBalance = DAO-баланс, а не total_xp
+  const effectiveBalance = votingBalance;
   const remaining = Math.max(0, effectiveBalance - usedLocally);
 
+  // ---------- пресеты ----------
   const setVotePercent = (optionId: number, fraction: number) => {
     if (!selectedProposal) return;
     setError(null);
@@ -186,6 +206,7 @@ const DaoPage: React.FC = () => {
     });
   };
 
+  // ---------- отправка голосов ----------
   const handleSubmit = async () => {
     if (!selectedProposal) return;
     if (!initData) {
@@ -224,10 +245,10 @@ const DaoPage: React.FC = () => {
         }
       );
 
-      const data = await res.json();
+      const data: VoteResponse | any = await res.json();
 
       if (!res.ok) {
-        const detail = data.detail || 'unknown';
+        const detail = (data && data.detail) || 'unknown';
         setError(
           t('errors.server', {
             detail,
@@ -237,26 +258,30 @@ const DaoPage: React.FC = () => {
         return;
       }
 
-      // ожидаем, что бек вернёт актуальный остаток DAO-баланса
+      // ожидаем, что бек вернёт:
+      // - used_weight: сколько GAP было поставлено В ЭТОМ запросе
+      // - balance: ОСТАТОК DAO-лимита
       if (typeof data.balance === 'number') {
         setVotingBalance(data.balance);
       } else {
-        const newVotingBalance = Math.max(
+        const fallbackBalance = Math.max(
           0,
           effectiveBalance - (Number(data.used_weight ?? 0) || 0)
         );
-        setVotingBalance(newVotingBalance);
+        setVotingBalance(fallbackBalance);
       }
 
       setVotes({});
 
+      const used = Number(data.used_weight ?? 0);
+
       setMessage(
         t('message.votes_accepted', {
-          amount: (data.used_weight ?? 0).toLocaleString(),
+          amount: used.toLocaleString(),
           defaultValue: 'Səslər qəbul edildi: {{amount}} GAP',
         })
       );
-    } catch (e: any) {
+    } catch (e) {
       setError(
         t('errors.vote_error', {
           defaultValue: 'Səsvermə zamanı xəta baş verdi',
@@ -267,47 +292,17 @@ const DaoPage: React.FC = () => {
     }
   };
 
+  // =======================================================================================
+  //                                     UI
+  // =======================================================================================
+
   return (
     <div className="min-h-screen bg-[#131f2f] text-[#00f0ff] px-4 py-6 flex flex-col items-center">
       <h1 className="text-2xl font-bold mb-2">
         {t('title', { defaultValue: 'DAO səsvermə' })}
       </h1>
 
-      {/* Баланс GAP / доступно для голосования */}
-      <div className="w-full max-w-md mt-1">
-        <div className="bg-[#0e1a2b] border border-[#00f0ff40] rounded-2xl px-3 py-2">
-          {loadingBalance ? (
-            <div className="text-xs text-[#7ee9ff80]">
-              {t('balance.loading', { defaultValue: 'Balans yüklənir...' })}
-            </div>
-          ) : (
-            <>
-              <div className="flex items-center justify-between text-xs text-[#7ee9ff]">
-                <span>
-                  {t('balance.total', {
-                    defaultValue: 'Cəmi GAP balansı:',
-                  })}
-                </span>
-                <span className="font-semibold">
-                  {balance.toLocaleString()}
-                </span>
-              </div>
-              <div className="flex items-center justify-between text-xs text-[#a0f6ff] mt-1">
-                <span>
-                  {t('balance.available', {
-                    defaultValue: 'Səsvermə üçün mövcud:',
-                  })}
-                </span>
-                <span className="font-semibold">
-                  {remaining.toLocaleString()}
-                </span>
-              </div>
-            </>
-          )}
-        </div>
-      </div>
-
-      {/* РЕЗУЛЬТАТЫ */}
+      {/* ==================== РЕЖИМ РЕЗУЛЬТАТОВ ==================== */}
       {results && !selectedProposal && (
         <div className="w-full max-w-md bg-[#0e1a2b] border border-[#00f0ff40] rounded-2xl p-4 mt-4">
           <h2 className="text-lg font-semibold mb-3 text-[#7ee9ff]">
@@ -329,9 +324,9 @@ const DaoPage: React.FC = () => {
               return (
                 <div
                   key={r.option_id}
-                  className="bg-[#111f33] rounded-xl border border-[#1f3b57] p-4 flex gap-3"
+                  className="bg-[#111f33] rounded-xl border border-[#1f3b57] p-3 flex gap-3"
                 >
-                  <div className="w-20 h-20 rounded-lg bg-[#0d273d] overflow-hidden flex items-center justify-center flex-shrink-0">
+                  <div className="w-16 h-16 rounded-lg bg-[#0d273d] overflow-hidden flex items-center justify-center">
                     {img ? (
                       <img src={img} className="w-full h-full object-cover" />
                     ) : (
@@ -341,14 +336,14 @@ const DaoPage: React.FC = () => {
                     )}
                   </div>
 
-                  <div className="flex-1 flex flex-col justify-between">
+                  <div className="flex-1">
                     <div className="text-white text-sm font-semibold">
                       {r.art_title || r.label}
                     </div>
                     <div className="text-[#7ee9ff] text-xs mt-1">
                       {r.total_weight.toLocaleString()} GAP ({percent}%)
                     </div>
-                    <div className="text-[#7ee9ff80] text-[10px] mt-1">
+                    <div className="text-[#7ee9ff80] text-[10px]">
                       {t('results.votes_count', {
                         defaultValue: 'Səslərin sayı:',
                       })}{' '}
@@ -362,12 +357,30 @@ const DaoPage: React.FC = () => {
         </div>
       )}
 
-      {/* ГОЛОСОВАНИЕ */}
+      {/* ==================== РЕЖИМ ГОЛОСОВАНИЯ ==================== */}
       {!loadingProposals && selectedProposal && (
         <div className="w-full max-w-md bg-[#0e1a2b] border border-[#00f0ff40] rounded-2xl p-4 mt-4">
           <h2 className="text-lg font-semibold text-[#7ee9ff]">
             {selectedProposal.title}
           </h2>
+
+          {/* Балансы */}
+          <div className="mt-2 text-xs text-[#a0f6ff] flex flex-col gap-1">
+            <div>
+              <span className="opacity-80">Cəmi GAP balansı:</span>{' '}
+              <span className="font-semibold">
+                {balance.toLocaleString()}
+              </span>
+            </div>
+            <div>
+              <span className="opacity-80">
+                Səsvermə üçün mövcud:
+              </span>{' '}
+              <span className="font-semibold">
+                {remaining.toLocaleString()}
+              </span>
+            </div>
+          </div>
 
           <div className="mt-3 space-y-3">
             {selectedProposal.options.map((opt) => {
@@ -377,9 +390,9 @@ const DaoPage: React.FC = () => {
               return (
                 <div
                   key={opt.id}
-                  className="bg-[#111f33] border border-[#1f3b57] rounded-xl p-4 flex gap-3"
+                  className="bg-[#111f33] rounded-xl border border-[#1f3b57] p-3 flex gap-3"
                 >
-                  <div className="w-20 h-20 rounded-lg overflow-hidden bg-[#0d273d] flex-shrink-0 flex items-center justify-center">
+                  <div className="w-16 h-16 rounded-lg bg-[#0d273d] overflow-hidden flex items-center justify-center">
                     {imgSrc ? (
                       <img
                         src={imgSrc}
@@ -449,6 +462,7 @@ const DaoPage: React.FC = () => {
 };
 
 export default DaoPage;
+
 
 
 
