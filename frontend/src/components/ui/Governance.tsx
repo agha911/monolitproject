@@ -175,7 +175,7 @@ const DaoPage: React.FC = () => {
     if (!initData) {
       setError(
         t('dao.errors.init_data_missing', {
-          defaultValue: 'Не удалось инициализировать Telegram WebApp',
+          defaultValue: 'Telegram WebApp başlanğıcı alınmadı',
         })
       );
       return;
@@ -188,7 +188,7 @@ const DaoPage: React.FC = () => {
     if (items.length === 0) {
       setError(
         t('dao.errors.no_votes', {
-          defaultValue: 'Вы не распределили голоса',
+          defaultValue: 'Siz səs ayırmamısınız',
         })
       );
       return;
@@ -215,7 +215,7 @@ const DaoPage: React.FC = () => {
         setError(
           t('dao.errors.server', {
             detail,
-            defaultValue: 'Ошибка: {{detail}}',
+            defaultValue: 'Xəta: {{detail}}',
           })
         );
         return;
@@ -224,14 +224,15 @@ const DaoPage: React.FC = () => {
       setMessage(
         t('dao.message.votes_accepted', {
           amount: data.used_weight.toLocaleString(),
-          defaultValue: 'Голоса учтены: {{amount}} GAP',
+          // важный момент: fallback теперь на азербайджанском
+          defaultValue: 'Səslər qəbul edildi: {{amount}} GAP',
         })
       );
       setVotes({});
     } catch (e: any) {
       setError(
         t('dao.errors.vote_error', {
-          defaultValue: 'Во время голосования произошла ошибка',
+          defaultValue: 'Səsvermə zamanı xəta baş verdi',
         })
       );
     } finally {
@@ -248,6 +249,40 @@ const DaoPage: React.FC = () => {
       <h1 className="text-2xl font-bold mb-2">
         {t('dao.title', { defaultValue: 'DAO səsvermə' })}
       </h1>
+
+      {/* Баланс GAP / доступно для голосования */}
+      <div className="w-full max-w-md mt-1">
+        <div className="bg-[#0e1a2b] border border-[#00f0ff40] rounded-2xl px-3 py-2">
+          {loadingBalance ? (
+            <div className="text-xs text-[#7ee9ff80]">
+              {t('dao.balance.loading', { defaultValue: 'Balans yüklənir...' })}
+            </div>
+          ) : (
+            <>
+              <div className="flex items-center justify-between text-xs text-[#7ee9ff]">
+                <span>
+                  {t('dao.balance.total', {
+                    defaultValue: 'Cəmi GAP balansı:',
+                  })}
+                </span>
+                <span className="font-semibold">
+                  {balance.toLocaleString()}
+                </span>
+              </div>
+              <div className="flex items-center justify-between text-xs text-[#a0f6ff] mt-1">
+                <span>
+                  {t('dao.balance.available', {
+                    defaultValue: 'Səsvermə üçün mövcud:',
+                  })}
+                </span>
+                <span className="font-semibold">
+                  {remaining.toLocaleString()}
+                </span>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
 
       {/* ==================== РЕЖИМ РЕЗУЛЬТАТОВ ==================== */}
       {results && !selectedProposal && (
@@ -271,26 +306,26 @@ const DaoPage: React.FC = () => {
               return (
                 <div
                   key={r.option_id}
-                  className="bg-[#111f33] rounded-xl border border-[#1f3b57] p-3 flex gap-3"
+                  className="bg-[#111f33] rounded-xl border border-[#1f3b57] p-4 flex gap-3"
                 >
-                  <div className="w-16 h-16 rounded-lg bg-[#0d273d] overflow-hidden flex items-center justify-center">
+                  <div className="w-20 h-20 rounded-lg bg-[#0d273d] overflow-hidden flex items-center justify-center flex-shrink-0">
                     {img ? (
                       <img src={img} className="w-full h-full object-cover" />
                     ) : (
                       <span className="text-xs text-[#7ee9ff]">
-                        {t('dao.no_image', { defaultValue: 'No image' })}
+                        {t('dao.no_image', { defaultValue: 'Şəkil yoxdur' })}
                       </span>
                     )}
                   </div>
 
-                  <div className="flex-1">
+                  <div className="flex-1 flex flex-col justify-between">
                     <div className="text-white text-sm font-semibold">
                       {r.art_title || r.label}
                     </div>
                     <div className="text-[#7ee9ff] text-xs mt-1">
                       {r.total_weight.toLocaleString()} GAP ({percent}%)
                     </div>
-                    <div className="text-[#7ee9ff80] text-[10px]">
+                    <div className="text-[#7ee9ff80] text-[10px] mt-1">
                       {t('dao.results.votes_count', {
                         defaultValue: 'Səslərin sayı:',
                       })}{' '}
@@ -319,43 +354,46 @@ const DaoPage: React.FC = () => {
               return (
                 <div
                   key={opt.id}
-                  className="bg-[#111f33] border border-[#1f3b57] rounded-xl p-3 flex gap-3"
+                  className="bg-[#111f33] border border-[#1f3b57] rounded-xl p-4 flex gap-3"
                 >
-                  <div className="w-16 h-16 rounded-lg overflow-hidden bg-[#0d273d] flex-shrink-0 flex items-center justify-center">
+                  <div className="w-20 h-20 rounded-lg overflow-hidden bg-[#0d273d] flex-shrink-0 flex items-center justify-center">
                     {imgSrc ? (
-                      <img src={imgSrc} className="w-full h-full object-cover" />
+                      <img
+                        src={imgSrc}
+                        className="w-full h-full object-cover"
+                      />
                     ) : (
                       <span className="text-xs text-[#7ee9ff]">
-                        {t('dao.no_image', { defaultValue: 'No image' })}
+                        {t('dao.no_image', { defaultValue: 'Şəkil yoxdur' })}
                       </span>
                     )}
                   </div>
 
-                  <div className="flex-1">
+                  <div className="flex-1 flex flex-col gap-2">
                     <div className="text-sm font-semibold text-white">
                       {opt.art_title || opt.label}
                     </div>
 
-                    <div className="mt-2 flex items-center justify-between gap-2">
-                      <div className="text-xs text-[#a0f6ff]">
+                    <div className="flex items-center justify-between text-xs text-[#a0f6ff]">
+                      <span>
                         {t('dao.vote_label', { defaultValue: 'Səs:' })}{' '}
                         <span className="font-semibold">
                           {current.toLocaleString()}
                         </span>
-                      </div>
+                      </span>
+                    </div>
 
-                      <div className="flex gap-1">
-                        {[0, 0.1, 0.25, 0.5, 1].map((fraction) => (
-                          <button
-                            key={fraction}
-                            onClick={() => setVotePercent(opt.id, fraction)}
-                            disabled={submitting || balance <= 0}
-                            className="px-2 py-1 rounded-full bg-[#0d273d] border border-[#1f3b57] text-[10px] text-[#7ee9ff]"
-                          >
-                            {Math.round(fraction * 100)}%
-                          </button>
-                        ))}
-                      </div>
+                    <div className="mt-1 flex flex-wrap gap-1 justify-end">
+                      {[0, 0.1, 0.25, 0.5, 1].map((fraction) => (
+                        <button
+                          key={fraction}
+                          onClick={() => setVotePercent(opt.id, fraction)}
+                          disabled={submitting || balance <= 0}
+                          className="px-2 py-1 rounded-full bg-[#0d273d] border border-[#1f3b57] text-[10px] leading-none text-[#7ee9ff] min-w-[40px] text-center"
+                        >
+                          {Math.round(fraction * 100)}%
+                        </button>
+                      ))}
                     </div>
                   </div>
                 </div>
@@ -388,6 +426,7 @@ const DaoPage: React.FC = () => {
 };
 
 export default DaoPage;
+
 
 
 
