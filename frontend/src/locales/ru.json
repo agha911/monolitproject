@@ -137,6 +137,23 @@
   "shop_tab_drops": "Дропы",
   "errors": {
   "drop_user_limit_reached": "Вы уже использовали этот дроп."
-}
+},
+  "title": "Голосование DAO",
+  "results": {
+    "heading": "Результаты:",
+    "votes_count": "Количество голосов:"
+  },
+  "no_image": "Нет изображения",
+  "vote_label": "Голос:",
+  "submit_button": "Проголосовать",
+  "message": {
+    "votes_accepted": "Голоса учтены: {{amount}} GAP"
+  },
+  "errors": {
+    "init_data_missing": "Не удалось инициализировать Telegram WebApp",
+    "no_votes": "Вы не распределили голоса",
+    "server": "Ошибка: {{detail}}",
+    "vote_error": "Во время голосования произошла ошибка"
+  }
 
 }
