@@ -61,8 +61,6 @@ const resolveImageUrl = (src: string | null): string | null => {
 const DaoPage: React.FC = () => {
   const { t } = useTranslation('dao');
 
-  const [telegramUser, setTelegramUser] = useState<any | null>(null);
-
   const [proposals, setProposals] = useState<DaoProposal[]>([]);
   const [loadingProposals, setLoadingProposals] = useState(true);
 
@@ -70,7 +68,7 @@ const DaoPage: React.FC = () => {
   const [loadingResults, setLoadingResults] = useState(false);
 
   const [balance, setBalance] = useState<number>(0); // общий total_xp
-  const [votingBalance, setVotingBalance] = useState<number | null>(null); // доступно для голосования
+  const [votingBalance, setVotingBalance] = useState<number>(0); // доступно для голосования (voting_power)
   const [loadingBalance, setLoadingBalance] = useState(true);
 
   const [votes, setVotes] = useState<Record<number, number>>({});
@@ -80,19 +78,19 @@ const DaoPage: React.FC = () => {
 
   useEffect(() => {
     WebApp.ready();
-    const user = WebApp.initDataUnsafe?.user;
-    if (user) setTelegramUser(user);
   }, []);
 
   const initData = WebApp.initData;
 
-  // Загрузка total_xp + восстановление votingBalance из localStorage
+  // Загрузка total_xp + DAO voting_balance (voting_power)
   useEffect(() => {
-    if (!initData || !telegramUser) return;
+    if (!initData) return;
 
     (async () => {
       try {
         setLoadingBalance(true);
+
+        // 1. Тянем общий GAP-баланс (total_xp)
         const res = await fetch(`${API_BASE_URL}/api/game/progress`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -102,29 +100,37 @@ const DaoPage: React.FC = () => {
         const totalXp = Number(data.total_xp ?? 0);
         setBalance(totalXp);
 
-        // восстановим сохранённый DAO-баланс, если он есть
-        const storageKey = `dao_voting_balance_${CURRENT_PROPOSAL_ID}_${telegramUser.id}`;
-        let effective = totalXp;
+        // 2. Тянем DAO-баланс (voting_power / effective_balance) для текущего голосования
         try {
-          const stored = window.localStorage.getItem(storageKey);
-          if (stored !== null) {
-            const parsed = Number(stored);
-            if (!Number.isNaN(parsed) && parsed >= 0 && parsed <= totalXp) {
-              effective = parsed;
+          const daoRes = await fetch(
+            `${API_BASE_URL}/api/dao/proposals/${CURRENT_PROPOSAL_ID}/voting-balance`,
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ init_data: initData }),
             }
+          );
+          if (daoRes.ok) {
+            const daoData = await daoRes.json();
+            const eff = Number(daoData.balance ?? 0);
+            setVotingBalance(eff >= 0 ? eff : 0);
+          } else {
+            // если эндпоинт вдруг вернул ошибку — fallback к total_xp
+            setVotingBalance(totalXp);
           }
         } catch {
-          // если нет доступа к localStorage — игнорируем
+          // если не достучались до эндпоинта — fallback к total_xp
+          setVotingBalance(totalXp);
         }
-        setVotingBalance(effective);
       } catch (e) {
         console.error('Ошибка загрузки баланса:', e);
+        setBalance(0);
         setVotingBalance(0);
       } finally {
         setLoadingBalance(false);
       }
     })();
-  }, [initData, telegramUser]);
+  }, [initData]);
 
   // Загрузка активных голосований / результатов
   useEffect(() => {
@@ -161,7 +167,7 @@ const DaoPage: React.FC = () => {
     [votes]
   );
 
-  const effectiveBalance = votingBalance ?? balance;
+  const effectiveBalance = votingBalance; // теперь это чистый DAO-баланс
   const remaining = Math.max(0, effectiveBalance - usedLocally);
 
   const setVotePercent = (optionId: number, fraction: number) => {
@@ -231,33 +237,18 @@ const DaoPage: React.FC = () => {
         return;
       }
 
-      // backend должен возвращать оставшийся DAO-баланс в data.balance
-      let newVotingBalance: number;
+      // ожидаем, что бек вернёт актуальный остаток DAO-баланса
       if (typeof data.balance === 'number') {
-        newVotingBalance = data.balance;
+        setVotingBalance(data.balance);
       } else {
-        // fallback: вычитаем локально
-        newVotingBalance = Math.max(
+        const newVotingBalance = Math.max(
           0,
           effectiveBalance - (Number(data.used_weight ?? 0) || 0)
         );
+        setVotingBalance(newVotingBalance);
       }
 
-      setVotingBalance(newVotingBalance);
       setVotes({});
-
-      // сохраняем в localStorage, чтобы после обновления страницы число оставалось тем же
-      if (telegramUser) {
-        const storageKey = `dao_voting_balance_${CURRENT_PROPOSAL_ID}_${telegramUser.id}`;
-        try {
-          window.localStorage.setItem(
-            storageKey,
-            String(newVotingBalance)
-          );
-        } catch {
-          // если localStorage недоступен — игнорируем
-        }
-      }
 
       setMessage(
         t('message.votes_accepted', {
@@ -458,6 +449,7 @@ const DaoPage: React.FC = () => {
 };
 
 export default DaoPage;
+
 
 
 
