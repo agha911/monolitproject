@@ -94,23 +94,6 @@
   "slides_already_claimed": "Artıq qəbul olunub",
   "slides_error": "Xəta baş verdi",
   "slides_network_error": "Şəbəkə xətası",
-  "title": "DAO səsvermə",
-  "results": {
-    "heading": "Nəticələr:",
-    "votes_count": "Səslərin sayı:"
-  },
-  "no_image": "Şəkil yoxdur",
-  "vote_label": "Səs:",
-  "submit_button": "Səs vermək",
-  "message": {
-    "votes_accepted": "Səslər qəbul edildi: {{amount}} GAP"
-  },
-  "errors": {
-    "init_data_missing": "Telegram WebApp başlanğıcı alınmadı",
-    "no_votes": "Siz səs ayırmamısınız",
-    "server": "Xəta: {{detail}}",
-    "vote_error": "Səsvermə zamanı xəta baş verdi"
-  }
 
   "error_user_unknown": "Xəta: istifadəçi müəyyən edilmədi",
   "ref_balance": "Referal balans",
@@ -156,6 +139,5 @@
   "errors": {
   "drop_user_limit_reached": "Bu drop-dan artıq istifadə etmisiniz."
 }
-  
 
 }
