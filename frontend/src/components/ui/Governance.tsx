@@ -59,8 +59,9 @@ const resolveImageUrl = (src: string | null): string | null => {
 };
 
 const DaoPage: React.FC = () => {
-  // ВАЖНО: используем namespace 'dao'
   const { t } = useTranslation('dao');
+
+  const [telegramUser, setTelegramUser] = useState<any | null>(null);
 
   const [proposals, setProposals] = useState<DaoProposal[]>([]);
   const [loadingProposals, setLoadingProposals] = useState(true);
@@ -68,7 +69,8 @@ const DaoPage: React.FC = () => {
   const [results, setResults] = useState<DaoResultsOut | null>(null);
   const [loadingResults, setLoadingResults] = useState(false);
 
-  const [balance, setBalance] = useState<number>(0);
+  const [balance, setBalance] = useState<number>(0); // общий total_xp
+  const [votingBalance, setVotingBalance] = useState<number | null>(null); // доступно для голосования
   const [loadingBalance, setLoadingBalance] = useState(true);
 
   const [votes, setVotes] = useState<Record<number, number>>({});
@@ -78,13 +80,15 @@ const DaoPage: React.FC = () => {
 
   useEffect(() => {
     WebApp.ready();
+    const user = WebApp.initDataUnsafe?.user;
+    if (user) setTelegramUser(user);
   }, []);
 
   const initData = WebApp.initData;
 
-  // Загрузка баланса GAP
+  // Загрузка total_xp + восстановление votingBalance из localStorage
   useEffect(() => {
-    if (!initData) return;
+    if (!initData || !telegramUser) return;
 
     (async () => {
       try {
@@ -95,14 +99,32 @@ const DaoPage: React.FC = () => {
           body: JSON.stringify({ init_data: initData }),
         });
         const data = await res.json();
-        setBalance(Number(data.total_xp ?? 0));
+        const totalXp = Number(data.total_xp ?? 0);
+        setBalance(totalXp);
+
+        // восстановим сохранённый DAO-баланс, если он есть
+        const storageKey = `dao_voting_balance_${CURRENT_PROPOSAL_ID}_${telegramUser.id}`;
+        let effective = totalXp;
+        try {
+          const stored = window.localStorage.getItem(storageKey);
+          if (stored !== null) {
+            const parsed = Number(stored);
+            if (!Number.isNaN(parsed) && parsed >= 0 && parsed <= totalXp) {
+              effective = parsed;
+            }
+          }
+        } catch {
+          // если нет доступа к localStorage — игнорируем
+        }
+        setVotingBalance(effective);
       } catch (e) {
         console.error('Ошибка загрузки баланса:', e);
+        setVotingBalance(0);
       } finally {
         setLoadingBalance(false);
       }
     })();
-  }, [initData]);
+  }, [initData, telegramUser]);
 
   // Загрузка активных голосований / результатов
   useEffect(() => {
@@ -138,7 +160,9 @@ const DaoPage: React.FC = () => {
     () => Object.values(votes).reduce((s, w) => s + w, 0),
     [votes]
   );
-  const remaining = Math.max(0, balance - usedLocally);
+
+  const effectiveBalance = votingBalance ?? balance;
+  const remaining = Math.max(0, effectiveBalance - usedLocally);
 
   const setVotePercent = (optionId: number, fraction: number) => {
     if (!selectedProposal) return;
@@ -146,12 +170,12 @@ const DaoPage: React.FC = () => {
     setMessage(null);
 
     setVotes((prev) => {
-      const target = Math.floor(balance * fraction);
+      const target = Math.floor(effectiveBalance * fraction);
       const usedWithout = Object.entries(prev).reduce((s, [id, w]) => {
         return s + (Number(id) === optionId ? 0 : w);
       }, 0);
 
-      const maxAllowed = Math.max(0, balance - usedWithout);
+      const maxAllowed = Math.max(0, effectiveBalance - usedWithout);
       return { ...prev, [optionId]: Math.min(target, maxAllowed) };
     });
   };
@@ -207,13 +231,40 @@ const DaoPage: React.FC = () => {
         return;
       }
 
+      // backend должен возвращать оставшийся DAO-баланс в data.balance
+      let newVotingBalance: number;
+      if (typeof data.balance === 'number') {
+        newVotingBalance = data.balance;
+      } else {
+        // fallback: вычитаем локально
+        newVotingBalance = Math.max(
+          0,
+          effectiveBalance - (Number(data.used_weight ?? 0) || 0)
+        );
+      }
+
+      setVotingBalance(newVotingBalance);
+      setVotes({});
+
+      // сохраняем в localStorage, чтобы после обновления страницы число оставалось тем же
+      if (telegramUser) {
+        const storageKey = `dao_voting_balance_${CURRENT_PROPOSAL_ID}_${telegramUser.id}`;
+        try {
+          window.localStorage.setItem(
+            storageKey,
+            String(newVotingBalance)
+          );
+        } catch {
+          // если localStorage недоступен — игнорируем
+        }
+      }
+
       setMessage(
         t('message.votes_accepted', {
-          amount: data.used_weight.toLocaleString(),
+          amount: (data.used_weight ?? 0).toLocaleString(),
           defaultValue: 'Səslər qəbul edildi: {{amount}} GAP',
         })
       );
-      setVotes({});
     } catch (e: any) {
       setError(
         t('errors.vote_error', {
@@ -369,7 +420,7 @@ const DaoPage: React.FC = () => {
                         <button
                           key={fraction}
                           onClick={() => setVotePercent(opt.id, fraction)}
-                          disabled={submitting || balance <= 0}
+                          disabled={submitting || effectiveBalance <= 0}
                           className="px-2 py-1 rounded-full bg-[#0d273d] border border-[#1f3b57] text-[10px] leading-none text-[#7ee9ff] min-w-[40px] text-center"
                         >
                           {Math.round(fraction * 100)}%
@@ -407,6 +458,7 @@ const DaoPage: React.FC = () => {
 };
 
 export default DaoPage;
+
 
 
 
