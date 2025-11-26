@@ -173,7 +173,11 @@ const DaoPage: React.FC = () => {
   const handleSubmit = async () => {
     if (!selectedProposal) return;
     if (!initData) {
-      setError('init_data_missing');
+      setError(
+        t('dao.errors.init_data_missing', {
+          defaultValue: 'Не удалось инициализировать Telegram WebApp',
+        })
+      );
       return;
     }
 
@@ -182,7 +186,11 @@ const DaoPage: React.FC = () => {
       .map(([id, w]) => ({ option_id: Number(id), weight: w }));
 
     if (items.length === 0) {
-      setError('Вы не распределили голоса');
+      setError(
+        t('dao.errors.no_votes', {
+          defaultValue: 'Вы не распределили голоса',
+        })
+      );
       return;
     }
 
@@ -203,14 +211,29 @@ const DaoPage: React.FC = () => {
       const data = await res.json();
 
       if (!res.ok) {
-        setError(`Ошибка: ${data.detail || 'unknown'}`);
+        const detail = data.detail || 'unknown';
+        setError(
+          t('dao.errors.server', {
+            detail,
+            defaultValue: 'Ошибка: {{detail}}',
+          })
+        );
         return;
       }
 
-      setMessage(`Голоса учтены: ${data.used_weight.toLocaleString()} GAP`);
+      setMessage(
+        t('dao.message.votes_accepted', {
+          amount: data.used_weight.toLocaleString(),
+          defaultValue: 'Голоса учтены: {{amount}} GAP',
+        })
+      );
       setVotes({});
     } catch (e: any) {
-      setError(e?.message || 'vote_error');
+      setError(
+        t('dao.errors.vote_error', {
+          defaultValue: 'Во время голосования произошла ошибка',
+        })
+      );
     } finally {
       setSubmitting(false);
     }
@@ -222,13 +245,16 @@ const DaoPage: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-[#131f2f] text-[#00f0ff] px-4 py-6 flex flex-col items-center">
-      <h1 className="text-2xl font-bold mb-2">DAO səsvermə</h1>
+      <h1 className="text-2xl font-bold mb-2">
+        {t('dao.title', { defaultValue: 'DAO səsvermə' })}
+      </h1>
 
       {/* ==================== РЕЖИМ РЕЗУЛЬТАТОВ ==================== */}
       {results && !selectedProposal && (
         <div className="w-full max-w-md bg-[#0e1a2b] border border-[#00f0ff40] rounded-2xl p-4 mt-4">
           <h2 className="text-lg font-semibold mb-3 text-[#7ee9ff]">
-            Nəticələr: {results.title}
+            {t('dao.results.heading', { defaultValue: 'Nəticələr:' })}{' '}
+            {results.title}
           </h2>
 
           <div className="space-y-4">
@@ -238,7 +264,9 @@ const DaoPage: React.FC = () => {
                 (s, x) => s + x.total_weight,
                 0
               );
-              const percent = total ? Math.round((r.total_weight / total) * 100) : 0;
+              const percent = total
+                ? Math.round((r.total_weight / total) * 100)
+                : 0;
 
               return (
                 <div
@@ -249,7 +277,9 @@ const DaoPage: React.FC = () => {
                     {img ? (
                       <img src={img} className="w-full h-full object-cover" />
                     ) : (
-                      <span className="text-xs text-[#7ee9ff]">No image</span>
+                      <span className="text-xs text-[#7ee9ff]">
+                        {t('dao.no_image', { defaultValue: 'No image' })}
+                      </span>
                     )}
                   </div>
 
@@ -261,7 +291,10 @@ const DaoPage: React.FC = () => {
                       {r.total_weight.toLocaleString()} GAP ({percent}%)
                     </div>
                     <div className="text-[#7ee9ff80] text-[10px]">
-                      Səslərin sayı: {r.votes_count}
+                      {t('dao.results.votes_count', {
+                        defaultValue: 'Səslərin sayı:',
+                      })}{' '}
+                      {r.votes_count}
                     </div>
                   </div>
                 </div>
@@ -292,7 +325,9 @@ const DaoPage: React.FC = () => {
                     {imgSrc ? (
                       <img src={imgSrc} className="w-full h-full object-cover" />
                     ) : (
-                      <span className="text-xs text-[#7ee9ff]">No image</span>
+                      <span className="text-xs text-[#7ee9ff]">
+                        {t('dao.no_image', { defaultValue: 'No image' })}
+                      </span>
                     )}
                   </div>
 
@@ -303,7 +338,7 @@ const DaoPage: React.FC = () => {
 
                     <div className="mt-2 flex items-center justify-between gap-2">
                       <div className="text-xs text-[#a0f6ff]">
-                        Səs:{' '}
+                        {t('dao.vote_label', { defaultValue: 'Səs:' })}{' '}
                         <span className="font-semibold">
                           {current.toLocaleString()}
                         </span>
@@ -333,18 +368,27 @@ const DaoPage: React.FC = () => {
             disabled={submitting || usedLocally <= 0}
             onClick={handleSubmit}
           >
-            Səs vermək
+            {t('dao.submit_button', { defaultValue: 'Səs vermək' })}
           </button>
         </div>
       )}
 
-      {error && <div className="mt-4 text-red-300 text-xs">{error}</div>}
-      {message && <div className="mt-4 text-[#a0f6ff] text-xs">{message}</div>}
+      {error && (
+        <div className="mt-4 text-red-300 text-xs">
+          {error}
+        </div>
+      )}
+      {message && (
+        <div className="mt-4 text-[#a0f6ff] text-xs">
+          {message}
+        </div>
+      )}
     </div>
   );
 };
 
 export default DaoPage;
+
 
 
 
