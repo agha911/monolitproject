@@ -330,13 +330,22 @@ async def get_proposal_results(
 @router.post("/proposals/{proposal_id}/voting-balance", response_model=DaoVotingBalanceOut)
 async def get_voting_balance(
     proposal_id: int,
-    data: InitDataIn,                 # { init_data: str }
+    data: InitDataIn,
     session: AsyncSession = Depends(get_async_session),
 ):
     user = await get_or_create_user_from_init_data(data.init_data, session)
-    balance = await crud_dao.get_user_effective_voting_balance(
+
+    # Текущий общий GAP-баланс пользователя (total_xp)
+    current_balance = int(user.total_xp or 0)
+
+    # Остаток для голосования = cap - sum(votes.weight)
+    balance = await crud_dao.get_user_remaining_voting_balance(
         session=session,
         user_id=user.id,
         proposal_id=proposal_id,
+        current_balance=current_balance,
     )
-    return {"balance": balance}
+
+    # Можно вернуть модель или dict — Pydantic сам приведёт
+    return DaoVotingBalanceOut(balance=balance)
+    # или просто: return {"balance": balance}
