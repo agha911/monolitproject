@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import List, Dict
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Body
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -347,35 +347,31 @@ async def get_proposal_results(
 @router.post("/proposals/{proposal_id}/voting-balance", response_model=DaoVotingBalanceOut)
 async def get_voting_balance(
     proposal_id: int,
-    data: InitDataIn,  # { init_data: str }
+    init_data: str = Body(..., embed=True),  # ждём тело { "init_data": "..." }
     session: AsyncSession = Depends(get_async_session),
 ):
     """
     Вернуть ОСТАТОК монет, доступных для голосования по данному proposal.
-    Логируем все ключевые параметры, чтобы отладить кейс "у всех 0".
+
+    - init_data -> находим/создаём пользователя
+    - current_balance берём из user.total_xp
+    - считаем snapshot + уже использованный вес
+    - возвращаем остаток, чтобы фронт показывал реальную доступную сумму
     """
-    logger.info(
-        "dao.voting_balance.request",
-        extra={
-            "proposal_id": proposal_id,
-            "init_data_len": len(data.init_data) if data.init_data else 0,
-        },
+
+    log.info(
+        "dao.voting_balance.request proposal_id=%s init_data_len=%s",
+        proposal_id,
+        len(init_data) if init_data else None,
     )
 
-    user = await get_or_create_user_from_init_data(data.init_data, session)
+    # 1. Находим/создаём пользователя по init_data
+    user = await get_or_create_user_from_init_data(init_data, session)
 
+    # 2. Текущий общий GAP-баланс пользователя (total_xp)
     current_balance = int(user.total_xp or 0)
 
-    logger.info(
-        "dao.voting_balance.user",
-        extra={
-            "proposal_id": proposal_id,
-            "user_id": user.id,
-            "telegram_id": getattr(user, "telegram_id", None),
-            "total_xp": current_balance,
-        },
-    )
-
+    # 3. Считаем остаток с учётом снапшота и уже проголосованных весов
     remaining = await crud_dao.get_user_remaining_voting_balance(
         session=session,
         user_id=user.id,
@@ -383,13 +379,12 @@ async def get_voting_balance(
         current_balance=current_balance,
     )
 
-    logger.info(
-        "dao.voting_balance.response",
-        extra={
-            "proposal_id": proposal_id,
-            "user_id": user.id,
-            "remaining": remaining,
-        },
+    log.info(
+        "dao.voting_balance.result user_id=%s proposal_id=%s total_xp=%s remaining=%s",
+        user.id,
+        proposal_id,
+        current_balance,
+        remaining,
     )
 
     return {"balance": remaining}
