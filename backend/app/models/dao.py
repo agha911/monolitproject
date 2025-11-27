@@ -135,11 +135,6 @@ class DaoOption(Base):
 
 
 class DaoVote(Base):
-    """
-    Голос пользователя.
-    Один user может иметь по одной записи на опцию в рамках одного пропозала.
-    Таблица: dao_votes
-    """
     __tablename__ = "dao_votes"
 
     id = Column(BigInteger, primary_key=True, index=True)
@@ -160,25 +155,20 @@ class DaoVote(Base):
         nullable=False,
     )
 
-    # Вес = количество $GAP, которое пользователь поставил за эту опцию
     weight = Column(BigInteger, nullable=False)
-
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     proposal = relationship("DaoProposal", back_populates="votes")
     option = relationship("DaoOption", back_populates="votes")
     user = relationship("User", backref="dao_votes")
 
+    __table_args__ = (
+        UniqueConstraint("proposal_id", "user_id", "option_id", name="uq_dao_vote_user_option"),
+    )
+
+
 
 class DaoUserVotingPower(Base):
-    """
-    Фиксируем баланс пользователя на момент первого голосования
-    по конкретному proposal.
-
-    base_balance — сколько $GAP было у пользователя в момент,
-    когда он впервые проголосовал по этому proposal.
-    Потом мы этот баланс используем как "потолок" для суммарного веса.
-    """
     __tablename__ = "dao_user_voting_power"
 
     id = Column(Integer, primary_key=True, index=True)
@@ -197,10 +187,7 @@ class DaoUserVotingPower(Base):
         index=True,
     )
 
-    base_balance = Column(
-        BigInteger,
-        nullable=False,
-    )
+    base_balance = Column(BigInteger, nullable=False)
 
     created_at = Column(
         DateTime(timezone=True),
