@@ -352,23 +352,44 @@ async def get_voting_balance(
 ):
     """
     Вернуть ОСТАТОК монет, доступных для голосования по данному proposal.
-
-    - init_data -> находим/создаём пользователя
-    - current_balance берём из user.total_xp
-    - считаем snapshot + уже использованный вес
-    - возвращаем остаток, чтобы фронт показывал реальную доступную сумму
+    Логируем все ключевые параметры, чтобы отладить кейс "у всех 0".
     """
+    logger.info(
+        "dao.voting_balance.request",
+        extra={
+            "proposal_id": proposal_id,
+            "init_data_len": len(data.init_data) if data.init_data else 0,
+        },
+    )
+
     user = await get_or_create_user_from_init_data(data.init_data, session)
 
-    # Текущий общий GAP-баланс пользователя (total_xp)
     current_balance = int(user.total_xp or 0)
 
-    # Считаем остаток с учётом снапшота и уже проголосованных весов
+    logger.info(
+        "dao.voting_balance.user",
+        extra={
+            "proposal_id": proposal_id,
+            "user_id": user.id,
+            "telegram_id": getattr(user, "telegram_id", None),
+            "total_xp": current_balance,
+        },
+    )
+
     remaining = await crud_dao.get_user_remaining_voting_balance(
         session=session,
         user_id=user.id,
         proposal_id=proposal_id,
         current_balance=current_balance,
+    )
+
+    logger.info(
+        "dao.voting_balance.response",
+        extra={
+            "proposal_id": proposal_id,
+            "user_id": user.id,
+            "remaining": remaining,
+        },
     )
 
     return {"balance": remaining}
