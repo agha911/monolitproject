@@ -3,7 +3,7 @@ import WebApp from '@twa-dev/sdk';
 import { useTranslation } from 'react-i18next';
 import API_BASE_URL from '../config';
 
-const CURRENT_PROPOSAL_ID = 2; // <-- вручную указываем ID голосования
+const CURRENT_PROPOSAL_ID = 2; // fallback для завершённого голосования
 
 type DaoOptionArt = {
   id: number;
@@ -31,7 +31,7 @@ type VoteItem = {
 type VoteResponse = {
   status: string;
   used_weight: number;
-  balance: number; // здесь ОСТАТОК DAO-баланса, не total_xp
+  balance: number; // остаток DAO-баланса (remaining)
 };
 
 type DaoResultItem = {
@@ -73,8 +73,13 @@ const DaoPage: React.FC = () => {
   const [proposals, setProposals] = useState<DaoProposal[]>([]);
   const [loadingProposals, setLoadingProposals] = useState(true);
 
+  // финальные результаты (когда голосование завершено)
   const [results, setResults] = useState<DaoResultsOut | null>(null);
   const [loadingResults, setLoadingResults] = useState(false);
+
+  // лайв-результаты по активному голосованию
+  const [liveResults, setLiveResults] = useState<DaoResultsOut | null>(null);
+  const [loadingLiveResults, setLoadingLiveResults] = useState(false);
 
   // общий GAP (total_xp)
   const [balance, setBalance] = useState<number>(0);
@@ -97,7 +102,7 @@ const DaoPage: React.FC = () => {
 
   const initData = WebApp.initData;
 
-  // ================= ЗАГРУЗКА БАЛАНСОВ =================
+  // ================= ЗАГРУЗКА ОБЩЕГО БАЛАНСА (total_xp) =================
   useEffect(() => {
     if (!initData) return;
 
@@ -105,7 +110,6 @@ const DaoPage: React.FC = () => {
       try {
         setLoadingBalance(true);
 
-        // 1. Общий GAP-баланс (total_xp)
         const res = await fetch(`${API_BASE_URL}/api/game/progress`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -114,35 +118,9 @@ const DaoPage: React.FC = () => {
         const data = await res.json();
         const totalXp = Number(data.total_xp ?? 0);
         setBalance(totalXp);
-
-        // 2. DAO-баланс (остаток лимита по текущему голосованию)
-        try {
-          const daoRes = await fetch(
-            `${API_BASE_URL}/api/dao/proposals/${CURRENT_PROPOSAL_ID}/voting-balance`,
-            {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ init_data: initData }),
-            }
-          );
-
-          if (daoRes.ok) {
-            const daoData = await daoRes.json();
-            const eff = Number(daoData.balance ?? 0);
-            setVotingBalance(eff >= 0 ? eff : 0);
-          } else {
-            console.warn('DAO voting-balance HTTP error:', daoRes.status);
-            // если эндпоинт не работает — честно показываем 0, а не total_xp
-            setVotingBalance(0);
-          }
-        } catch (err) {
-          console.error('DAO voting-balance fetch failed:', err);
-          setVotingBalance(0);
-        }
       } catch (e) {
         console.error('Ошибка загрузки баланса:', e);
         setBalance(0);
-        setVotingBalance(0);
       } finally {
         setLoadingBalance(false);
       }
@@ -158,17 +136,43 @@ const DaoPage: React.FC = () => {
         const data: DaoProposal[] = await res.json();
         setProposals(data || []);
 
+        // если активных голосований нет — показываем финальные результаты по текущему ID
         if (!data || data.length === 0) {
-          // голосование закончилось — грузим результаты
           setLoadingResults(true);
-          const r = await fetch(
-            `${API_BASE_URL}/api/dao/proposals/${CURRENT_PROPOSAL_ID}/results`
-          );
-          if (r.ok) {
-            const rs: DaoResultsOut = await r.json();
-            setResults(rs);
+          try {
+            const r = await fetch(
+              `${API_BASE_URL}/api/dao/proposals/${CURRENT_PROPOSAL_ID}/results`
+            );
+            if (r.ok) {
+              const rs: DaoResultsOut = await r.json();
+              setResults(rs);
+            } else {
+              console.warn('results HTTP error', r.status);
+            }
+          } catch (err) {
+            console.error('Ошибка загрузки результатов:', err);
+          } finally {
+            setLoadingResults(false);
           }
-          setLoadingResults(false);
+        } else {
+          // есть активное голосование — подгружаем лайв-результаты по нему
+          const active = data[0];
+          setLoadingLiveResults(true);
+          try {
+            const r = await fetch(
+              `${API_BASE_URL}/api/dao/proposals/${active.id}/results`
+            );
+            if (r.ok) {
+              const rs: DaoResultsOut = await r.json();
+              setLiveResults(rs);
+            } else {
+              console.warn('live results HTTP error', r.status);
+            }
+          } catch (err) {
+            console.error('Ошибка загрузки live-results:', err);
+          } finally {
+            setLoadingLiveResults(false);
+          }
         }
       } catch (e) {
         console.error('Ошибка загрузки голосований:', e);
@@ -180,6 +184,36 @@ const DaoPage: React.FC = () => {
 
   const selectedProposal = proposals.length > 0 ? proposals[0] : null;
 
+  // ================= ЗАГРУЗКА DAO-БАЛАНСА (остаток лимита) =================
+  useEffect(() => {
+    if (!initData || !selectedProposal) return;
+
+    (async () => {
+      try {
+        const daoRes = await fetch(
+          `${API_BASE_URL}/api/dao/proposals/${selectedProposal.id}/voting-balance`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ init_data: initData }),
+          }
+        );
+
+        if (daoRes.ok) {
+          const daoData = await daoRes.json();
+          const eff = Number(daoData.balance ?? 0);
+          setVotingBalance(eff >= 0 ? eff : 0);
+        } else {
+          console.warn('DAO voting-balance HTTP error:', daoRes.status);
+          setVotingBalance(0);
+        }
+      } catch (err) {
+        console.error('DAO voting-balance fetch failed:', err);
+        setVotingBalance(0);
+      }
+    })();
+  }, [initData, selectedProposal?.id]);
+
   const usedLocally = useMemo(
     () => Object.values(votes).reduce((s, w) => s + w, 0),
     [votes]
@@ -188,6 +222,28 @@ const DaoPage: React.FC = () => {
   // effectiveBalance = DAO-баланс, а не total_xp
   const effectiveBalance = votingBalance;
   const remaining = Math.max(0, effectiveBalance - usedLocally);
+
+  // ---------- лайв-результаты в виде map по option_id ----------
+  const liveTotals = useMemo(() => {
+    if (!liveResults) return {} as Record<
+      number,
+      { total: number; percent: number }
+    >;
+
+    const total = liveResults.results.reduce(
+      (s, r) => s + (r.total_weight || 0),
+      0
+    );
+
+    const map: Record<number, { total: number; percent: number }> = {};
+    liveResults.results.forEach((r) => {
+      const w = r.total_weight || 0;
+      const pct = total ? Math.round((w / total) * 100) : 0;
+      map[r.option_id] = { total: w, percent: pct };
+    });
+
+    return map;
+  }, [liveResults]);
 
   // ---------- пресеты ----------
   const setVotePercent = (optionId: number, fraction: number) => {
@@ -260,7 +316,7 @@ const DaoPage: React.FC = () => {
 
       // ожидаем, что бек вернёт:
       // - used_weight: сколько GAP было поставлено В ЭТОМ запросе
-      // - balance: ОСТАТОК DAO-лимита
+      // - balance: ОСТАТОК DAO-лимита (remaining)
       if (typeof data.balance === 'number') {
         setVotingBalance(data.balance);
       } else {
@@ -281,6 +337,19 @@ const DaoPage: React.FC = () => {
           defaultValue: 'Səslər qəbul edildi: {{amount}} GAP',
         })
       );
+
+      // после успешного голосования обновляем лайв-результаты
+      try {
+        const r = await fetch(
+          `${API_BASE_URL}/api/dao/proposals/${selectedProposal.id}/results`
+        );
+        if (r.ok) {
+          const rs: DaoResultsOut = await r.json();
+          setLiveResults(rs);
+        }
+      } catch (err) {
+        console.error('Ошибка обновления live-results после голосования:', err);
+      }
     } catch (e) {
       setError(
         t('errors.vote_error', {
@@ -302,7 +371,7 @@ const DaoPage: React.FC = () => {
         {t('title', { defaultValue: 'DAO səsvermə' })}
       </h1>
 
-      {/* ==================== РЕЖИМ РЕЗУЛЬТАТОВ ==================== */}
+      {/* ==================== РЕЖИМ РЕЗУЛЬТАТОВ (ГОЛОСОВАНИЕ ЗАВЕРШЕНО) ==================== */}
       {results && !selectedProposal && (
         <div className="w-full max-w-md bg-[#0e1a2b] border border-[#00f0ff40] rounded-2xl p-4 mt-4">
           <h2 className="text-lg font-semibold mb-3 text-[#7ee9ff]">
@@ -357,7 +426,7 @@ const DaoPage: React.FC = () => {
         </div>
       )}
 
-      {/* ==================== РЕЖИМ ГОЛОСОВАНИЯ ==================== */}
+      {/* ==================== РЕЖИМ ГОЛОСОВАНИЯ (АКТИВНОЕ) ==================== */}
       {!loadingProposals && selectedProposal && (
         <div className="w-full max-w-md bg-[#0e1a2b] border border-[#00f0ff40] rounded-2xl p-4 mt-4">
           <h2 className="text-lg font-semibold text-[#7ee9ff]">
@@ -386,6 +455,7 @@ const DaoPage: React.FC = () => {
             {selectedProposal.options.map((opt) => {
               const current = votes[opt.id] || 0;
               const imgSrc = resolveImageUrl(opt.art_image_url);
+              const live = liveTotals[opt.id];
 
               return (
                 <div
@@ -418,6 +488,13 @@ const DaoPage: React.FC = () => {
                         </span>
                       </span>
                     </div>
+
+                    {/* Лайв-результаты по опции */}
+                    {live && (
+                      <div className="text-[#7ee9ff] text-[10px]">
+                        {live.total.toLocaleString()} GAP ({live.percent}%)
+                      </div>
+                    )}
 
                     <div className="mt-1 flex flex-wrap gap-1 justify-end">
                       {[0, 0.1, 0.25, 0.5, 1].map((fraction) => (
