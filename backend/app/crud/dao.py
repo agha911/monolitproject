@@ -257,23 +257,20 @@ async def cast_vote(
     effective_balance: int,
 ) -> DaoVote:
     """
-    Записать голос пользователя за конкретную опцию.
+    Проставить/обновить голос пользователя по одной опции.
 
-    Правила:
-    - вес > 0
-    - смотрим, сколько пользователь уже потратил на ДРУГИЕ опции
-    - не даём превысить зафиксированный effective_balance
-    - запрещаем УМЕНЬШАТЬ вес по уже существующей опции
+    - effective_balance — зафиксированный voting power (DaoUserVotingPower.base_balance)
+    - Нельзя превысить этот лимит суммарно по всем опциям
+    - Нельзя уменьшать вес по уже существующей опции (запрет перераспределения)
     """
-
     w = int(weight)
     if w <= 0:
         raise ValueError("weight_must_be_positive")
 
-    # Зафиксированный лимит по этому proposal
+    # ⚠️ ВАЖНО: используем зафиксированный effective_balance
     user_balance = int(effective_balance or 0)
 
-    # Сколько уже потрачено на другие опции (кроме этой)
+    # Сколько уже потрачено на другие опции (без этой)
     used_other = await session.scalar(
         select(func.coalesce(func.sum(DaoVote.weight), 0)).where(
             DaoVote.proposal_id == proposal.id,
@@ -283,7 +280,7 @@ async def cast_vote(
     )
     used_other = int(used_other or 0)
 
-    # Ищем голос по этой опции, чтобы понять, был ли здесь уже вес
+    # Пытаемся найти существующий голос по этой опции
     existing_vote = await session.scalar(
         select(DaoVote).where(
             DaoVote.proposal_id == proposal.id,
@@ -292,14 +289,13 @@ async def cast_vote(
         )
     )
 
-    existing_weight = int(existing_vote.weight) if existing_vote else 0
-
-    # 🔒 Запрещаем уменьшать вес по этой опции
-    # Было 1 000, пытается поставить 500 → запрещаем
-    if existing_vote and w < existing_weight:
+    # 🔒 Запрещаем уменьшать вес по опции
+    if existing_vote is not None and w < int(existing_vote.weight):
         raise ValueError("cannot_decrease_weight")
 
-    # Проверка лимита: другие опции + НОВЫЙ вес по этой опции
+    # Проверка лимита относительно зафиксированного баланса
+    # Если existing_vote есть — считаем, что новый вес "заменяет" старый
+    # и смотрим на суммарный вес: used_other + w
     if used_other + w > user_balance:
         raise ValueError("insufficient_balance")
 
