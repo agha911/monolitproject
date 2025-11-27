@@ -259,20 +259,21 @@ async def cast_vote(
     """
     Записать голос пользователя за конкретную опцию.
 
-    ✓ Проверяем, что вес > 0
-    ✓ Смотрим, сколько пользователь уже потратил голосов по ЭТОМУ proposal (кроме этой опции)
-    ✓ Не даём превысить ЗАФИКСИРОВАННЫЙ effective_balance (а не текущий total_xp)
-    ✓ Либо создаём новую запись DaoVote, либо обновляем существующую
+    Правила:
+    - вес > 0
+    - смотрим, сколько пользователь уже потратил на ДРУГИЕ опции
+    - не даём превысить зафиксированный effective_balance
+    - запрещаем УМЕНЬШАТЬ вес по уже существующей опции
     """
 
     w = int(weight)
     if w <= 0:
         raise ValueError("weight_must_be_positive")
 
-    # ⚠️ ВАЖНО: больше не берём user.total_xp, используем зафиксированный effective_balance
+    # Зафиксированный лимит по этому proposal
     user_balance = int(effective_balance or 0)
 
-    # Сколько уже потрачено на другие опции (без этой)
+    # Сколько уже потрачено на другие опции (кроме этой)
     used_other = await session.scalar(
         select(func.coalesce(func.sum(DaoVote.weight), 0)).where(
             DaoVote.proposal_id == proposal.id,
@@ -282,11 +283,7 @@ async def cast_vote(
     )
     used_other = int(used_other or 0)
 
-    # Проверка лимита относительно зафиксированного баланса
-    if used_other + w > user_balance:
-        raise ValueError("insufficient_balance")
-
-    # Пытаемся найти существующий голос по этой опции
+    # Ищем голос по этой опции, чтобы понять, был ли здесь уже вес
     existing_vote = await session.scalar(
         select(DaoVote).where(
             DaoVote.proposal_id == proposal.id,
@@ -294,6 +291,17 @@ async def cast_vote(
             DaoVote.option_id == option.id,
         )
     )
+
+    existing_weight = int(existing_vote.weight) if existing_vote else 0
+
+    # 🔒 Запрещаем уменьшать вес по этой опции
+    # Было 1 000, пытается поставить 500 → запрещаем
+    if existing_vote and w < existing_weight:
+        raise ValueError("cannot_decrease_weight")
+
+    # Проверка лимита: другие опции + НОВЫЙ вес по этой опции
+    if used_other + w > user_balance:
+        raise ValueError("insufficient_balance")
 
     now = datetime.utcnow()
 
@@ -415,18 +423,26 @@ async def get_user_remaining_voting_balance(
     Возвращает ОСТАТОК монет, доступных для голосования по proposal.
 
     Логика:
-      1) Берём "эффективный" (snapshot) баланс через DaoUserVotingPower:
-         - при первом обращении создаётся запись с base_balance = current_balance
-         - дальше всегда используем этот base_balance как потолок
-      2) Суммируем все уже проголосованные веса (DaoVote.weight)
-      3) Остаток = max(0, base_balance - used)
+      1) Если пользователь уже голосовал → используем зафиксированный base_balance.
+      2) Если ещё не голосовал → используем текущий current_balance (user.total_xp),
+         но при этом НИЧЕГО не фиксируем в dao_user_voting_power.
+      3) Суммируем все уже проголосованные веса (DaoVote.weight).
+      4) Остаток = max(0, effective_balance - used).
     """
-    effective_balance = await get_user_effective_voting_balance(
-        session=session,
+
+    # Пытаемся найти уже зафиксированный voting power
+    row = await get_user_voting_power_row(
+        session,
         user_id=user_id,
         proposal_id=proposal_id,
-        current_balance=current_balance,
     )
+
+    if row:
+        # Пользователь уже голосовал: используем снапшот
+        effective_balance = int(row.base_balance or 0)
+    else:
+        # Пользователь ещё не голосовал: можно использовать весь текущий баланс
+        effective_balance = int(current_balance or 0)
 
     used_weight = await get_user_vote_total_weight(
         session=session,
