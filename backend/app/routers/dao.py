@@ -174,9 +174,16 @@ async def vote_for_proposal(
     - проверяем, что proposal активен
     - проверяем, что option_id принадлежат proposal
     - один раз фиксируем voting power пользователя для этого proposal
-    - вызываем cast_vote для каждой опции с ОДНИМ и тем же effective_balance
-    - commit / rollback без session.begin()
+    - для расчёта сообщения считаем:
+        * used_before  — сколько было потрачено до запроса
+        * used_after   — сколько потрачено после
+        * delta_used   — сколько ДОБАВИЛИ этим запросом
+    - возвращаем:
+        * status = "ok"
+        * used_weight = delta_used
+        * balance = ОСТАТОК DAO-лимита (snapshot - уже потрачено)
     """
+    # --- init_data → telegram_id ---
     try:
         telegram_id = int(parse_telegram_user_id(payload.init_data))
     except Exception:
@@ -207,23 +214,29 @@ async def vote_for_proposal(
                 detail=f"option_not_in_proposal:{v.option_id}",
             )
 
-    from sqlalchemy import exc as sa_exc
-
     try:
-        # блокируем пользователя (как в clicker)
+        # Блокируем пользователя (как в кликере), работаем в явной транзакции
         db_user = await crud_user.get_user_for_update(session, user_id)
         if not db_user:
             await session.rollback()
             raise HTTPException(status_code=404, detail="user_not_found")
 
-        # ⚠️ КЛЮЧЕВОЕ МЕСТО:
-        # фиксируем voting power для ЭТОГО пользователя и ЭТОГО голосования
+        # Текущий общий GAP-баланс (total_xp)
         current_balance = int(db_user.total_xp or 0)
+
+        # ⚠️ Фиксируем voting power для ЭТОГО пользователя и ЭТОГО голосования
         effective_balance = await crud_dao.get_user_effective_voting_balance(
-            session,
+            session=session,
             user_id=user_id,
             proposal_id=proposal_id_int,
             current_balance=current_balance,
+        )
+
+        # Сколько было потрачено до этого запроса
+        used_before = await crud_dao.get_user_vote_total_weight(
+            session=session,
+            proposal_id=proposal_id_int,
+            user_id=user_id,
         )
 
         # применяем все голоса в рамках одного зафиксированного лимита
@@ -245,33 +258,37 @@ async def vote_for_proposal(
         raise
 
     except ValueError as e:
+        # сюда прилетят:
+        # - "weight_must_be_positive"
+        # - "insufficient_balance"
+        # - "cannot_decrease_weight"
         await session.rollback()
         raise HTTPException(status_code=400, detail=str(e))
 
-    except sa_exc.SQLAlchemyError:
-        await session.rollback()
-        log.exception(
-            "dao.vote.db_error | proposal_id=%s user_id=%s votes=%s",
-            proposal_id_int,
-            user_id,
-            [(v.option_id, v.weight) for v in payload.votes],
-        )
-        raise HTTPException(status_code=500, detail="db_error_internal")
-
     # --- если мы здесь — всё успешно закоммичено ---
-    used_weight = await crud_dao.get_user_vote_total_weight(
-        session,
+
+    # Сколько всего потрачено ПОСЛЕ этого запроса
+    used_after = await crud_dao.get_user_vote_total_weight(
+        session=session,
         proposal_id=proposal_id_int,
         user_id=user_id,
     )
 
-    # На голосование баланс мы НЕ уменьшаем — показываем текущий total_xp
-    balance = int(user.total_xp or 0)
+    # Сколько добавили именно этим запросом
+    delta_used = max(0, used_after - used_before)
+
+    # Реальный остаток DAO-лимита с учётом снапшота + уже проголосованных весов
+    remaining = await crud_dao.get_user_remaining_voting_balance(
+        session=session,
+        user_id=user_id,
+        proposal_id=proposal_id_int,
+        current_balance=current_balance,
+    )
 
     return VoteResponse(
         status="ok",
-        used_weight=used_weight,
-        balance=balance,
+        used_weight=delta_used,
+        balance=remaining,
     )
 
 
