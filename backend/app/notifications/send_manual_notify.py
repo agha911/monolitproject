@@ -1,4 +1,4 @@
-# app/notifications/announce_art_contest.py
+# app/notifications/send_manual_notify.py
 
 import asyncio
 from sqlalchemy.future import select
@@ -13,16 +13,20 @@ INSTAGRAM_URL = "https://www.instagram.com/gap_pick?igsh=ZzdzYWE1MzgzNGJk&utm_so
 
 # 🔔 Elan: Art Yarışması
 ANNOUNCEMENT_TEXT = (
-    "✨ *Art Yarışmamız başladı!* ✨\n"
-    "🏆 *Baş mükafat: 300 USDT*\n\n"
-    "Sən də öz yaradıcılığını göstər və Gappick maskotundan ilhamlanmış unikal "
-    "T-shirt dizaynı yarat! 👕🪙\n\n"
-    "📌 *Qaydalar çox sadədir:*\n"
-    "1️⃣ Öz dizaynını hazırla\n"
-    "2️⃣ Story-də paylaş\n"
-    "3️⃣ Səhifəmizi qeyd et və «iştirak edirəm» yaz ✍️\n\n"
-    "🔑 Yalnız *bir qalib* seçiləcək!\n\n"
-    "Bu fürsəti qaçırma — yaradıcılığını hamıya göstər! 🚀"
+    "✨ *Gappick DAO test səsverməsi başladı!* ✨\n\n"
+    "Art yarışmamızın yarımfinal və final mərhələlərində ən vacib səsvermələr "
+    "Gappick tətbiqi daxilində, DAO sistemi vasitəsilə keçiriləcək. Buna görə indi "
+    "*test səsverməsi* keçiririk ki, hər şey problemsiz işlədiyinə əmin olaq. 🧪🗳️\n\n"
+    "📌 *Nə etmək lazımdır?*\n"
+    "1️⃣ WebApp-i aç\n"
+    "2️⃣ \"DAO\" səhifəsinə keç\n"
+    "3️⃣ Maskot variantları arasında səs ver və sistemi yoxla ✅\n\n"
+    "Bu, hələ *test mərhələsidir* — nəticələr əsas yarışmanın qalibini müəyyən etmir, "
+    "amma gələcək yarımfinal və final səsvermələri üçün əsas olacaq.\n\n"
+    "🙏 Senden xahişimiz:\n"
+    "• Səs vermək üçün daxil ol\n"
+    "• Əgər hər hansı bug və ya qəribəlik görsən, qrupda bizə yaz 🐞\n\n"
+    "Gəlin birlikdə Gappick DAO səsvermə sistemini mükəmməlləşdirək! 🚀"
 )
 
 def build_markup() -> InlineKeyboardMarkup:
