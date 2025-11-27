@@ -10,6 +10,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.dao import ArtWork, DaoProposal, DaoUserVotingPower, DaoOption, DaoVote
 from app.models.user import User
+import logging
+
+logger = logging.getLogger("dao.voting")
 
 
 # ─────────────────────────
@@ -418,15 +421,20 @@ async def get_user_remaining_voting_balance(
     """
     Возвращает ОСТАТОК монет, доступных для голосования по proposal.
 
-    Логика:
-      1) Если пользователь уже голосовал → используем зафиксированный base_balance.
-      2) Если ещё не голосовал → используем текущий current_balance (user.total_xp),
-         но при этом НИЧЕГО не фиксируем в dao_user_voting_power.
-      3) Суммируем все уже проголосованные веса (DaoVote.weight).
-      4) Остаток = max(0, effective_balance - used).
+    - если уже есть DaoUserVotingPower → используем base_balance (snapshot)
+    - если нет → используем текущий current_balance (user.total_xp)
+    - затем вычитаем уже проголосованный вес
     """
+    logger.info(
+        "dao.remaining.start",
+        extra={
+            "user_id": user_id,
+            "proposal_id": proposal_id,
+            "current_balance": int(current_balance or 0),
+        },
+    )
 
-    # Пытаемся найти уже зафиксированный voting power
+    # пробуем найти зафиксированный снапшот
     row = await get_user_voting_power_row(
         session,
         user_id=user_id,
@@ -434,11 +442,25 @@ async def get_user_remaining_voting_balance(
     )
 
     if row:
-        # Пользователь уже голосовал: используем снапшот
         effective_balance = int(row.base_balance or 0)
+        logger.info(
+            "dao.remaining.snapshot_found",
+            extra={
+                "user_id": user_id,
+                "proposal_id": proposal_id,
+                "base_balance": effective_balance,
+            },
+        )
     else:
-        # Пользователь ещё не голосовал: можно использовать весь текущий баланс
         effective_balance = int(current_balance or 0)
+        logger.info(
+            "dao.remaining.no_snapshot",
+            extra={
+                "user_id": user_id,
+                "proposal_id": proposal_id,
+                "effective_balance": effective_balance,
+            },
+        )
 
     used_weight = await get_user_vote_total_weight(
         session=session,
@@ -447,4 +469,16 @@ async def get_user_remaining_voting_balance(
     )
 
     remaining = max(0, effective_balance - used_weight)
+
+    logger.info(
+        "dao.remaining.done",
+        extra={
+            "user_id": user_id,
+            "proposal_id": proposal_id,
+            "effective_balance": effective_balance,
+            "used_weight": used_weight,
+            "remaining": remaining,
+        },
+    )
+
     return remaining
