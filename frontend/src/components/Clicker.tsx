@@ -23,56 +23,24 @@ const Clicker: React.FC = () => {
   const [energy, setEnergy] = useState(1000);
   const smoothEnergy = useAnimatedInt(energy, { speedPerUnit: 8, minDuration: 120, maxDuration: 600 });
   const [maxEnergy, setMaxEnergy] = useState(1000);
-
-  const [clickBoost, setClickBoost] = useState(1);
-  const [nickname, setNickname] = useState<string | null>(null);
-  const [invitedFriends, setInvitedFriends] = useState<number>(0);
-  const [ratingPosition, setRatingPosition] = useState<number | null>(null);
-  const [ratingTotalPlayers, setRatingTotalPlayers] = useState<number | null>(null);
-
   const [lastEnergyUpdate, setLastEnergyUpdate] = useState<Date | null>(null);
-
+  const [timeToFullEnergy, setTimeToFullEnergy] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  const [clicks, setClicks] = useState(0);
-  const [deltaXp, setDeltaXp] = useState(0);
-
-  const [tempMultUntil, setTempMultUntil] = useState<number | null>(null);
-
-  const [spawned, setSpawned] = useState<SpawnedBooster | null>(null);
-
+  const [clickBoost, setClickBoost] = useState(1);
+  const [floatingTexts, setFloatingTexts] = useState<any[]>([]);
   const [serverSeq, setServerSeq] = useState<number | null>(null);
   const [seqReady, setSeqReady] = useState(false);
-  const lastFlushTimeRef = useRef<number>(0);
+  const [showUserCard, setShowUserCard] = useState(false);
 
-  const [flushError, setFlushError] = useState<string | null>(null);
+  // бустеры
+  const [spawned, setSpawned] = useState<SpawnedBooster | null>(null);
+  const spawnTimer = useRef<number | null>(null);
+  const [tempMultUntil, setTempMultUntil] = useState<number | null>(null);
 
-  const [wasOffline, setWasOffline] = useState(false);
-
-  const [energyDepletedShown, setEnergyDepletedShown] = useState(false);
-
-  const { buffer, addClick, flushBuffer, clearBuffer } = useClickBuffer({
-    onFlushed: (resp: FlushResponse) => {
-      if (typeof resp.total_xp === 'number') {
-        setTotalXp(resp.total_xp);
-      }
-      if (typeof resp.energy === 'number') {
-        setEnergy(resp.energy);
-      }
-      setFlushError(null);
-      setWasOffline(false);
-    },
-    onError: (err) => {
-      console.error('Flush error', err);
-      setFlushError('Синхронизация с сервером временно недоступна');
-      setWasOffline(true);
-    },
-  });
-
-  // ---- boosters daily tracking (локально, но день = UTC, как на бэке)
-  // Используем UTC-день, чтобы совпадать с логикой бэкенда
-  const todayStr = new Date().toISOString().slice(0, 10); // YYYY-MM-DD в UTC
+  // суточные счётчики по типам (для UI; лимиты всё равно на бэке)
+  // БЫЛО: const todayStr = new Date().toDateString();
+  // СТАЛО: используем UTC-день, чтобы совпадать с бэкендом
+  const todayStr = new Date().toISOString().slice(0, 10);
   const coinsKey = `gappick:boosters:coinsClaimsUsed:${todayStr}`;
   const multKey  = `gappick:boosters:multClaimsUsed:${todayStr}`;
 
@@ -89,9 +57,11 @@ const Clicker: React.FC = () => {
   const [sessionCoinsSpawned, setSessionCoinsSpawned] = useState(false);
   const [sessionMultSpawned, setSessionMultSpawned] = useState(false);
 
-  // авто-обновление суточных счётчиков при смене даты (раз в минуту, по UTC)
+  // авто-обновление суточных счётчиков при смене даты (раз в минуту)
   useEffect(() => {
     const id = window.setInterval(() => {
+      // БЫЛО: const nowStr = new Date().toDateString();
+      // СТАЛО: UTC-дата
       const nowStr = new Date().toISOString().slice(0, 10);
       const cKey = `gappick:boosters:coinsClaimsUsed:${nowStr}`;
       const mKey = `gappick:boosters:multClaimsUsed:${nowStr}`;
@@ -110,20 +80,15 @@ const Clicker: React.FC = () => {
     else alert('Xəta: Telegram istifadəçi məlumatlarını almaq mümkün olmadı.');
   }, []);
 
-  const seqStorageKey = useMemo(() => {
-    const telegramId = WebApp.initDataUnsafe?.user?.id;
-    return telegramId ? `gappick:lastServerSeq:${telegramId}` : 'gappick:lastServerSeq:anon';
-  }, []);
-
-  // исправлено: useState без deps + отдельный useEffect, который читает localStorage
-  const [lastClientSeq, setLastClientSeq] = useState<number>(0);
-
-  useEffect(() => {
+  const userId = telegramUser?.id ? String(telegramUser.id) : 'guest';
+  const sessionId = useMemo(() => `${userId}-${Date.now()}`, [userId]);
+  const seqStorageKey = useMemo(() => `gappick:lastSeq:${userId}`, [userId]);
+  const initialLocalSeq = useMemo(() => {
     try {
       const saved = localStorage.getItem(seqStorageKey);
-      setLastClientSeq(saved ? Number(saved) : 0);
+      return saved ? Number(saved) : 0;
     } catch {
-      setLastClientSeq(0);
+      return 0;
     }
   }, [seqStorageKey]);
 
@@ -151,159 +116,149 @@ const Clicker: React.FC = () => {
         setMaxEnergy(data.max_energy ?? 1000);
         setClickBoost((data.click_boost_level ?? 0) + 1);
 
-        setNickname(data.nickname ?? null);
-        setInvitedFriends(data.invited_friends_count ?? 0);
-        setRatingPosition(data.rating_position ?? null);
-        setRatingTotalPlayers(data.rating_total_players ?? null);
-
         const s = Number(data.last_client_seq ?? 0);
         setServerSeq(s);
-        try {
-          localStorage.setItem(seqStorageKey, String(s));
-        } catch {}
+        try { localStorage.setItem(seqStorageKey, String(s)); } catch {}
 
         setSeqReady(true);
         setLoading(false);
-      } catch (e) {
-        console.error(e);
-        setError('Xəta baş verdi. Лütfən, daha sonra yenidən cəhd edin.');
-        setLoading(false);
+      } catch (error) {
+        console.error('İstifadəçinin ilkinləşdirilməsində xəta:', error);
+        setSeqReady(false);
       }
     })();
   }, [telegramUser, seqStorageKey]);
 
   useEffect(() => {
-    if (!lastEnergyUpdate) return;
+    const interval = setInterval(async () => {
+      if (!telegramUser || energy >= maxEnergy) return;
+      try {
+        const res = await fetch(`${API_BASE_URL}/api/game/progress`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ init_data: WebApp.initData }),
+        });
 
-    const updateEnergyFromServerTime = () => {
-      if (!lastEnergyUpdate) return;
-      const now = new Date();
-      const diffMs = now.getTime() - lastEnergyUpdate.getTime();
-      const diffMinutes = Math.floor(diffMs / 60000);
+        const data = await res.json();
+        setEnergy(data.energy);
+        setLastEnergyUpdate(data.lastEnergyUpdate ? new Date(data.lastEnergyUpdate) : null);
+        setMaxEnergy(data.max_energy ?? 1000);
+        setClickBoost((data.click_boost_level ?? 0) + 1);
 
-      if (diffMinutes <= 0) return;
+        const s = Number(data.last_client_seq ?? 0);
+        if (serverSeq === null || s > serverSeq) {
+          setServerSeq(s);
+          try { localStorage.setItem(seqStorageKey, String(s)); } catch {}
+          setSeqReady(true);
+        }
+      } catch (err) {
+        console.error('Auto yeniləmədə xəta:', err);
+      }
+    }, 10000);
 
-      const ENERGY_RECOVERY_INTERVAL_MINUTES = 1;
-      const ENERGY_PER_INTERVAL = 1;
-      const intervals = Math.floor(diffMinutes / ENERGY_RECOVERY_INTERVAL_MINUTES);
-
-      if (intervals <= 0) return;
-
-      setEnergy((prev) => {
-        const recovered = prev + intervals * ENERGY_PER_INTERVAL;
-        const capped = Math.min(recovered, maxEnergy);
-        return capped;
-      });
-
-      setLastEnergyUpdate((prev) => {
-        if (!prev) return prev;
-        const newDate = new Date(prev.getTime() + intervals * ENERGY_RECOVERY_INTERVAL_MINUTES * 60000);
-        return newDate;
-      });
-    };
-
-    updateEnergyFromServerTime();
-    const id = window.setInterval(updateEnergyFromServerTime, 30_000);
-
-    return () => clearInterval(id);
-  }, [lastEnergyUpdate, maxEnergy]);
-
-  const energyInt = smoothEnergy;
-
-  const currentMultiplier = useMemo(() => {
-    const now = Date.now();
-    if (tempMultUntil && tempMultUntil > now) return 10;
-    return 1;
-  }, [tempMultUntil]);
-
-  const canClick = energy > 0;
-
-  const flushIfNeeded = async () => {
-    if (!seqReady || buffer.length === 0) return;
-
-    const now = Date.now();
-    if (now - lastFlushTimeRef.current < 500) return;
-    lastFlushTimeRef.current = now;
-
-    const nextSeqStart = lastClientSeq + 1;
-    const eventsWithSeq = buffer.map((ev, index) => ({
-      ...ev,
-      seq: nextSeqStart + index,
-    }));
-
-    setLastClientSeq(nextSeqStart + buffer.length - 1);
-    try {
-      localStorage.setItem(seqStorageKey, String(nextSeqStart + buffer.length - 1));
-    } catch (e) {
-      console.warn('Cannot persist seq', e);
-    }
-
-    await flushBuffer(eventsWithSeq, WebApp.initData);
-  };
+    return () => clearInterval(interval);
+  }, [telegramUser, energy, maxEnergy, serverSeq, seqStorageKey]);
 
   useEffect(() => {
-    if (!canClick || !seqReady || buffer.length === 0) return;
-    flushIfNeeded();
-  }, [buffer, canClick, seqReady]);
-
-  const handleClick = () => {
-    if (!canClick) {
-      if (!energyDepletedShown) {
-        WebApp.HapticFeedback.notificationOccurred('warning');
-        setEnergyDepletedShown(true);
-        setTimeout(() => setEnergyDepletedShown(false), 2000);
+    const interval = setInterval(() => {
+      if (!lastEnergyUpdate || energy >= maxEnergy) {
+        setTimeToFullEnergy(null);
+        return;
       }
+      const now = new Date();
+      const msPassed = now.getTime() - (lastEnergyUpdate?.getTime?.() ?? 0);
+      const totalRecoveryMinutes = 480;
+      const intervalMsPerUnit = (totalRecoveryMinutes / maxEnergy) * 60 * 1000;
+      const remainingUnits = maxEnergy - energy;
+      const msToNextUnit = intervalMsPerUnit - (msPassed % intervalMsPerUnit);
+      const msToFull = (remainingUnits - 1) * intervalMsPerUnit + msToNextUnit;
+      const totalSeconds = Math.max(0, Math.ceil(msToFull / 1000));
+      const hours = Math.floor(totalSeconds / 3600);
+      const minutes = Math.floor((totalSeconds % 3600) / 60);
+      const seconds = totalSeconds % 60;
+      const hh = hours.toString().padStart(2, '0');
+      const mm = minutes.toString().padStart(2, '0');
+      const ss = seconds.toString().padStart(2, '0');
+      setTimeToFullEnergy(`${hh}:${mm}:${ss}`);
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [lastEnergyUpdate, energy, maxEnergy]);
+
+  const onReconcile = async (data: FlushResponse) => {
+    if (data.status === "ok") {
+      setEnergy(data.energy);
+      setTotalXp(data.total_xp);
+      setServerSeq(Number(data.server_seq ?? 0));
+    } else if (data.status === "noop") {
       return;
+    } else {
+      try {
+        const res = await fetch(`${API_BASE_URL}/api/game/progress`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ init_data: WebApp.initData }),
+        });
+        const p = await res.json();
+        setEnergy(p.energy);
+        setTotalXp(p.total_xp ?? 0);
+        setLastEnergyUpdate(p.lastEnergyUpdate ? new Date(p.lastEnergyUpdate) : null);
+        setMaxEnergy(p.max_energy ?? 1000);
+        setClickBoost((p.click_boost_level ?? 0) + 1);
+        setServerSeq(Number(p.last_client_seq ?? 0));
+      } catch (e) {
+        console.warn("Xəta sonrası yeniləmə alınmadı", e);
+      }
     }
-
-    const now = Date.now();
-    const clickValue = clickBoost * currentMultiplier;
-
-    addClick({
-      value: clickValue,
-      ts: now,
-      tg_init_data: WebApp.initData,
-    });
-
-    setClicks((prev) => prev + 1);
-    setDeltaXp((prev) => prev + clickValue);
-    setEnergy((prev) => Math.max(prev - 1, 0));
-
-    flushIfNeeded();
   };
 
-  const spawnRandomBooster = () => {
-    if (!canClick) return;
-    if (!seqReady) return;
+  // временный множитель x10, если активирован бустер
+  const tempMultiplierActive = tempMultUntil !== null && Date.now() < tempMultUntil ? 10 : 1;
+  const effectiveBoost = clickBoost * tempMultiplierActive;
 
-    const shouldSpawnCoin =
-      !sessionCoinsSpawned &&
-      coinsClaimsUsed < DAILY_CLAIM_LIMIT_PER_TYPE &&
-      Math.random() < 0.02;
+  const { addClicks } = useClickBuffer({
+    initData: WebApp.initData,
+    sessionId,
+    onReconcile,
+    enabled: seqReady && !!telegramUser,
+    flushEveryMs: 120,
+    threshold: 240,
+    initialSeq: Math.max(serverSeq ?? 0, initialLocalSeq),
+    maxBatch: 480,
+    lockKey: userId,
+    seqStorageKey: seqStorageKey as any,
+    canSend: energy > 0
+  });
 
-    const shouldSpawnMult =
-      !sessionMultSpawned &&
-      multClaimsUsed < DAILY_CLAIM_LIMIT_PER_TYPE &&
-      Math.random() < 0.02;
+  // ======== упрощённый спавн: по одному бустеру каждого типа за сеанс ========
+  const trySpawnBoosterForSession = () => {
+    if (spawned) return; // уже показан
+    if (tempMultiplierActive > 1) return; // если x10 активен — не показываем второй одновременно
 
-    if (!shouldSpawnCoin && !shouldSpawnMult) return;
+    // приоритет: сначала 🎁, потом 🚀
+    if (!sessionCoinsSpawned && coinsClaimsUsed < DAILY_CLAIM_LIMIT_PER_TYPE) {
+      spawnOne('coins');
+      setSessionCoinsSpawned(true);
+      return;
+    }
+    if (!sessionMultSpawned && multClaimsUsed < DAILY_CLAIM_LIMIT_PER_TYPE) {
+      spawnOne('mult');
+      setSessionMultSpawned(true);
+      return;
+    }
+  };
 
-    const kind: SpawnedBooster =
-      shouldSpawnCoin && shouldSpawnMult
-        ? Math.random() < 0.5
-          ? { kind: 'coins', id: Date.now(), x: Math.random() * 80 + 10, y: Math.random() * 60 + 20, expiresAt: Date.now() + SPAWN_SHOW_MS }
-          : { kind: 'mult', id: Date.now(), x: Math.random() * 80 + 10, y: Math.random() * 60 + 20, expiresAt: Date.now() + SPAWN_SHOW_MS }
-        : shouldSpawnCoin
-        ? { kind: 'coins', id: Date.now(), x: Math.random() * 80 + 10, y: Math.random() * 60 + 20, expiresAt: Date.now() + SPAWN_SHOW_MS }
-        : { kind: 'mult', id: Date.now(), x: Math.random() * 80 + 10, y: Math.random() * 60 + 20, expiresAt: Date.now() + SPAWN_SHOW_MS };
+  const spawnOne = (kind: 'coins' | 'mult') => {
+    const x = 10 + Math.random() * 80;
+    const y = 10 + Math.random() * 80;
+    const id = Date.now() + Math.random();
+    const expiresAt = Date.now() + SPAWN_SHOW_MS;
+    setSpawned({ kind, id, x, y, expiresAt });
 
-    if (kind.kind === 'coins') setSessionCoinsSpawned(true);
-    if (kind.kind === 'mult') setSessionMultSpawned(true);
-
-    setSpawned(kind);
-
-    window.setTimeout(() => {
-      setSpawned((cur) => (cur && cur.id === kind.id ? null : cur));
+    if (spawnTimer.current) window.clearTimeout(spawnTimer.current);
+    spawnTimer.current = window.setTimeout(() => {
+      // если не успели кликнуть — просто скрываем, второй попытки в этом сеансе не даём
+      setSpawned((cur) => (cur && cur.id === id ? null : cur));
     }, SPAWN_SHOW_MS) as unknown as number;
   };
 
@@ -324,18 +279,12 @@ const Clicker: React.FC = () => {
           const granted = Number(data.granted ?? 50000);
           setTotalXp((prev) => prev + granted);
 
-          // предпочитаем реальное значение с бэкенда
-          const usedFromServer = typeof data.used_today === 'number' ? data.used_today : null;
-          const used = usedFromServer !== null
-            ? Math.min(DAILY_CLAIM_LIMIT_PER_TYPE, usedFromServer)
-            : Math.min(DAILY_CLAIM_LIMIT_PER_TYPE, coinsClaimsUsed + 1);
+          const used = Math.min(DAILY_CLAIM_LIMIT_PER_TYPE, coinsClaimsUsed + 1);
           setCoinsClaimsUsed(used);
           localStorage.setItem(coinsKey, String(used));
         } else if (data.status === 'daily_limit_reached') {
-          const usedFromServer = typeof data.used_today === 'number' ? data.used_today : DAILY_CLAIM_LIMIT_PER_TYPE;
-          const used = Math.min(DAILY_CLAIM_LIMIT_PER_TYPE, usedFromServer);
-          setCoinsClaimsUsed(used);
-          localStorage.setItem(coinsKey, String(used));
+          setCoinsClaimsUsed(DAILY_CLAIM_LIMIT_PER_TYPE);
+          localStorage.setItem(coinsKey, String(DAILY_CLAIM_LIMIT_PER_TYPE));
         }
       } else {
         const res = await fetch(`${API_BASE_URL}/api/boosters/claim/multiplier`, {
@@ -349,53 +298,42 @@ const Clicker: React.FC = () => {
           const expires = data.expires_at ? new Date(data.expires_at).getTime() : Date.now() + 15000;
           setTempMultUntil(expires);
 
-          const usedFromServer = typeof data.used_today === 'number' ? data.used_today : null;
-          const used = usedFromServer !== null
-            ? Math.min(DAILY_CLAIM_LIMIT_PER_TYPE, usedFromServer)
-            : Math.min(DAILY_CLAIM_LIMIT_PER_TYPE, multClaimsUsed + 1);
+          const used = Math.min(DAILY_CLAIM_LIMIT_PER_TYPE, multClaimsUsed + 1);
           setMultClaimsUsed(used);
           localStorage.setItem(multKey, String(used));
         } else if (data.status === 'daily_limit_reached') {
-          const usedFromServer = typeof data.used_today === 'number' ? data.used_today : DAILY_CLAIM_LIMIT_PER_TYPE;
-          const used = Math.min(DAILY_CLAIM_LIMIT_PER_TYPE, usedFromServer);
-          setMultClaimsUsed(used);
-          localStorage.setItem(multKey, String(used));
+          setMultClaimsUsed(DAILY_CLAIM_LIMIT_PER_TYPE);
+          localStorage.setItem(multKey, String(DAILY_CLAIM_LIMIT_PER_TYPE));
         }
       }
     } catch (e) {
       console.warn('Booster claim error', e);
+      // ошибки не дают второй шанс в этом сеансе — это часть упрощённой логики
     }
   };
 
-  useEffect(() => {
-    if (!canClick || !seqReady) return;
-    if (spawned) return;
+  const handleMultiClick = (x: number, y: number) => {
+    if (!telegramUser || loading || energy <= 0) return;
 
-    const id = window.setInterval(() => {
-      if (Math.random() < 0.05) {
-        spawnRandomBooster();
-      }
-    }, 6000);
+    // показываем бустер, если ещё не появлялся в этом сеансе (по одному каждого вида)
+    trySpawnBoosterForSession();
 
-    return () => clearInterval(id);
-  }, [canClick, seqReady, spawned, coinsClaimsUsed, multClaimsUsed, sessionCoinsSpawned, sessionMultSpawned]);
+    const spend = Math.min(clickBoost * (tempMultUntil && Date.now() < tempMultUntil ? 10 : 1), energy);
+    if (spend <= 0) return;
 
-  const resetBoostersSession = () => {
-    setSessionCoinsSpawned(false);
-    setSessionMultSpawned(false);
+    setTotalXp((prev) => prev + spend);
+    setEnergy((prev) => Math.max(0, prev - spend));
+
+    const id = Date.now() + Math.random();
+    setFloatingTexts((prev) => [...prev, { id, value: spend, x, y }]);
+    setTimeout(() => {
+      setFloatingTexts((prev) => prev.filter((t) => t.id !== id));
+    }, 1000);
+
+    addClicks(spend);
   };
 
-  useEffect(() => {
-    const handleVisibilityChange = () => {
-      if (!document.hidden) {
-        resetBoostersSession();
-      }
-    };
-
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
-  }, []);
-
+  // счётчик секунд для бейджа x10
   const [multCountdown, setMultCountdown] = useState<number>(0);
   useEffect(() => {
     if (!tempMultUntil) {
@@ -408,191 +346,155 @@ const Clicker: React.FC = () => {
       if (left <= 0) setTempMultUntil(null);
     };
     tick();
-    const id = window.setInterval(tick, 1000);
-    return () => clearInterval(id);
+    const id = window.setInterval(tick, 250);
+    return () => window.clearInterval(id);
   }, [tempMultUntil]);
 
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-gradient-to-b from-[#050816] to-[#021019] flex items-center justify-center text-white">
-        <div className="text-center space-y-2">
-          <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-[#00f2ff] mx-auto" />
-          <div className="text-sm text-[#9be1ff]">
-            {t('loading', { defaultValue: 'Yüklənir...' })}
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div className="min-h-screen bg-gradient-to-b from-[#050816] to-[#021019] flex items-center justify-center text-white px-4">
-        <div className="max-w-xs text-center space-y-3">
-          <div className="text-red-400 font-semibold text-sm">Xəta</div>
-          <div className="text-sm text-[#fca5a5]">{error}</div>
-          <button
-            className="mt-2 px-4 py-2 rounded-lg bg-[#0ea5e9] text-xs font-semibold text-black hover:bg-[#38bdf8] transition"
-            onClick={() => window.location.reload()}
-          >
-            Yenidən cəhd et
-          </button>
-        </div>
-      </div>
-    );
-  }
-
-  const totalXpFormatted = useMemo(() => {
-    return totalXp.toLocaleString('en-US').replace(/,/g, ' ');
-  }, [totalXp]);
-
-  const deltaXpFormatted = useMemo(() => {
-    if (!deltaXp) return '';
-    const sign = deltaXp > 0 ? '+' : '';
-    return `${sign}${deltaXp}`;
-  }, [deltaXp]);
-
-  useEffect(() => {
-    if (deltaXp === 0) return;
-    const id = window.setTimeout(() => setDeltaXp(0), 1000);
-    return () => clearTimeout(id);
-  }, [deltaXp]);
+  const energyInt = Math.floor(smoothEnergy);
 
   return (
-    <div
-      className="min-h-screen bg-gradient-to-b from-[#050816] via-[#030712] to-[#020617] text-white flex flex-col items-center"
-      onClick={handleClick}
-    >
-      <div className="w-full max-w-md px-4 pt-4 flex flex-col gap-3">
-        <UserCard
-          username={nickname ?? telegramUser?.username}
-          totalXp={totalXp}
-          invitedFriends={invitedFriends}
-          ratingPosition={ratingPosition}
-          ratingTotalPlayers={ratingTotalPlayers}
-        />
+    <div className="w-full min-h-screen bg-[#131f2f] text-center flex flex-col items-center justify-start pt-8 px-4 text-[#00f0ff]">
+      {/* Кнопка «Карта пользователя» */}
+      <button
+        className="fixed top-3 left-3 z-50 w-9 h-9 rounded-full bg-black/80 text-white shadow flex items-center justify-center active:scale-95"
+        onClick={() => setShowUserCard(true)}
+        aria-label={t('userCard.open', { defaultValue: 'User card' })}
+        title={t('userCard.open', { defaultValue: 'User card' })}
+      >
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+          <path d="M12 12c2.761 0 5-2.686 5-6s-2.239-6-5-6-5 2.686-5 6 2.239 6 5 6Zm0 2c-4.418 0-8 2.91-8 6.5V22h16v-1.5C20 16.91 16.418 14 12 14Z" fill="currentColor"/>
+        </svg>
+      </button>
 
-        <div className="flex items-center justify-between text-xs text-[#9be1ff] mt-1">
-          <span>
-            {t('click_boost', { defaultValue: 'Klik gücü' })}: x{clickBoost}
+      <h2 className="text-2xl font-bold mb-2 drop-shadow-md">$GAP: {totalXp}</h2>
+
+      {/* строка буста и временного x10 */}
+      <div className="text-sm text-[#7ee9ff] mb-1 flex items-center gap-2">
+        <span>x{clickBoost} {t('boost', { defaultValue: 'boost' })}</span>
+        {tempMultiplierActive > 1 && (
+          <span className="px-2 py-0.5 rounded-full bg-[#00f0ff] text-[#0e1a2b] text-xs font-bold">
+            x10 · {multCountdown}s
           </span>
-          <span>
-            {t('multiplier', { defaultValue: 'Müvəqqəti x10' })}:{' '}
-            {currentMultiplier > 1 ? (
-              <span className="text-[#f97316] font-semibold">
-                x10 · {multCountdown}s
-              </span>
-            ) : (
-              <span className="opacity-60">x1</span>
-            )}
-          </span>
-        </div>
-
-        <div className="mb-3 flex items-center gap-2 text-xs">
-          <span
-            className={`px-2 py-1 rounded-full border ${
-              coinsClaimsUsed >= DAILY_CLAIM_LIMIT_PER_TYPE
-                ? 'opacity-60 border-[#2b526e] text-[#6ea6c7]'
-                : 'border-[#1f3b57] text-[#a0f6ff]'
-            }`}
-            title="Gift boosters today"
-          >
-            🎁 {coinsClaimsUsed}/{DAILY_CLAIM_LIMIT_PER_TYPE}
-          </span>
-          <span
-            className={`px-2 py-1 rounded-full border ${
-              multClaimsUsed >= DAILY_CLAIM_LIMIT_PER_TYPE
-                ? 'opacity-60 border-[#2b526e] text-[#6ea6c7]'
-                : 'border-[#1f3b57] text-[#a0f6ff]'
-            }`}
-            title="Rocket boosters today"
-          >
-            🚀 {multClaimsUsed}/{DAILY_CLAIM_LIMIT_PER_TYPE}
-          </span>
-        </div>
-
-        <div className="my-4 w-full max-w-md">
-          <label className="block mb-1 text-sm text-[#7ee9ff]">
-            {t('energy')}: {energyInt} / {maxEnergy}
-          </label>
-          <div className="w-full h-4 bg-[#0d273d] rounded overflow-hidden shadow-inner">
-            <div
-              className="h-full bg-gradient-to-r from-[#7af9ff] to-[#0ea5e9] transition-all duration-300"
-              style={{ width: `${(energyInt / maxEnergy) * 100}%` }}
-            />
-          </div>
-        </div>
-
-        <div className="mt-2 flex flex-col items-center">
-          <div className="relative inline-flex items-center justify-center">
-            <MainButton onClick={handleClick} disabled={!canClick} />
-            {spawned && (
-              <button
-                type="button"
-                className="absolute z-20 w-14 h-14 rounded-full border-2 border-[#22d3ee] bg-[#020617]/90 flex items-center justify-center text-2xl select-none"
-                style={{
-                  left: `${spawned.x}%`,
-                  top: `${spawned.y}%`,
-                  transform: 'translate(-50%, -50%)',
-                  pointerEvents: 'auto',
-                  userSelect: 'none',
-                  lineHeight: 1,
-                  filter:
-                    'drop-shadow(0 0 10px rgba(0,240,255,0.6)) drop-shadow(0 0 18px rgba(0,240,255,0.35))',
-                }}
-                onMouseDown={(e) => e.stopPropagation()}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  handleBoosterClick(spawned);
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' || e.key === ' ') {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    handleBoosterClick(spawned);
-                  }
-                }}
-                aria-label={
-                  spawned.kind === 'coins'
-                    ? t('boosters.coin_label', { defaultValue: 'Gift booster' })
-                    : t('boosters.mult_label', { defaultValue: 'Rocket booster' })
-                }
-              >
-                {spawned.kind === 'coins' ? '🎁' : '🚀'}
-              </button>
-            )}
-          </div>
-
-          <div className="mt-3 text-center">
-            <div className="text-2xl font-bold text-[#e5f9ff] tracking-wide">
-              {totalXpFormatted}
-            </div>
-            {deltaXp !== 0 && (
-              <div className="text-sm text-[#4ade80] mt-1">
-                {t('earned', { defaultValue: 'Qazanıldı' })}: {deltaXpFormatted}
-              </div>
-            )}
-          </div>
-        </div>
-
-        {flushError && (
-          <div className="mt-3 text-xs text-[#facc15] bg-[#451a03]/60 border border-[#78350f] rounded-lg px-3 py-2">
-            {flushError}
-          </div>
-        )}
-
-        {wasOffline && !flushError && (
-          <div className="mt-2 text-xs text-[#e5e7eb] opacity-80">
-            İnternet bağlantısında qısa fasilə oldu. Məlumatlar bərpa olunur...
-          </div>
-        )}
-
-        {energyDepletedShown && (
-          <div className="mt-2 text-xs text-[#fecaca]">
-            Enerji bitib. Bir azdan bərpa olacaq.
-          </div>
         )}
       </div>
+
+      {/* 🆕 бейджи прогресса бустеров за сегодня */}
+      <div className="mb-3 flex items-center gap-2 text-xs">
+        <span
+          className={`px-2 py-1 rounded-full border ${
+            coinsClaimsUsed >= DAILY_CLAIM_LIMIT_PER_TYPE
+              ? 'opacity-60 border-[#2b526e] text-[#6ea6c7]'
+              : 'border-[#1f3b57] text-[#a0f6ff]'
+          }`}
+          title="Gift boosters today"
+        >
+          🎁 {coinsClaimsUsed}/{DAILY_CLAIM_LIMIT_PER_TYPE}
+        </span>
+        <span
+          className={`px-2 py-1 rounded-full border ${
+            multClaimsUsed >= DAILY_CLAIM_LIMIT_PER_TYPE
+              ? 'opacity-60 border-[#2b526e] text-[#6ea6c7]'
+              : 'border-[#1f3b57] text-[#a0f6ff]'
+          }`}
+          title="Rocket boosters today"
+        >
+          🚀 {multClaimsUsed}/{DAILY_CLAIM_LIMIT_PER_TYPE}
+        </span>
+      </div>
+
+      <div className="my-4 w-full max-w-md">
+        <label className="block mb-1 text-sm text-[#7ee9ff]">
+          {t('energy')}: {energyInt} / {maxEnergy}
+        </label>
+        <div className="w-full h-4 bg-[#0d273d] rounded overflow-hidden shadow-inner">
+          <div
+            className="h-full bg-gradient-to-r from-[#7af9ff] to-[#00f0ff]"
+            style={{ width: `${Math.min((smoothEnergy / maxEnergy) * 100, 100)}%`, transition: "none" }}
+          />
+        </div>
+        {energy < maxEnergy && timeToFullEnergy && (
+          <p className="text-xs mt-1 text-[#89dfff]">
+            {t('full_in')} {timeToFullEnergy}
+          </p>
+        )}
+      </div>
+
+      <div className="relative w-96 h-96 mt-6">
+        <div className="absolute inset-0 flex items-center justify-center">
+          <MainButton energy={energyInt} onMultiClick={handleMultiClick} />
+        </div>
+
+        {/* всплывающие бустеры — чистые эмодзи 🎁/🚀 без фона, с мягкой пульсацией */}
+        {spawned && (
+          <div
+            role="button"
+            tabIndex={0}
+            className="absolute z-50 text-4xl select-none booster-pulse"
+            style={{
+              left: `${spawned.x}%`,
+              top: `${spawned.y}%`,
+              transform: 'translate(-50%, -50%)',
+              pointerEvents: 'auto',
+              userSelect: 'none',
+              lineHeight: 1,
+              filter: 'drop-shadow(0 0 10px rgba(0,240,255,0.6)) drop-shadow(0 0 18px rgba(0,240,255,0.35))',
+            }}
+            onMouseDown={(e) => e.stopPropagation()}
+            onClick={(e) => { e.stopPropagation(); handleBoosterClick(spawned); }}
+            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); handleBoosterClick(spawned); } }}
+            aria-label={spawned.kind === 'coins'
+              ? t('boosters.coin_label', { defaultValue: 'Gift booster' })
+              : t('boosters.mult_label', { defaultValue: 'Rocket booster' })}
+            title={spawned.kind === 'coins'
+              ? t('boosters.coin_label', { defaultValue: 'Gift booster' })
+              : t('boosters.mult_label', { defaultValue: 'Rocket booster' })}
+          >
+            <span
+              style={{
+                textShadow:
+                  '0 0 10px rgba(0,240,255,0.7), 0 0 18px rgba(0,240,255,0.45), 0 0 28px rgba(0,240,255,0.35)',
+                display: 'inline-block',
+              }}
+            >
+              {spawned.kind === 'coins' ? '🎁' : '🚀'}
+            </span>
+          </div>
+        )}
+
+        {floatingTexts.map((text) => (
+          <div
+            key={text.id}
+            className="absolute text-lg font-bold text-yellow-300"
+            style={{
+              left: `${text.x}%`,
+              top: `${text.y}%`,
+              transform: 'translate(-50%, -50%)',
+              pointerEvents: 'none',
+              animation: 'floatUpFade 1s ease-out',
+            }}
+          >
+            +{text.value}
+          </div>
+        ))}
+
+        {/* Локальные анимации */}
+        <style>{`
+          @keyframes floatUpFade {
+            0% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+            100% { opacity: 0; transform: translate(-50%, -100%) scale(1.2); }
+          }
+          @keyframes pulsePop {
+            0%   { transform: translate(-50%, -50%) scale(1); }
+            50%  { transform: translate(-50%, -50%) scale(1.12); }
+            100% { transform: translate(-50%, -50%) scale(1); }
+          }
+          .booster-pulse {
+            animation: pulsePop 0.9s ease-in-out infinite;
+          }
+        `}</style>
+      </div>
+
+      {showUserCard && <UserCard onClose={() => setShowUserCard(false)} />}
     </div>
   );
 };
