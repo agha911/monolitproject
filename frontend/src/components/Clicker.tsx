@@ -89,10 +89,9 @@ const Clicker: React.FC = () => {
   const [sessionCoinsSpawned, setSessionCoinsSpawned] = useState(false);
   const [sessionMultSpawned, setSessionMultSpawned] = useState(false);
 
-  // авто-обновление суточных счётчиков при смене даты (раз в минуту)
+  // авто-обновление суточных счётчиков при смене даты (раз в минуту, по UTC)
   useEffect(() => {
     const id = window.setInterval(() => {
-      // Берём текущий день в UTC, чтобы совпадать с бэкендом
       const nowStr = new Date().toISOString().slice(0, 10);
       const cKey = `gappick:boosters:coinsClaimsUsed:${nowStr}`;
       const mKey = `gappick:boosters:multClaimsUsed:${nowStr}`;
@@ -116,12 +115,15 @@ const Clicker: React.FC = () => {
     return telegramId ? `gappick:lastServerSeq:${telegramId}` : 'gappick:lastServerSeq:anon';
   }, []);
 
-  const [lastClientSeq, setLastClientSeq] = useState<number>(() => {
+  // исправлено: useState без deps + отдельный useEffect, который читает localStorage
+  const [lastClientSeq, setLastClientSeq] = useState<number>(0);
+
+  useEffect(() => {
     try {
       const saved = localStorage.getItem(seqStorageKey);
-      return saved ? Number(saved) : 0;
+      setLastClientSeq(saved ? Number(saved) : 0);
     } catch {
-      return 0;
+      setLastClientSeq(0);
     }
   }, [seqStorageKey]);
 
@@ -156,13 +158,15 @@ const Clicker: React.FC = () => {
 
         const s = Number(data.last_client_seq ?? 0);
         setServerSeq(s);
-        try { localStorage.setItem(seqStorageKey, String(s)); } catch {}
+        try {
+          localStorage.setItem(seqStorageKey, String(s));
+        } catch {}
 
         setSeqReady(true);
         setLoading(false);
       } catch (e) {
         console.error(e);
-        setError('Xəta baş verdi. Lütfən, daha sonra yenidən cəhd edin.');
+        setError('Xəta baş verdi. Лütfən, daha sonra yenidən cəhd edin.');
         setLoading(false);
       }
     })();
@@ -320,7 +324,7 @@ const Clicker: React.FC = () => {
           const granted = Number(data.granted ?? 50000);
           setTotalXp((prev) => prev + granted);
 
-          // предпочитаем реальное значение с бэкенда, а не локальное приращение
+          // предпочитаем реальное значение с бэкенда
           const usedFromServer = typeof data.used_today === 'number' ? data.used_today : null;
           const used = usedFromServer !== null
             ? Math.min(DAILY_CLAIM_LIMIT_PER_TYPE, usedFromServer)
