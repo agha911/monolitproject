@@ -13,18 +13,14 @@ INSTAGRAM_URL = "https://www.instagram.com/gap_pick?igsh=ZzdzYWE1MzgzNGJk&utm_so
 
 # 🔔 Elan: Art Yarışması
 ANNOUNCEMENT_TEXT = (
-    "🌟 *Gappick Art Yarışması – Böyük Final yaxınlaşır!* 🌟\n\n"
-    "Ən həyəcanlı mərhələ qarşımızdadır! 💛\n"
-    "*15 dekabr* final səsverməsi başlayır və nəticələri yalnız siz müəyyən edəcəksiniz. "
-    "Hər bir səs, hər bir $GAP fərq yarada bilər! 🔥🗳️\n\n"
-    "💰 *Baş mükafat: 300 USDT!* \n"
-    "Finalda kimin zirvəyə qalxacağı tam olaraq sizin səsinizdən asılıdır. "
-    "✨ *Finala necə hazırlaşmalı?*\n"
-    "💰 $GAP-piklərinizi maksimum toplayın,\n"
-    "🚀 Səsvermə başlayanda aktiv olun!\n\n"
-    "Bu final — Gappick icmasının gücünü göstərmək və ədalətli seçim etmək üçün "
-    "möhtəşəm bir andır. Gəlin bu mərhələni ən yüksək səviyyədə keçirək! 💫\n\n"
-    "Hazır olun — həlledici an çox yaxındadır! 🔥"
+    "🏁 *Gappick Art Yarışması – Final səsverməsi başladı!* 🏁\n\n"
+    "Həlledici mərhələ artıq aktivdir. Son iki iş finalda üz-üzədir "
+    "və qalib çox tezliklə müəyyən olunacaq.\n\n"
+    "🗳️ İndi hər bir səs real təsir göstərir.\n"
+    "💰 *Baş mükafat: 300 USDT*\n\n"
+    "Finalın taleyi sənin qərarındadır. "
+    "Səs ver və Gappick Art Yarışmasının qalibini birlikdə müəyyən edək.\n\n"
+    "⏳ Vaxt məhduddur — final 24 saat davam edəcək."
 )
 
 def build_markup() -> InlineKeyboardMarkup:
