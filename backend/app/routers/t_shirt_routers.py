@@ -25,7 +25,7 @@ from app.crud.t_shirt_crud import (
 
 # ⚠️ Замени импорты под твой проект (названия могут отличаться)
 from app.database import get_async_session
-from app.api.deps import get_current_user
+from app.crud.user import get_user as get_current_user
 
 
 router = APIRouter(prefix="/api/shop/tshirt", tags=["Shop"])
