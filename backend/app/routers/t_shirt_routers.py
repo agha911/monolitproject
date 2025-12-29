@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -23,9 +23,8 @@ from app.crud.t_shirt_crud import (
     TshirtError,
 )
 
-# ⚠️ Замени импорты под твой проект (названия могут отличаться)
 from app.database import get_async_session
-from app.crud.user import get_user as get_current_user
+from app.crud.user import get_user
 
 
 router = APIRouter(prefix="/api/shop/tshirt", tags=["Shop"])
@@ -81,12 +80,25 @@ class AdminActivateIn(BaseModel):
 
 
 # -------------------------
+# Helpers
+# -------------------------
+async def _resolve_user(session: AsyncSession, telegram_id: int) -> User:
+    user: User | None = await get_user(session=session, telegram_id=telegram_id)
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="user_not_registered",
+        )
+    return user
+
+
+# -------------------------
 # Routes
 # -------------------------
 @router.get("/status", response_model=TshirtStatusOut)
 async def tshirt_status(
+    telegram_id: int = Query(..., description="Telegram user id"),
     session: AsyncSession = Depends(get_async_session),
-    user: User = Depends(get_current_user),
 ):
     """
     Статус товара/карточки:
@@ -94,6 +106,8 @@ async def tshirt_status(
     - купил ли пользователь
     - если купил: статус пассивного дохода (accrued/cap/paused)
     """
+    user = await _resolve_user(session=session, telegram_id=telegram_id)
+
     try:
         dto = await get_tshirt_status(session=session, user_id=user.id, drop_id=1)
         return TshirtStatusOut(
@@ -123,8 +137,8 @@ async def tshirt_status(
 @router.post("/buy", response_model=TshirtBuyOut)
 async def tshirt_buy(
     payload: TshirtBuyIn,
+    telegram_id: int = Query(..., description="Telegram user id"),
     session: AsyncSession = Depends(get_async_session),
-    user: User = Depends(get_current_user),
 ):
     """
     Покупка футболки:
@@ -134,6 +148,8 @@ async def tshirt_buy(
     - активирует карточку пассивного дохода
     - уменьшает остаток (sold_count)
     """
+    user = await _resolve_user(session=session, telegram_id=telegram_id)
+
     if TSHIRT_PRICE_GAP <= 0:
         raise HTTPException(status_code=500, detail="tshirt_price_not_configured")
 
@@ -175,14 +191,16 @@ async def tshirt_buy(
 
 @router.post("/claim", response_model=TshirtClaimOut)
 async def tshirt_claim(
+    telegram_id: int = Query(..., description="Telegram user id"),
     session: AsyncSession = Depends(get_async_session),
-    user: User = Depends(get_current_user),
 ):
     """
     Забрать накопленное с карточки:
     - начисляет пользователю accrued_unclaimed (<= 50k)
     - обнуляет accrued_unclaimed (снимает "паузу")
     """
+    user = await _resolve_user(session=session, telegram_id=telegram_id)
+
     try:
         amount = await claim_tshirt_passive_income(session=session, user_id=user.id)
         return TshirtClaimOut(ok=True, claimed_amount=int(amount))
@@ -198,14 +216,15 @@ async def tshirt_claim(
 @router.post("/admin/activate")
 async def tshirt_admin_activate(
     payload: AdminActivateIn,
+    telegram_id: int = Query(..., description="Telegram user id"),
     session: AsyncSession = Depends(get_async_session),
-    user: User = Depends(get_current_user),
 ):
     """
     Опционально: включить/выключить продажу.
     Тут обычно нужна проверка роли админа (добавь сам).
     """
-    # TODO: добавь проверку прав админа
+    _ = await _resolve_user(session=session, telegram_id=telegram_id)
+
     try:
         drop = await set_tshirt_drop_active(session=session, is_active=payload.is_active, drop_id=1)
         return {"ok": True, "is_active": bool(drop.is_active)}
@@ -213,3 +232,4 @@ async def tshirt_admin_activate(
         raise HTTPException(status_code=404, detail="tshirt_drop_not_found")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"tshirt_admin_activate_failed: {e}")
+
