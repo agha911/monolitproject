@@ -31,7 +31,7 @@ from app.routers import referral as referral_router
 from app.routers import store_drops, user_card, partner_drops
 from app.routers import boosters
 from app.routers import dao as dao_router
-from app.api.routers.t_shirt_routers import router as tshirt_router
+from app.routers.t_shirt_routers import router as tshirt_router
 
 # ---------------- logging setup ----------------
 
