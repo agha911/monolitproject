@@ -15,8 +15,30 @@ type SpawnedBooster =
   | { kind: 'coins'; id: number; x: number; y: number; expiresAt: number }
   | { kind: 'mult'; id: number; x: number; y: number; expiresAt: number };
 
+// ❄️ Winter snow overlay (minimal)
+type Snowflake = {
+  id: number;
+  left: number;     // %
+  size: number;     // px
+  duration: number; // seconds
+  delay: number;    // seconds
+  opacity: number;
+};
+
 const Clicker: React.FC = () => {
   const { t } = useTranslation();
+
+  // ❄️ Generate snowflakes once per mount
+  const snowflakes = useMemo<Snowflake[]>(() => {
+    return Array.from({ length: 28 }).map((_, i) => ({
+      id: i,
+      left: Math.random() * 100,
+      size: 2 + Math.random() * 3,
+      duration: 10 + Math.random() * 10,
+      delay: Math.random() * 10,
+      opacity: 0.25 + Math.random() * 0.35,
+    }));
+  }, []);
 
   const [telegramUser, setTelegramUser] = useState<any | null>(null);
   const [totalXp, setTotalXp] = useState(0);
@@ -353,7 +375,26 @@ const Clicker: React.FC = () => {
   const energyInt = Math.floor(smoothEnergy);
 
   return (
-    <div className="w-full min-h-screen bg-[#131f2f] text-center flex flex-col items-center justify-start pt-8 px-4 text-[#00f0ff]">
+    <div className="w-full min-h-screen bg-[#131f2f] text-center flex flex-col items-center justify-start pt-8 px-4 text-[#00f0ff] relative overflow-hidden">
+      {/* ❄️ Minimal winter snow overlay (doesn't block clicks) */}
+      <div className="pointer-events-none fixed inset-0 z-0 overflow-hidden">
+        {snowflakes.map((f) => (
+          <span
+            key={f.id}
+            className="absolute top-[-10px] rounded-full bg-[#9fefff]"
+            style={{
+              left: `${f.left}%`,
+              width: `${f.size}px`,
+              height: `${f.size}px`,
+              opacity: f.opacity,
+              filter: 'drop-shadow(0 0 6px rgba(0,240,255,0.6))',
+              animation: `snowFall ${f.duration}s linear infinite, snowSway ${Math.max(3, f.duration / 2)}s ease-in-out infinite`,
+              animationDelay: `${f.delay}s`,
+            }}
+          />
+        ))}
+      </div>
+
       {/* Кнопка «Карта пользователя» */}
       <button
         className="fixed top-3 left-3 z-50 w-9 h-9 rounded-full bg-black/80 text-white shadow flex items-center justify-center active:scale-95"
@@ -366,10 +407,10 @@ const Clicker: React.FC = () => {
         </svg>
       </button>
 
-      <h2 className="text-2xl font-bold mb-2 drop-shadow-md">$GAP: {totalXp}</h2>
+      <h2 className="text-2xl font-bold mb-2 drop-shadow-md relative z-10">$GAP: {totalXp}</h2>
 
       {/* строка буста и временного x10 */}
-      <div className="text-sm text-[#7ee9ff] mb-1 flex items-center gap-2">
+      <div className="text-sm text-[#7ee9ff] mb-1 flex items-center gap-2 relative z-10">
         <span>x{clickBoost} {t('boost', { defaultValue: 'boost' })}</span>
         {tempMultiplierActive > 1 && (
           <span className="px-2 py-0.5 rounded-full bg-[#00f0ff] text-[#0e1a2b] text-xs font-bold">
@@ -379,7 +420,7 @@ const Clicker: React.FC = () => {
       </div>
 
       {/* 🆕 бейджи прогресса бустеров за сегодня */}
-      <div className="mb-3 flex items-center gap-2 text-xs">
+      <div className="mb-3 flex items-center gap-2 text-xs relative z-10">
         <span
           className={`px-2 py-1 rounded-full border ${
             coinsClaimsUsed >= DAILY_CLAIM_LIMIT_PER_TYPE
@@ -402,7 +443,7 @@ const Clicker: React.FC = () => {
         </span>
       </div>
 
-      <div className="my-4 w-full max-w-md">
+      <div className="my-4 w-full max-w-md relative z-10">
         <label className="block mb-1 text-sm text-[#7ee9ff]">
           {t('energy')}: {energyInt} / {maxEnergy}
         </label>
@@ -419,7 +460,7 @@ const Clicker: React.FC = () => {
         )}
       </div>
 
-      <div className="relative w-96 h-96 mt-6">
+      <div className="relative w-96 h-96 mt-6 z-10">
         <div className="absolute inset-0 flex items-center justify-center">
           <MainButton energy={energyInt} onMultiClick={handleMultiClick} />
         </div>
@@ -491,6 +532,17 @@ const Clicker: React.FC = () => {
           .booster-pulse {
             animation: pulsePop 0.9s ease-in-out infinite;
           }
+
+          /* ❄️ Winter snow animations */
+          @keyframes snowFall {
+            from { transform: translateY(0); }
+            to   { transform: translateY(110vh); }
+          }
+          @keyframes snowSway {
+            0%   { margin-left: 0; }
+            50%  { margin-left: 10px; }
+            100% { margin-left: 0; }
+          }
         `}</style>
       </div>
 
@@ -500,6 +552,7 @@ const Clicker: React.FC = () => {
 };
 
 export default Clicker;
+
 
 
 
