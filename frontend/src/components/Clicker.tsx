@@ -395,6 +395,14 @@ const Clicker: React.FC = () => {
         ))}
       </div>
 
+      {/* ❄️ Frost corners overlay (doesn't block clicks) */}
+      <div className="pointer-events-none fixed inset-0 z-0 overflow-hidden">
+        <div className="frost-corner tl" />
+        <div className="frost-corner tr" />
+        <div className="frost-corner bl" />
+        <div className="frost-corner br" />
+      </div>
+
       {/* Кнопка «Карта пользователя» */}
       <button
         className="fixed top-3 left-3 z-50 w-9 h-9 rounded-full bg-black/80 text-white shadow flex items-center justify-center active:scale-95"
@@ -543,6 +551,25 @@ const Clicker: React.FC = () => {
             50%  { margin-left: 10px; }
             100% { margin-left: 0; }
           }
+
+          /* ❄️ Frost corners */
+          .frost-corner {
+            position: absolute;
+            width: 190px;
+            height: 190px;
+            background: radial-gradient(
+              circle at center,
+              rgba(160, 240, 255, 0.30),
+              rgba(160, 240, 255, 0.14) 42%,
+              rgba(160, 240, 255, 0.06) 62%,
+              transparent 72%
+            );
+            filter: blur(10px);
+          }
+          .frost-corner.tl { top: -55px; left: -55px; }
+          .frost-corner.tr { top: -55px; right: -55px; }
+          .frost-corner.bl { bottom: -55px; left: -55px; }
+          .frost-corner.br { bottom: -55px; right: -55px; }
         `}</style>
       </div>
 
