@@ -31,7 +31,7 @@ from app.crud.user import get_user as get_current_user
 router = APIRouter(prefix="/api/shop/tshirt", tags=["Shop"])
 
 # Стоимость футболки в $GAP (поставь реальную)
-TSHIRT_PRICE_GAP = 0  # TODO: выстави цену
+TSHIRT_PRICE_GAP = 1000  # TODO: выстави цену
 
 
 # -------------------------
