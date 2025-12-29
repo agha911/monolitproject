@@ -103,6 +103,8 @@ async def get_or_create_tshirt_drop(
     if drop:
         return drop
 
+    # По умолчанию создаём INACTIVE (как и было),
+    # но главное — теперь статус/активация не будут падать из-за отсутствия строки.
     drop = TshirtDrop(
         id=drop_id,
         title=title_default,
@@ -174,13 +176,10 @@ async def refresh_passive_card_accrual(
 
     # Если уже уперлись в cap — пауза (ничего не начисляем)
     if int(card.accrued_unclaimed or 0) >= int(card.cap_unclaimed or 0):
-        # можно обновить last_calculated_at, но это не обязательно.
-        # оставим как есть (чтобы не плодить лишних UPDATE)
         return card
 
     last_ts = card.last_calculated_at or card.cycle_started_at or now
     if last_ts > now:
-        # странный случай (clock skew) — просто выровняем
         card.last_calculated_at = now
         await session.commit()
         await session.refresh(card)
@@ -200,13 +199,11 @@ async def refresh_passive_card_accrual(
         await session.refresh(card)
         return card
 
-    # скорость начисления в секунду
     rate_per_sec = rate_total / float(cycle_seconds)
 
     add_float = rate_per_sec * elapsed_sec
-    add_int = int(add_float)  # монеты целые
+    add_int = int(add_float)
     if add_int <= 0:
-        # накопилось меньше 1 монеты — просто двигаем last_calculated_at, чтобы не копить микродельты бесконечно
         card.last_calculated_at = now
         await session.commit()
         await session.refresh(card)
@@ -230,7 +227,9 @@ async def get_tshirt_status(
     user_id: int,
     drop_id: int = 1,
 ) -> TshirtStatusDTO:
-    drop = await get_tshirt_drop(session, drop_id=drop_id)
+    # ✅ ВАЖНО: теперь статус гарантированно работает даже если записи ещё нет
+    drop = await get_or_create_tshirt_drop(session, drop_id=drop_id)
+
     left = max(int(drop.total_stock or 0) - int(drop.sold_count or 0), 0)
 
     purchase = await get_user_tshirt_purchase(session, user_id=user_id, drop_id=drop_id)
@@ -263,7 +262,7 @@ async def get_tshirt_status(
 
 
 # -------------------------
-# Buy tshirt (лимит 10, размер, списание у юзера, фонд, карточка)
+# Buy tshirt
 # -------------------------
 async def buy_tshirt(
     session: AsyncSession,
@@ -272,30 +271,16 @@ async def buy_tshirt(
     price_gap: int,
     drop_id: int = 1,
 ) -> TshirtPurchase:
-    """
-    Покупка футболки:
-    - проверяем активность
-    - блокируем строку дропа (FOR UPDATE)
-    - проверяем наличие
-    - проверяем "не купил ли уже"
-    - списываем GAP у пользователя
-    - начисляем в фонд (increment_total_spent)
-    - создаём purchase
-    - создаём/активируем passive_income_card
-    - обновляем sold_count, sold_out_at
-    """
     if price_gap <= 0:
         raise ValueError("price_gap must be > 0")
 
     now = _utcnow()
 
-    # 1) Берём user
     res_u = await session.execute(select(User).where(User.id == user_id))
     user = res_u.scalar_one_or_none()
     if not user:
         raise TshirtError(f"User id={user_id} not found")
 
-    # 2) Лочим дроп на время покупки (защита от 11-й покупки)
     res_d = await session.execute(
         select(TshirtDrop).where(TshirtDrop.id == drop_id).with_for_update()
     )
@@ -309,28 +294,21 @@ async def buy_tshirt(
     if int(drop.sold_count or 0) >= int(drop.total_stock or 0):
         raise TshirtSoldOut("Tshirt is sold out")
 
-    # 3) Уже покупал?
     existing = await get_user_tshirt_purchase(session, user_id=user_id, drop_id=drop_id)
     if existing:
         raise TshirtAlreadyPurchased("User already purchased tshirt")
 
-    # 4) Фиксируем старт продаж, если не был зафиксирован
     if drop.sale_started_at is None:
         drop.sale_started_at = now
 
-    # 5) Проверка баланса и списание
     user_balance = int(getattr(user, "total_xp", 0) or 0)
     if user_balance < price_gap:
         raise NotEnoughGap("Not enough $GAP")
 
     setattr(user, "total_xp", user_balance - price_gap)
 
-    # 6) Зачисляем в фонд
-    # ВАЖНО: твоя increment_total_spent делает session.commit().
-    # Идеально — убрать commit из increment_total_spent и коммитить единоразово тут.
     await increment_total_spent(session, price_gap)
 
-    # 7) Создаём purchase
     purchase = TshirtPurchase(
         user_id=user_id,
         drop_id=drop_id,
@@ -342,7 +320,6 @@ async def buy_tshirt(
     )
     session.add(purchase)
 
-    # 8) Создаём/активируем карточку пассивного дохода
     card = await get_user_passive_card(session, user_id=user_id, source=PassiveIncomeSource.TSHIRT)
     if not card:
         card = PassiveIncomeCard(
@@ -358,23 +335,19 @@ async def buy_tshirt(
         session.add(card)
     else:
         card.is_active = True
-        # перезапускаем цикл с момента покупки
         card.cycle_started_at = now
         card.last_calculated_at = now
         card.accrued_unclaimed = 0
         card.last_claim_at = None
 
-    # 9) Обновляем sold_count
     drop.sold_count = int(drop.sold_count or 0) + 1
     if int(drop.sold_count) >= int(drop.total_stock or 0) and drop.sold_out_at is None:
         drop.sold_out_at = now
 
-    # 10) Коммит покупки
     try:
         await session.commit()
     except IntegrityError:
         await session.rollback()
-        # если одновременно купили и упёрлись в unique(user_id, drop_id)
         raise TshirtAlreadyPurchased("User already purchased tshirt (race condition)")
 
     await session.refresh(purchase)
@@ -382,19 +355,12 @@ async def buy_tshirt(
 
 
 # -------------------------
-# Claim: забрать накопленное (до 50k), начислить юзеру
+# Claim
 # -------------------------
 async def claim_tshirt_passive_income(
     session: AsyncSession,
     user_id: int,
 ) -> int:
-    """
-    1) Обновить accrued_unclaimed (refresh)
-    2) Если 0 — вернуть 0
-    3) Добавить в user.total_xp
-    4) Обнулить accrued_unclaimed
-    5) Обновить last_claim_at, total_claimed, last_calculated_at
-    """
     now = _utcnow()
 
     res_u = await session.execute(select(User).where(User.id == user_id))
@@ -412,31 +378,31 @@ async def claim_tshirt_passive_income(
     if amount <= 0:
         return 0
 
-    # начисляем юзеру
     user_balance = int(getattr(user, "total_xp", 0) or 0)
     setattr(user, "total_xp", user_balance + amount)
 
-    # обнуляем накопленное и снимаем паузу
     card.accrued_unclaimed = 0
     card.total_claimed = int(card.total_claimed or 0) + amount
     card.last_claim_at = now
-    card.last_calculated_at = now  # стартуем новый отсчет для следующего накопления
+    card.last_calculated_at = now
 
     await session.commit()
     return amount
 
 
 # -------------------------
-# Админские CRUD (опционально)
+# Админские CRUD
 # -------------------------
 async def set_tshirt_drop_active(
     session: AsyncSession,
     is_active: bool,
     drop_id: int = 1,
 ) -> TshirtDrop:
-    drop = await get_tshirt_drop(session, drop_id=drop_id)
+    # ✅ ВАЖНО: теперь activate не будет падать 404, если записи ещё нет
+    drop = await get_or_create_tshirt_drop(session, drop_id=drop_id)
+
     drop.is_active = bool(is_active)
-    # если включаем и старт еще не фиксирован — можно зафиксировать старт
+
     if drop.is_active and drop.sale_started_at is None:
         drop.sale_started_at = _utcnow()
 
@@ -450,10 +416,6 @@ async def reset_tshirt_drop(
     drop_id: int = 1,
     total_stock: int = 10,
 ) -> TshirtDrop:
-    """
-    Осторожно: для тестов/админки. Сбрасывает счётчики дропа.
-    Покупки и карточки НЕ трогает.
-    """
     drop = await get_tshirt_drop(session, drop_id=drop_id)
     drop.total_stock = int(total_stock)
     drop.sold_count = 0
@@ -462,3 +424,4 @@ async def reset_tshirt_drop(
     await session.commit()
     await session.refresh(drop)
     return drop
+
