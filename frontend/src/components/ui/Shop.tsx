@@ -9,12 +9,36 @@ import { listDrops, buyDrop, type Drop, type Purchase } from '../scripts/api/dro
 const ENERGY_UPGRADE_PRICE = 2500;
 const REFILL_PRICE = 2500;
 
-// временный сток футболок (плейсхолдер)
-const TSHIRT_TOTAL = 10;
-const TSHIRT_LEFT = 10;
+// ⚠️ цена футболки (должна совпадать с backend TSHIRT_PRICE_GAP)
+const TSHIRT_PRICE_GAP = 1000;
 
 const INVITE_REQUIREMENTS: Record<number, number> = { 6: 1, 7: 5, 8: 10, 9: 15, 10: 20 };
 const MAX_BOOST_LEVEL = 10;
+
+// tshirt types (backend: /api/shop/tshirt/status)
+type TshirtStatus = {
+  drop_id: number;
+  title: string;
+  is_active: boolean;
+  total_stock: number;
+  sold_count: number;
+  left: number;
+  sale_started_at?: string | null;
+  sold_out_at?: string | null;
+
+  user_has_tshirt: boolean;
+  user_size?: string | null;
+
+  passive_is_active?: boolean | null;
+  accrued_unclaimed?: number | null;
+  cap_unclaimed?: number | null;
+  rate_total?: number | null;
+  cycle_seconds?: number | null;
+  is_paused?: boolean | null;
+};
+
+const TSHIRT_SIZES = ['S', 'M', 'L', 'XL', 'XXL'] as const;
+type TshirtSize = (typeof TSHIRT_SIZES)[number];
 
 const Shop: React.FC = () => {
   const { t } = useTranslation();
@@ -41,6 +65,12 @@ const Shop: React.FC = () => {
   const [refillsLeft, setRefillsLeft] = useState<number | null>(null);
   const [currentEnergy, setCurrentEnergy] = useState<number | null>(null);
   const [refillMaxEnergy, setRefillMaxEnergy] = useState<number | null>(null);
+
+  // tshirt status
+  const [tshirtStatus, setTshirtStatus] = useState<TshirtStatus | null>(null);
+  const [tshirtLoading, setTshirtLoading] = useState(false);
+  const [tshirtModalOpen, setTshirtModalOpen] = useState(false);
+  const [selectedTshirtSize, setSelectedTshirtSize] = useState<TshirtSize>('M');
 
   // дропы
   const [drops, setDrops] = useState<Drop[]>([]);
@@ -130,6 +160,28 @@ const Shop: React.FC = () => {
     }
   };
 
+  const fetchTshirtStatus = async () => {
+    if (!telegramUserId) return;
+    try {
+      setTshirtLoading(true);
+      const res = await fetch(
+        `${API_BASE_URL}/api/shop/tshirt/status?telegram_id=${telegramUserId}`
+      );
+      if (!res.ok) {
+        // не спамим ошибками: просто не показываем статус
+        setTshirtStatus(null);
+        return;
+      }
+      const data = await res.json();
+      setTshirtStatus(data as TshirtStatus);
+    } catch (err) {
+      console.error('Ошибка при получении статуса футболки:', err);
+      setTshirtStatus(null);
+    } finally {
+      setTshirtLoading(false);
+    }
+  };
+
   // дропы: загружаем при первом открытии вкладки
   useEffect(() => {
     const loadDropsOnce = async () => {
@@ -148,12 +200,19 @@ const Shop: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab]);
 
+  // футболку подгружаем при открытии вкладки drops
+  useEffect(() => {
+    if (tab === 'drops') fetchTshirtStatus();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab]);
+
   useEffect(() => {
     fetchUserData();
     fetchInvitesCount();
     fetchTotalSpent();
     fetchEnergyUpgradeStatus();
     fetchRefillStatus();
+    // tshirt не тянем на старте, только на вкладке drops
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -316,6 +375,98 @@ const Shop: React.FC = () => {
     }
   };
 
+  const handleBuyTshirt = async () => {
+    if (!telegramUserId) return;
+    if (!tshirtStatus) return;
+
+    setLoading(true);
+    setMessage('');
+
+    if (!tshirtStatus.is_active) {
+      setMessage('T-shirt drop inactive');
+      setLoading(false);
+      return;
+    }
+    if (tshirtStatus.left <= 0) {
+      setMessage('Sold out');
+      setLoading(false);
+      return;
+    }
+    if (tshirtStatus.user_has_tshirt) {
+      setMessage('Already purchased');
+      setLoading(false);
+      return;
+    }
+    if (totalXp < TSHIRT_PRICE_GAP) {
+      setMessage(t('not_enough_gap'));
+      setLoading(false);
+      return;
+    }
+
+    try {
+      const res = await fetch(
+        `${API_BASE_URL}/api/shop/tshirt/buy?telegram_id=${telegramUserId}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ size: selectedTshirtSize }),
+        }
+      );
+
+      const data = await res.json().catch(() => ({}));
+
+      if (!res.ok) {
+        const detail = data?.detail ?? 'buy_failed';
+        setMessage(typeof detail === 'string' ? detail : 'buy_failed');
+        return;
+      }
+
+      // успех
+      setTshirtModalOpen(false);
+      await fetchUserData();
+      await fetchTotalSpent();
+      await fetchTshirtStatus();
+      setMessage(t('shop_success') || 'Success');
+    } catch (err) {
+      console.error('Ошибка покупки футболки:', err);
+      setMessage(t('error'));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleClaimTshirt = async () => {
+    if (!telegramUserId) return;
+
+    setLoading(true);
+    setMessage('');
+
+    try {
+      const res = await fetch(
+        `${API_BASE_URL}/api/shop/tshirt/claim?telegram_id=${telegramUserId}`,
+        { method: 'POST' }
+      );
+
+      const data = await res.json().catch(() => ({}));
+
+      if (!res.ok) {
+        const detail = data?.detail ?? 'claim_failed';
+        setMessage(typeof detail === 'string' ? detail : 'claim_failed');
+        return;
+      }
+
+      // успех
+      await fetchUserData();
+      await fetchTshirtStatus();
+      setMessage(t('shop_success') || 'Success');
+    } catch (err) {
+      console.error('Ошибка claim футболки:', err);
+      setMessage(t('error'));
+    } finally {
+      setLoading(false);
+    }
+  };
+
   // derived
   const disableClickBoost =
     loading ||
@@ -336,6 +487,26 @@ const Shop: React.FC = () => {
 
   const disableRefill =
     loading || totalXp < REFILL_PRICE || (refillsLeft !== null && refillsLeft <= 0) || energyIsFull;
+
+  const tshirtLeft = tshirtStatus?.left ?? 10;
+  const tshirtTotal = tshirtStatus?.total_stock ?? 10;
+
+  const tshirtAccrued = Number(tshirtStatus?.accrued_unclaimed ?? 0);
+  const tshirtCap = Number(tshirtStatus?.cap_unclaimed ?? 50000);
+  const tshirtPaused = Boolean(tshirtStatus?.is_paused ?? (tshirtAccrued >= tshirtCap));
+
+  const disableTshirtBuy =
+    loading ||
+    tshirtLoading ||
+    !telegramUserId ||
+    !tshirtStatus ||
+    !tshirtStatus.is_active ||
+    tshirtStatus.left <= 0 ||
+    tshirtStatus.user_has_tshirt ||
+    totalXp < TSHIRT_PRICE_GAP;
+
+  const disableTshirtClaim =
+    loading || tshirtLoading || !telegramUserId || !tshirtStatus?.user_has_tshirt || tshirtAccrued <= 0;
 
   // tabs UI
   const Tabs = (
@@ -449,7 +620,7 @@ const Shop: React.FC = () => {
       {/* === Вкладка ДРОПЫ === */}
       {tab === 'drops' && (
         <div className="max-w-md mx-auto">
-          {/* Футболка (плейсхолдер) */}
+          {/* Футболка (реальная логика) */}
           <div className="bg-[#0e1a2b] border border-[#ffffff20] p-4 rounded-xl shadow-[0_0_10px_#ffffff20] text-center space-y-2 mb-6">
             <div className="relative w-fit mx-auto">
               <img
@@ -458,18 +629,143 @@ const Shop: React.FC = () => {
                 className="w-24 h-24 mx-auto rounded-md object-cover"
               />
               <span className="absolute -right-2 -top-2 bg-[#00f0ff] text-[#0e1a2b] text-xs font-bold px-2 py-1 rounded-full shadow">
-                {TSHIRT_LEFT}/{TSHIRT_TOTAL}
+                {tshirtLeft}/{tshirtTotal}
               </span>
             </div>
-            <h3 className="text-lg font-semibold text-white/90">👕 Gappick T-shirt (Limited)</h3>
-            <p className="text-sm text-[#999999]">Tezliklə satışda</p>
-            <button
-              disabled
-              className="bg-[#cccccc20] text-[#cccccc] font-semibold px-4 py-2 rounded cursor-not-allowed"
-            >
-              {t('buy')}
-            </button>
+
+            {!tshirtStatus && (
+              <>
+                <h3 className="text-lg font-semibold text-white/90">👕 Gappick T-shirt (Limited)</h3>
+                <p className="text-sm text-[#999999]">
+                  {tshirtLoading ? (t('common.loading') || 'Loading...') : '—'}
+                </p>
+                <button
+                  disabled
+                  className="bg-[#cccccc20] text-[#cccccc] font-semibold px-4 py-2 rounded cursor-not-allowed"
+                >
+                  {t('buy')}
+                </button>
+              </>
+            )}
+
+            {tshirtStatus && !tshirtStatus.user_has_tshirt && (
+              <>
+                <h3 className="text-lg font-semibold text-white/90">👕 {tshirtStatus.title}</h3>
+                <p className="text-sm text-[#a0f6ff]">{TSHIRT_PRICE_GAP.toLocaleString()} $GAP</p>
+
+                {!tshirtStatus.is_active && (
+                  <p className="text-xs text-[#ffadad]">Drop inactive</p>
+                )}
+                {tshirtStatus.left <= 0 && <p className="text-xs text-[#ffadad]">Sold out</p>}
+
+                <button
+                  onClick={() => setTshirtModalOpen(true)}
+                  disabled={disableTshirtBuy}
+                  className="bg-[#00f0ff] text-[#0e1a2b] font-semibold px-4 py-2 rounded hover:scale-105 transition-all disabled:opacity-40"
+                >
+                  {loading ? '...' : t('buy')}
+                </button>
+
+                {totalXp < TSHIRT_PRICE_GAP && (
+                  <p className="text-xs text-[#ffadad]">{t('not_enough_gap')}</p>
+                )}
+              </>
+            )}
+
+            {tshirtStatus && tshirtStatus.user_has_tshirt && (
+              <>
+                <h3 className="text-lg font-semibold text-white/90">💰 $GAP Farm (T-shirt)</h3>
+                <p className="text-xs text-[#89dfff]">
+                  {t('level')}: {tshirtStatus.user_size ? `Size ${tshirtStatus.user_size}` : '—'}
+                </p>
+
+                <div className="mt-2 text-sm text-[#a0f6ff]">
+                  {tshirtAccrued.toLocaleString()} / {tshirtCap.toLocaleString()} $GAP
+                </div>
+
+                <div className="w-full bg-[#ffffff10] rounded-full h-2 mt-2 overflow-hidden">
+                  <div
+                    className="h-2 bg-[#00f0ff]"
+                    style={{
+                      width: `${Math.min(100, Math.round((tshirtAccrued / Math.max(1, tshirtCap)) * 100))}%`,
+                    }}
+                  />
+                </div>
+
+                {tshirtPaused && (
+                  <p className="text-xs text-[#ffadad] mt-2">
+                    Pause: cap reached. Claim to continue.
+                  </p>
+                )}
+
+                <button
+                  onClick={handleClaimTshirt}
+                  disabled={disableTshirtClaim}
+                  className="bg-[#00f0ff] text-[#0e1a2b] font-semibold px-4 py-2 rounded hover:scale-105 transition-all disabled:opacity-40 mt-3"
+                >
+                  {loading ? '...' : 'Claim'}
+                </button>
+              </>
+            )}
           </div>
+
+          {/* Модалка выбора размера */}
+          {tshirtModalOpen && (
+            <div
+              className="fixed inset-0 bg-black/50 flex items-end"
+              onClick={(e) => {
+                if (e.target === e.currentTarget) setTshirtModalOpen(false);
+              }}
+            >
+              <div className="w-full rounded-t-2xl bg-white p-4 relative">
+                <button
+                  className="absolute right-3 top-3 w-8 h-8 rounded-full bg-black/80 text-white flex items-center justify-center"
+                  onClick={() => setTshirtModalOpen(false)}
+                  aria-label={t('actions.close') || 'Close'}
+                  title={t('actions.close') || 'Close'}
+                >
+                  ×
+                </button>
+
+                <div className="font-semibold mb-2">Select size</div>
+
+                <div className="flex flex-wrap gap-2">
+                  {TSHIRT_SIZES.map((s) => (
+                    <button
+                      key={s}
+                      className={`px-3 py-2 rounded-lg border text-sm font-semibold ${
+                        selectedTshirtSize === s
+                          ? 'bg-black text-white border-black'
+                          : 'bg-white text-black border-gray-300'
+                      }`}
+                      onClick={() => setSelectedTshirtSize(s)}
+                      type="button"
+                    >
+                      {s}
+                    </button>
+                  ))}
+                </div>
+
+                <div className="mt-3 text-sm">
+                  Price: <b>{TSHIRT_PRICE_GAP.toLocaleString()} $GAP</b>
+                </div>
+
+                <button
+                  className="mt-4 w-full px-4 py-3 rounded-xl bg-black text-white font-semibold disabled:opacity-50"
+                  onClick={handleBuyTshirt}
+                  disabled={disableTshirtBuy}
+                >
+                  {loading ? '...' : 'Buy'}
+                </button>
+
+                {tshirtStatus?.left != null && (
+                  <div className="mt-2 text-xs opacity-70">
+                    Left: {tshirtStatus.left}/{tshirtStatus.total_stock}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
 
           {dropsLoading && (
             <div className="text-center text-sm text-[#7ee9ff] mb-4">{t('common.loading')}</div>
@@ -504,7 +800,9 @@ const Shop: React.FC = () => {
                       <div className="text-[11px] opacity-70 mt-1">
                         {leftAll != null && <span>{t('available')}: {leftAll}</span>}
                         {leftAll != null && leftUser != null && <span> • </span>}
-                        {leftUser != null && <span>{t('your_available') ?? 'You'}: {leftUser}</span>}
+                        {leftUser != null && (
+                          <span>{t('your_available') ?? 'You'}: {leftUser}</span>
+                        )}
                       </div>
                     )}
                   </div>
@@ -526,7 +824,9 @@ const Shop: React.FC = () => {
                           // локально уменьшим user_remaining, если фронту вернули лимиты
                           if (leftUser != null) {
                             (d as any).user_remaining = Math.max(0, leftUser - 1);
-                            setDrops((prev) => prev.map(x => (x.id === d.id ? { ...x, ...(d as any) } : x)));
+                            setDrops((prev) =>
+                              prev.map((x) => (x.id === d.id ? { ...x, ...(d as any) } : x))
+                            );
                           }
                         } catch (e: any) {
                           alert(e?.message || t('shop_error'));
@@ -568,7 +868,8 @@ const Shop: React.FC = () => {
 
                 <div className="font-semibold mb-1">{t('drop_code_title') || 'Код дропа'}</div>
                 <div className="text-sm">
-                  {t('drop_code_hint') || 'Покажите этот код партнёру:'} <b>{purchase.unique_code}</b>
+                  {t('drop_code_hint') || 'Покажите этот код партнёру:'}{' '}
+                  <b>{purchase.unique_code}</b>
                 </div>
 
                 <div className="text-xs opacity-70 mt-2">
@@ -615,6 +916,7 @@ const Shop: React.FC = () => {
 };
 
 export default Shop;
+
 
 
 
