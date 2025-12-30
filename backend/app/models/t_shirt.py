@@ -104,8 +104,17 @@ class PassiveIncomeCard(Base):
 
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
 
+    # ✅ FIX: используем value ("tshirt"), а не имя Enum-члена ("TSHIRT"),
+    # и привязываемся к существующему PG enum-типу passiveincomesource.
     source: Mapped[PassiveIncomeSource] = mapped_column(
-        Enum(PassiveIncomeSource), nullable=False, default=PassiveIncomeSource.TSHIRT
+        Enum(
+            PassiveIncomeSource,
+            name="passiveincomesource",
+            values_callable=lambda enum_cls: [e.value for e in enum_cls],
+            native_enum=True,
+        ),
+        nullable=False,
+        default=PassiveIncomeSource.TSHIRT,
     )
 
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
@@ -147,3 +156,4 @@ class PassiveIncomeCard(Base):
         Index("ix_passive_income_user_id", "user_id"),
         Index("ix_passive_income_active", "is_active"),
     )
+
