@@ -168,7 +168,6 @@ const Shop: React.FC = () => {
         `${API_BASE_URL}/api/shop/tshirt/status?telegram_id=${telegramUserId}`
       );
       if (!res.ok) {
-        // не спамим ошибками: просто не показываем статус
         setTshirtStatus(null);
         return;
       }
@@ -212,7 +211,6 @@ const Shop: React.FC = () => {
     fetchTotalSpent();
     fetchEnergyUpgradeStatus();
     fetchRefillStatus();
-    // tshirt не тянем на старте, только на вкладке drops
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -421,7 +419,6 @@ const Shop: React.FC = () => {
         return;
       }
 
-      // успех
       setTshirtModalOpen(false);
       await fetchUserData();
       await fetchTotalSpent();
@@ -455,7 +452,6 @@ const Shop: React.FC = () => {
         return;
       }
 
-      // успех
       await fetchUserData();
       await fetchTshirtStatus();
       setMessage(t('shop_success') || 'Success');
@@ -712,15 +708,14 @@ const Shop: React.FC = () => {
           {/* Модалка выбора размера */}
           {tshirtModalOpen && (
             <div
-              // ✅ поднимаем sheet над нижней навигацией + учитываем safe-area
               className="fixed inset-0 bg-black/50 flex items-end pb-[calc(env(safe-area-inset-bottom)+96px)]"
               onClick={(e) => {
                 if (e.target === e.currentTarget) setTshirtModalOpen(false);
               }}
             >
               <div
-                // ✅ небольшой дополнительный отступ + padding снизу на всякий случай
-                className="w-full rounded-t-2xl bg-white p-4 pb-[calc(env(safe-area-inset-bottom)+24px)] relative mb-2"
+                // ✅ FIX: делаем весь текст в модалке черным (чтобы не наследовался cyan)
+                className="w-full rounded-t-2xl bg-white p-4 pb-[calc(env(safe-area-inset-bottom)+24px)] relative mb-2 text-black"
               >
                 <button
                   className="absolute right-3 top-3 w-8 h-8 rounded-full bg-black/80 text-white flex items-center justify-center"
@@ -825,7 +820,6 @@ const Shop: React.FC = () => {
                           setPurchase(p);
                           await fetchUserData();
                           await fetchTotalSpent();
-                          // локально уменьшим user_remaining, если фронту вернули лимиты
                           if (leftUser != null) {
                             (d as any).user_remaining = Math.max(0, leftUser - 1);
                             setDrops((prev) =>
@@ -857,7 +851,6 @@ const Shop: React.FC = () => {
               }}
             >
               <div className="w-full rounded-t-2xl bg-white p-4 relative">
-                {/* крестик */}
                 <button
                   className="absolute right-3 top-3 w-8 h-8 rounded-full bg-black/80 text-white flex items-center justify-center"
                   onClick={() => {
@@ -920,6 +913,7 @@ const Shop: React.FC = () => {
 };
 
 export default Shop;
+
 
 
 
