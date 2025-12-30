@@ -155,6 +155,46 @@
     "no_votes": "Siz səs ayırmamısınız",
     "server": "Xəta: {{detail}}",
     "vote_error": "Səsvermə zamanı xəta baş verdi"
+  },
+  "shop": {
+    "tab_boosters": "Busterlər",
+    "tab_drops": "Drop-lar",
+    "tshirt": {
+      "title_fallback": "Gappick T-shirt (Limited)",
+      "price_label": "Qiymət",
+      "buy": "Al",
+      "select_size": "Ölçü seç",
+      "left": "Qalıb",
+      "drop_inactive": "Drop aktiv deyil",
+      "sold_out": "Satılıb qurtardı",
+      "already_purchased": "Artıq alınıb",
+      "buy_failed": "Alış alınmadı",
+      "claim": "Yığ",
+      "claim_success": "Yığıldı",
+      "claim_failed": "Yığım alınmadı",
+      "farm_title": "$GAP Farm (T-shirt)",
+      "size_label": "Ölçü",
+      "paused_hint": "Pauza: limit doldu. Davam üçün yığ."
+    }
+  },
+
+  "errors": {
+    "user_not_registered": "İstifadəçi qeydiyyatdan keçməyib",
+    "not_enough_gap": "Kifayət qədər $GAP yoxdur",
+
+    "tshirt_drop_not_found": "T-shirt drop tapılmadı",
+    "tshirt_drop_inactive": "T-shirt drop aktiv deyil",
+    "tshirt_sold_out": "T-shirt satılıb qurtardı",
+    "tshirt_already_purchased": "Bu t-shirt artıq alınıb",
+    "passive_card_not_found": "Passiv kart tapılmadı",
+    "tshirt_price_not_configured": "Qiymət konfiqurasiya edilməyib",
+
+    "tshirt_status_failed": "Status alınmadı",
+    "tshirt_buy_failed": "Alış zamanı xəta baş verdi",
+    "tshirt_claim_failed": "Yığım zamanı xəta baş verdi",
+    "buy_failed": "Alış alınmadı",
+    "claim_failed": "Yığım alınmadı"
   }
+  
 
 }
