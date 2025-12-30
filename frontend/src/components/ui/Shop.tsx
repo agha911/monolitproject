@@ -712,12 +712,16 @@ const Shop: React.FC = () => {
           {/* Модалка выбора размера */}
           {tshirtModalOpen && (
             <div
-              className="fixed inset-0 bg-black/50 flex items-end"
+              // ✅ поднимаем sheet над нижней навигацией + учитываем safe-area
+              className="fixed inset-0 bg-black/50 flex items-end pb-[calc(env(safe-area-inset-bottom)+96px)]"
               onClick={(e) => {
                 if (e.target === e.currentTarget) setTshirtModalOpen(false);
               }}
             >
-              <div className="w-full rounded-t-2xl bg-white p-4 relative">
+              <div
+                // ✅ небольшой дополнительный отступ + padding снизу на всякий случай
+                className="w-full rounded-t-2xl bg-white p-4 pb-[calc(env(safe-area-inset-bottom)+24px)] relative mb-2"
+              >
                 <button
                   className="absolute right-3 top-3 w-8 h-8 rounded-full bg-black/80 text-white flex items-center justify-center"
                   onClick={() => setTshirtModalOpen(false)}
