@@ -153,5 +153,44 @@
     "no_votes": "You haven't allocated any votes",
     "server": "Error: {{detail}}",
     "vote_error": "An error occurred while voting"
+  },
+  "shop": {
+    "tab_boosters": "Boosters",
+    "tab_drops": "Drops",
+    "tshirt": {
+      "title_fallback": "Gappick T-shirt (Limited)",
+      "price_label": "Price",
+      "buy": "Buy",
+      "select_size": "Select size",
+      "left": "Left",
+      "drop_inactive": "Drop inactive",
+      "sold_out": "Sold out",
+      "already_purchased": "Already purchased",
+      "buy_failed": "Purchase failed",
+      "claim": "Claim",
+      "claim_success": "Claimed",
+      "claim_failed": "Claim failed",
+      "farm_title": "$GAP Farm (T-shirt)",
+      "size_label": "Size",
+      "paused_hint": "Paused: cap reached. Claim to continue."
+    }
+  },
+
+  "errors": {
+    "user_not_registered": "User is not registered",
+    "not_enough_gap": "Not enough $GAP",
+
+    "tshirt_drop_not_found": "T-shirt drop not found",
+    "tshirt_drop_inactive": "T-shirt drop inactive",
+    "tshirt_sold_out": "T-shirts are sold out",
+    "tshirt_already_purchased": "T-shirt already purchased",
+    "passive_card_not_found": "Passive card not found",
+    "tshirt_price_not_configured": "Price is not configured",
+
+    "tshirt_status_failed": "Failed to load status",
+    "tshirt_buy_failed": "Buy error",
+    "tshirt_claim_failed": "Claim error",
+    "buy_failed": "Purchase failed",
+    "claim_failed": "Claim failed"
   }
 }
