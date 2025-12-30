@@ -82,6 +82,24 @@ const Shop: React.FC = () => {
   const telegramUserId = telegramUser?.id;
   const initData = WebApp.initData;
 
+  // --- i18n helpers ---
+  const tr = (key: string, fallback: string) => {
+    const v = t(key);
+    return v === key ? fallback : v;
+  };
+
+  const translateApiDetail = (detail: unknown, fallbackKey: string) => {
+    // backend often returns detail like "tshirt_drop_inactive" / "buy_failed" etc.
+    if (typeof detail === 'string') {
+      const k = `errors.${detail}`;
+      const v = t(k);
+      return v === k ? detail : v;
+    }
+    const fbKey = `errors.${fallbackKey}`;
+    const fb = t(fbKey);
+    return fb === fbKey ? fallbackKey : fb;
+  };
+
   // loaders
   const fetchUserData = async () => {
     try {
@@ -381,17 +399,17 @@ const Shop: React.FC = () => {
     setMessage('');
 
     if (!tshirtStatus.is_active) {
-      setMessage('T-shirt drop inactive');
+      setMessage(tr('shop.tshirt.drop_inactive', 'Drop inactive'));
       setLoading(false);
       return;
     }
     if (tshirtStatus.left <= 0) {
-      setMessage('Sold out');
+      setMessage(tr('shop.tshirt.sold_out', 'Sold out'));
       setLoading(false);
       return;
     }
     if (tshirtStatus.user_has_tshirt) {
-      setMessage('Already purchased');
+      setMessage(tr('shop.tshirt.already_purchased', 'Already purchased'));
       setLoading(false);
       return;
     }
@@ -414,8 +432,8 @@ const Shop: React.FC = () => {
       const data = await res.json().catch(() => ({}));
 
       if (!res.ok) {
-        const detail = data?.detail ?? 'buy_failed';
-        setMessage(typeof detail === 'string' ? detail : 'buy_failed');
+        const detail = (data as any)?.detail ?? 'tshirt_buy_failed';
+        setMessage(translateApiDetail(detail, 'tshirt_buy_failed'));
         return;
       }
 
@@ -423,7 +441,7 @@ const Shop: React.FC = () => {
       await fetchUserData();
       await fetchTotalSpent();
       await fetchTshirtStatus();
-      setMessage(t('shop_success') || 'Success');
+      setMessage(tr('shop.tshirt.claim_success', tr('shop_success', 'Success')));
     } catch (err) {
       console.error('Ошибка покупки футболки:', err);
       setMessage(t('error'));
@@ -447,14 +465,14 @@ const Shop: React.FC = () => {
       const data = await res.json().catch(() => ({}));
 
       if (!res.ok) {
-        const detail = data?.detail ?? 'claim_failed';
-        setMessage(typeof detail === 'string' ? detail : 'claim_failed');
+        const detail = (data as any)?.detail ?? 'tshirt_claim_failed';
+        setMessage(translateApiDetail(detail, 'tshirt_claim_failed'));
         return;
       }
 
       await fetchUserData();
       await fetchTshirtStatus();
-      setMessage(t('shop_success') || 'Success');
+      setMessage(tr('shop.tshirt.claim_success', tr('shop_success', 'Success')));
     } catch (err) {
       console.error('Ошибка claim футболки:', err);
       setMessage(t('error'));
@@ -621,7 +639,7 @@ const Shop: React.FC = () => {
             <div className="relative w-fit mx-auto">
               <img
                 src="/tshirt-preview-1.png"
-                alt="T-shirt"
+                alt={tr('shop.tshirt.title_fallback', 'T-shirt')}
                 className="w-24 h-24 mx-auto rounded-md object-cover"
               />
               <span className="absolute -right-2 -top-2 bg-[#00f0ff] text-[#0e1a2b] text-xs font-bold px-2 py-1 rounded-full shadow">
@@ -631,9 +649,11 @@ const Shop: React.FC = () => {
 
             {!tshirtStatus && (
               <>
-                <h3 className="text-lg font-semibold text-white/90">👕 Gappick T-shirt (Limited)</h3>
+                <h3 className="text-lg font-semibold text-white/90">
+                  👕 {tr('shop.tshirt.title_fallback', 'Gappick T-shirt (Limited)')}
+                </h3>
                 <p className="text-sm text-[#999999]">
-                  {tshirtLoading ? (t('common.loading') || 'Loading...') : '—'}
+                  {tshirtLoading ? (tr('common.loading', 'Loading...') as any) : '—'}
                 </p>
                 <button
                   disabled
@@ -650,9 +670,11 @@ const Shop: React.FC = () => {
                 <p className="text-sm text-[#a0f6ff]">{TSHIRT_PRICE_GAP.toLocaleString()} $GAP</p>
 
                 {!tshirtStatus.is_active && (
-                  <p className="text-xs text-[#ffadad]">Drop inactive</p>
+                  <p className="text-xs text-[#ffadad]">{tr('shop.tshirt.drop_inactive', 'Drop inactive')}</p>
                 )}
-                {tshirtStatus.left <= 0 && <p className="text-xs text-[#ffadad]">Sold out</p>}
+                {tshirtStatus.left <= 0 && (
+                  <p className="text-xs text-[#ffadad]">{tr('shop.tshirt.sold_out', 'Sold out')}</p>
+                )}
 
                 <button
                   onClick={() => setTshirtModalOpen(true)}
@@ -670,9 +692,11 @@ const Shop: React.FC = () => {
 
             {tshirtStatus && tshirtStatus.user_has_tshirt && (
               <>
-                <h3 className="text-lg font-semibold text-white/90">💰 $GAP Farm (T-shirt)</h3>
+                <h3 className="text-lg font-semibold text-white/90">
+                  💰 {tr('shop.tshirt.farm_title', '$GAP Farm (T-shirt)')}
+                </h3>
                 <p className="text-xs text-[#89dfff]">
-                  {t('level')}: {tshirtStatus.user_size ? `Size ${tshirtStatus.user_size}` : '—'}
+                  {t('level')}: {tshirtStatus.user_size ? `${tr('shop.tshirt.size_label', 'Size')} ${tshirtStatus.user_size}` : '—'}
                 </p>
 
                 <div className="mt-2 text-sm text-[#a0f6ff]">
@@ -690,7 +714,7 @@ const Shop: React.FC = () => {
 
                 {tshirtPaused && (
                   <p className="text-xs text-[#ffadad] mt-2">
-                    Pause: cap reached. Claim to continue.
+                    {tr('shop.tshirt.paused_hint', 'Paused: cap reached. Claim to continue.')}
                   </p>
                 )}
 
@@ -699,7 +723,7 @@ const Shop: React.FC = () => {
                   disabled={disableTshirtClaim}
                   className="bg-[#00f0ff] text-[#0e1a2b] font-semibold px-4 py-2 rounded hover:scale-105 transition-all disabled:opacity-40 mt-3"
                 >
-                  {loading ? '...' : 'Claim'}
+                  {loading ? '...' : tr('shop.tshirt.claim', 'Claim')}
                 </button>
               </>
             )}
@@ -726,7 +750,7 @@ const Shop: React.FC = () => {
                   ×
                 </button>
 
-                <div className="font-semibold mb-2">Select size</div>
+                <div className="font-semibold mb-2">{tr('shop.tshirt.select_size', 'Select size')}</div>
 
                 <div className="flex flex-wrap gap-2">
                   {TSHIRT_SIZES.map((s) => (
@@ -746,7 +770,7 @@ const Shop: React.FC = () => {
                 </div>
 
                 <div className="mt-3 text-sm">
-                  Price: <b>{TSHIRT_PRICE_GAP.toLocaleString()} $GAP</b>
+                  {tr('shop.tshirt.price_label', 'Price')}: <b>{TSHIRT_PRICE_GAP.toLocaleString()} $GAP</b>
                 </div>
 
                 <button
@@ -754,12 +778,12 @@ const Shop: React.FC = () => {
                   onClick={handleBuyTshirt}
                   disabled={disableTshirtBuy}
                 >
-                  {loading ? '...' : 'Buy'}
+                  {loading ? '...' : tr('shop.tshirt.buy', 'Buy')}
                 </button>
 
                 {tshirtStatus?.left != null && (
                   <div className="mt-2 text-xs opacity-70">
-                    Left: {tshirtStatus.left}/{tshirtStatus.total_stock}
+                    {tr('shop.tshirt.left', 'Left')}: {tshirtStatus.left}/{tshirtStatus.total_stock}
                   </div>
                 )}
               </div>
@@ -797,10 +821,16 @@ const Shop: React.FC = () => {
 
                     {(leftAll != null || leftUser != null) && (
                       <div className="text-[11px] opacity-70 mt-1">
-                        {leftAll != null && <span>{t('available')}: {leftAll}</span>}
+                        {leftAll != null && (
+                          <span>
+                            {t('available')}: {leftAll}
+                          </span>
+                        )}
                         {leftAll != null && leftUser != null && <span> • </span>}
                         {leftUser != null && (
-                          <span>{t('your_available') ?? 'You'}: {leftUser}</span>
+                          <span>
+                            {t('your_available') ?? 'You'}: {leftUser}
+                          </span>
                         )}
                       </div>
                     )}
@@ -865,8 +895,7 @@ const Shop: React.FC = () => {
 
                 <div className="font-semibold mb-1">{t('drop_code_title') || 'Код дропа'}</div>
                 <div className="text-sm">
-                  {t('drop_code_hint') || 'Покажите этот код партнёру:'}{' '}
-                  <b>{purchase.unique_code}</b>
+                  {t('drop_code_hint') || 'Покажите этот код партнёру:'} <b>{purchase.unique_code}</b>
                 </div>
 
                 <div className="text-xs opacity-70 mt-2">
