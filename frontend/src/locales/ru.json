@@ -154,6 +154,45 @@
     "no_votes": "Вы не распределили голоса",
     "server": "Ошибка: {{detail}}",
     "vote_error": "Во время голосования произошла ошибка"
+  },
+  "shop": {
+    "tab_boosters": "Бустеры",
+    "tab_drops": "Дропы",
+    "tshirt": {
+      "title_fallback": "Gappick T-shirt (Limited)",
+      "price_label": "Цена",
+      "buy": "Купить",
+      "select_size": "Выберите размер",
+      "left": "Осталось",
+      "drop_inactive": "Дроп не активен",
+      "sold_out": "Продано",
+      "already_purchased": "Уже куплено",
+      "buy_failed": "Покупка не удалась",
+      "claim": "Забрать",
+      "claim_success": "Забрано",
+      "claim_failed": "Не удалось забрать",
+      "farm_title": "$GAP Farm (T-shirt)",
+      "size_label": "Размер",
+      "paused_hint": "Пауза: достигнут лимит. Заберите, чтобы продолжить."
+    }
+  },
+
+  "errors": {
+    "user_not_registered": "Пользователь не зарегистрирован",
+    "not_enough_gap": "Недостаточно $GAP",
+
+    "tshirt_drop_not_found": "Дроп футболки не найден",
+    "tshirt_drop_inactive": "Дроп футболки не активен",
+    "tshirt_sold_out": "Футболки закончились",
+    "tshirt_already_purchased": "Футболка уже куплена",
+    "passive_card_not_found": "Пассивная карточка не найдена",
+    "tshirt_price_not_configured": "Цена не настроена",
+
+    "tshirt_status_failed": "Не удалось получить статус",
+    "tshirt_buy_failed": "Ошибка покупки",
+    "tshirt_claim_failed": "Ошибка получения",
+    "buy_failed": "Покупка не удалась",
+    "claim_failed": "Не удалось забрать"
   }
 
 }
