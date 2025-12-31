@@ -10,7 +10,7 @@ const ENERGY_UPGRADE_PRICE = 2500;
 const REFILL_PRICE = 2500;
 
 // ⚠️ цена футболки (должна совпадать с backend TSHIRT_PRICE_GAP)
-const TSHIRT_PRICE_GAP = 1000;
+const TSHIRT_PRICE_GAP = 10000000;
 
 const INVITE_REQUIREMENTS: Record<number, number> = { 6: 1, 7: 5, 8: 10, 9: 15, 10: 20 };
 const MAX_BOOST_LEVEL = 10;
