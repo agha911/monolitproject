@@ -59,7 +59,7 @@ class TshirtStatusOut(BaseModel):
 
 
 class TshirtBuyIn(BaseModel):
-    size: TshirtSize = Field(..., description="T-shirt size: S/M/L/XL/XXL")
+    size: TshirtSize = Field(..., description="T-shirt size: S/M/L")
 
 
 class TshirtBuyOut(BaseModel):
