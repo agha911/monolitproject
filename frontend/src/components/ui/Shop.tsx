@@ -37,7 +37,7 @@ type TshirtStatus = {
   is_paused?: boolean | null;
 };
 
-const TSHIRT_SIZES = ['S', 'M', 'L', 'XL', 'XXL'] as const;
+const TSHIRT_SIZES = ['S', 'M', 'L'] as const;
 type TshirtSize = (typeof TSHIRT_SIZES)[number];
 
 const Shop: React.FC = () => {
