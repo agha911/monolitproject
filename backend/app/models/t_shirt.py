@@ -24,8 +24,6 @@ class TshirtSize(str, enum.Enum):
     S = "S"
     M = "M"
     L = "L"
-    XL = "XL"
-    XXL = "XXL"
 
 
 class PassiveIncomeSource(str, enum.Enum):
