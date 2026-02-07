@@ -1,36 +1,95 @@
 # backend/app/helpers/pvp_helpers.py
-# Хелперы для PvP Live + Challenge: расчет исхода, лимиты, подбор, недели (UTC+4)
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone, date
+from datetime import datetime, timedelta, timezone
 from typing import Optional, Tuple
 
 
-# Твой проект живёт по Баку: UTC+4 (без DST)
-BAKU_TZ = timezone(timedelta(hours=4))
+# ---------------------------------------------------------------------
+# Time helpers (Azerbaijan, UTC+4)
+# ---------------------------------------------------------------------
+
+AZ_TZ = timezone(timedelta(hours=4), name="AZT")
 
 
-# ----------------------------
-# Results / DTO
-# ----------------------------
+def az_now() -> datetime:
+    """
+    Текущее время в Азербайджане (UTC+4), aware datetime.
+    """
+    return datetime.now(AZ_TZ)
+
+
+def az_day_bounds_utc(dt_az: Optional[datetime] = None) -> Tuple[datetime, datetime]:
+    """
+    Возвращает (start_utc, end_utc) для суток по времени Азербайджана.
+    Удобно для дневных лимитов challenge (5/день).
+
+    end_utc — эксклюзивная граница (start + 1 day).
+    """
+    if dt_az is None:
+        dt_az = az_now()
+
+    # если пришёл dt без tzinfo, считаем, что это AZ
+    if dt_az.tzinfo is None:
+        dt_az = dt_az.replace(tzinfo=AZ_TZ)
+    else:
+        dt_az = dt_az.astimezone(AZ_TZ)
+
+    start_az = dt_az.replace(hour=0, minute=0, second=0, microsecond=0)
+    end_az = start_az + timedelta(days=1)
+
+    start_utc = start_az.astimezone(timezone.utc)
+    end_utc = end_az.astimezone(timezone.utc)
+    return start_utc, end_utc
+
+
+# ---------------------------------------------------------------------
+# Matchmaking helper (Challenge opponent range)
+# ---------------------------------------------------------------------
+
+def calc_best_result_range(
+    my_best: int,
+    *,
+    pct: float = 0.20,
+    min_span: int = 20,
+    min_low: int = 0,
+) -> Tuple[int, int]:
+    """
+    Диапазон подбора оппонента для Challenge: best +/- pct,
+    но не уже чем min_span.
+
+    Пример: my_best=100, pct=0.2 => 80..120
+    """
+    my_best = int(my_best or 0)
+    if my_best < 0:
+        my_best = 0
+
+    span = max(int(my_best * pct), min_span)
+    low = max(min_low, my_best - span)
+    high = my_best + span
+    return low, high
+
+
+# ---------------------------------------------------------------------
+# PvP / Challenge outcomes
+# ---------------------------------------------------------------------
 
 @dataclass(frozen=True)
 class PvpOutcome:
     is_draw: bool
-    winner_id: Optional[int]
-    loser_id: Optional[int]
+    winner_id: Optional[int]  # None if draw
 
 
 @dataclass(frozen=True)
 class PvpPayout:
     """
-    Денежные изменения по матчу (в монетах приложения).
-    Важно: логика списаний/начислений должна быть атомарной в сервисе.
+    Дельты (в монетах / total_xp), которые отражают итог матча:
+    - winner: +stake
+    - loser:  -stake
+    - draw:    0
     """
-    stake: int
-    bank: int
     player1_delta: int
     player2_delta: int
 
@@ -38,12 +97,8 @@ class PvpPayout:
 @dataclass(frozen=True)
 class ChallengeOutcome:
     is_win: bool
-    victories_delta: int  # +1 при win, иначе 0
+    victories_delta: int  # win=+1, lose=0
 
-
-# ----------------------------
-# Core logic
-# ----------------------------
 
 def resolve_pvp_outcome(
     *,
@@ -53,21 +108,18 @@ def resolve_pvp_outcome(
     player2_clicks: int,
 ) -> PvpOutcome:
     """
-    Определяет победителя/ничью для PvP Live.
+    Определение исхода live PvP по кликам.
     """
-    if player1_id == player2_id:
-        raise ValueError("player1_id and player2_id must be different")
-
-    if player1_clicks < 0 or player2_clicks < 0:
-        raise ValueError("clicks must be >= 0")
+    player1_clicks = int(player1_clicks)
+    player2_clicks = int(player2_clicks)
 
     if player1_clicks == player2_clicks:
-        return PvpOutcome(is_draw=True, winner_id=None, loser_id=None)
+        return PvpOutcome(is_draw=True, winner_id=None)
 
     if player1_clicks > player2_clicks:
-        return PvpOutcome(is_draw=False, winner_id=player1_id, loser_id=player2_id)
+        return PvpOutcome(is_draw=False, winner_id=int(player1_id))
 
-    return PvpOutcome(is_draw=False, winner_id=player2_id, loser_id=player1_id)
+    return PvpOutcome(is_draw=False, winner_id=int(player2_id))
 
 
 def calc_pvp_payout(
@@ -75,48 +127,28 @@ def calc_pvp_payout(
     player1_id: int,
     player2_id: int,
     outcome: PvpOutcome,
-    stake: int = 50000,
+    stake: int,
 ) -> PvpPayout:
     """
-    Расчёт изменения баланса по PvP Live:
+    Пэйаут в терминах *дельт*:
+      - победитель: +stake
+      - проигравший: -stake
+      - ничья: 0/0
 
-    - ставка по умолчанию 50k с игрока
-    - ничья -> возврат ставок
-    - победа -> банк делится поровну победителям
-      (в твоей механике: команды 1–2 человека; на уровне 1v1 это значит победитель получает весь банк,
-       но если будет 2v2, сервис сможет разделить между победителями поровну)
-
-    Тут мы считаем ДЕЛЬТЫ для 1v1:
-      - ничья: player1_delta=0, player2_delta=0 (если ранее списал stake, то сервис делает возврат)
-      - победа: winner_delta=+stake, loser_delta=-stake (эквивалент: loser теряет ставку, winner получает ставку оппонента)
+    В твоём сервисе фактическое списание/возврат может делаться иначе,
+    но эти дельты удобны для ответа/логов/тестов.
     """
+    stake = int(stake)
     if stake < 0:
-        raise ValueError("stake must be >= 0")
-    if player1_id == player2_id:
-        raise ValueError("player1_id and player2_id must be different")
-
-    bank = stake * 2
+        stake = 0
 
     if outcome.is_draw:
-        # При ничьей: деньги возвращаются -> итоговая дельта 0, если сервис списывал и возвращал
-        return PvpPayout(
-            stake=stake,
-            bank=bank,
-            player1_delta=0,
-            player2_delta=0,
-        )
+        return PvpPayout(player1_delta=0, player2_delta=0)
 
-    if outcome.winner_id is None or outcome.loser_id is None:
-        raise ValueError("invalid outcome: winner/loser required when not draw")
+    if outcome.winner_id == int(player1_id):
+        return PvpPayout(player1_delta=stake, player2_delta=-stake)
 
-    # 1v1: winner получает ставку оппонента, loser теряет свою ставку
-    if outcome.winner_id == player1_id:
-        return PvpPayout(stake=stake, bank=bank, player1_delta=+stake, player2_delta=-stake)
-
-    if outcome.winner_id == player2_id:
-        return PvpPayout(stake=stake, bank=bank, player1_delta=-stake, player2_delta=+stake)
-
-    raise ValueError("invalid outcome: winner_id must be one of players")
+    return PvpPayout(player1_delta=-stake, player2_delta=stake)
 
 
 def resolve_challenge_outcome(
@@ -125,102 +157,17 @@ def resolve_challenge_outcome(
     opponent_best_result: int,
 ) -> ChallengeOutcome:
     """
-    Challenge: победа если challenger_clicks > opponent_best_result
-    Победа: +1 victory
-    Поражение: 0
+    Challenge: сравниваем клики challenger с best_result оппонента.
+    По твоей текущей договорённости:
+      - победа: +1 victory
+      - поражение: 0
     """
-    if challenger_clicks < 0 or opponent_best_result < 0:
-        raise ValueError("values must be >= 0")
+    challenger_clicks = int(challenger_clicks)
+    opponent_best_result = int(opponent_best_result)
 
     is_win = challenger_clicks > opponent_best_result
-    return ChallengeOutcome(is_win=is_win, victories_delta=1 if is_win else 0)
+    return ChallengeOutcome(is_win=is_win, victories_delta=(1 if is_win else 0))
 
-
-# ----------------------------
-# Limits / time helpers
-# ----------------------------
-
-def now_baku() -> datetime:
-    return datetime.now(tz=BAKU_TZ)
-
-
-def baku_day_bounds(dt: Optional[datetime] = None) -> Tuple[datetime, datetime]:
-    """
-    Возвращает (start_of_day, end_of_day) в TZ Баку.
-    end_of_day = start + 1 day.
-    """
-    dt = dt or now_baku()
-    dt_local = dt.astimezone(BAKU_TZ)
-    start = dt_local.replace(hour=0, minute=0, second=0, microsecond=0)
-    end = start + timedelta(days=1)
-    return start, end
-
-
-def is_challenge_limit_exceeded(*, attempts_today: int, limit_per_day: int = 5) -> bool:
-    return attempts_today >= limit_per_day
-
-
-# ----------------------------
-# Weekly reset helpers
-# ----------------------------
-
-def week_window_utc4(dt: Optional[datetime] = None) -> Tuple[datetime, datetime]:
-    """
-    Окно "недельного турнира" / weekly reset по твоему правилу:
-    понедельник 00:00 — суббота 23:59 (UTC+4).
-
-    Возвращаем (week_start, week_end_exclusive), где:
-    - week_start: понедельник 00:00
-    - week_end_exclusive: воскресенье 00:00 (т.е. сразу после субботы 23:59:59.999...)
-    """
-    dt = dt or now_baku()
-    dt_local = dt.astimezone(BAKU_TZ)
-
-    # weekday(): Monday=0 ... Sunday=6
-    monday = dt_local - timedelta(days=dt_local.weekday())
-    week_start = monday.replace(hour=0, minute=0, second=0, microsecond=0)
-
-    # конец "соревновательной недели" — воскресенье 00:00
-    week_end_exclusive = week_start + timedelta(days=6)  # monday->sunday 00:00? нет, это saturday 00:00
-    # Правильно: monday 00:00 + 6 days = sunday 00:00? Проверим:
-    # Monday + 6 days = Sunday (weekday 6) same time => Sunday 00:00 ✅
-    # Значит окно понедельник 00:00 .. воскресенье 00:00 (не включает воскресенье)
-    return week_start, week_end_exclusive
-
-
-def is_reset_moment(dt: Optional[datetime] = None) -> bool:
-    """
-    Триггерный момент сброса — начало новой недели: понедельник 00:00 (UTC+4).
-    """
-    dt = dt or now_baku()
-    dt_local = dt.astimezone(BAKU_TZ)
-    return dt_local.weekday() == 0 and dt_local.hour == 0 and dt_local.minute == 0
-
-
-# ----------------------------
-# Matchmaking helper
-# ----------------------------
-
-def calc_best_result_range(
-    *,
-    best_result: int,
-    pct: float,
-    min_floor: int = 0,
-) -> Tuple[int, int]:
-    """
-    Диапазон для Challenge подбора по best_result:
-    best_result ± pct (например 0.15 = ±15%)
-    """
-    if best_result < 0:
-        raise ValueError("best_result must be >= 0")
-    if pct < 0:
-        raise ValueError("pct must be >= 0")
-
-    low = int(best_result * (1.0 - pct))
-    high = int(best_result * (1.0 + pct))
-
-    if low < min_floor:
-        low = min_floor
 
     if high < low:
         high = low
