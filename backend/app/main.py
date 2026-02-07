@@ -33,6 +33,7 @@ from app.routers import boosters
 from app.routers import dao as dao_router
 from app.routers.t_shirt_routers import router as tshirt_router
 from app.models.pvp_models import PvpInvite
+from app.routers import pvp
 
 # ---------------- logging setup ----------------
 
@@ -559,6 +560,7 @@ app.include_router(partner_drops.router)
 app.include_router(boosters.router)
 app.include_router(dao_router.router)
 app.include_router(tshirt_router)
+app.include_router(pvp.router)
 
 # ---------------- background ----------------
 
