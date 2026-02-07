@@ -1,6 +1,4 @@
 # app/routers/pvp.py
-# PvP / Challenge router (в стиле challenge.py)
-# Clean version: no raw SQL, uses ORM models for invites + queue.
 
 from __future__ import annotations
 
@@ -11,14 +9,14 @@ from typing import Optional, Any, Dict, List
 
 from fastapi import APIRouter, Depends, HTTPException, Header
 from pydantic import BaseModel, Field
-from sqlalchemy import select, func
+from sqlalchemy import select, func, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.database import get_async_session
 from app.models.user import User
-from app.models.pvp_models import PvpInvite, PvpQueue  # <-- теперь ORM
-from app.crud.user import get_user  # получить user по telegram_id
+from app.models.pvp_models import PvpInvite, PvpQueue, PvpSession
+from app.crud.user import get_user
 
 from app.helpers.pvp_helpers import (
     baku_day_bounds,
@@ -36,12 +34,15 @@ from app.crud.crud_pvp import (
 )
 
 from app.services.pvp_service import (
-    finish_live_pvp,
+    finish_live_pvp_session,
     run_challenge,
     UserNotFound,
     InsufficientCoins,
     ChallengeLimitExceeded,
     InvalidPayload,
+    SessionNotFound,
+    SessionNotActive,
+    SessionExpired,
 )
 
 router = APIRouter(prefix="/api/pvp", tags=["pvp"])
@@ -50,13 +51,12 @@ router = APIRouter(prefix="/api/pvp", tags=["pvp"])
 # ====== Config ======
 
 PVP_ENABLED = True
-PVP_DEFAULT_STAKE = 50000
+PVP_DEFAULT_STAKE = 50000  # ✅ фиксированный стейк
 PVP_MATCH_DURATION_SEC = 30
 PVP_MULTITOUCH_LIMIT = 2
 CHALLENGE_DAILY_LIMIT_DEFAULT = 5
 CHALLENGE_RANGE_PCT_DEFAULT = 0.15
 
-# admin token (Render env: PVP_ADMIN_TOKEN=...)
 PVP_ADMIN_TOKEN = os.getenv("PVP_ADMIN_TOKEN", "")
 
 
@@ -65,9 +65,9 @@ PVP_ADMIN_TOKEN = os.getenv("PVP_ADMIN_TOKEN", "")
 class LiveFinishRequest(BaseModel):
     telegram_id: int
     opponent_telegram_id: int
-    player1_clicks: int = Field(ge=0)
-    player2_clicks: int = Field(ge=0)
-    stake: int = Field(default=PVP_DEFAULT_STAKE, ge=0)
+    match_token: str = Field(min_length=10, max_length=128)
+    requester_clicks: int = Field(ge=0)
+    opponent_clicks: int = Field(ge=0)
 
 
 class ChallengeRunRequest(BaseModel):
@@ -79,7 +79,6 @@ class ChallengeRunRequest(BaseModel):
 
 class InviteCreateRequest(BaseModel):
     telegram_id: int
-    stake: int = Field(default=PVP_DEFAULT_STAKE, ge=0)
     ttl_seconds: int = Field(default=3600, ge=60, le=86400)
 
 
@@ -95,7 +94,6 @@ class InviteCancelRequest(BaseModel):
 
 class MatchmakingJoinRequest(BaseModel):
     telegram_id: int
-    stake: int = Field(default=PVP_DEFAULT_STAKE, ge=0)
     ttl_seconds: int = Field(default=120, ge=10, le=3600)
 
 
@@ -111,6 +109,10 @@ def _gen_invite_code() -> str:
     return secrets.token_urlsafe(8).replace("-", "").replace("_", "")
 
 
+def _gen_match_token() -> str:
+    return secrets.token_urlsafe(24).replace("-", "").replace("_", "")
+
+
 def _require_admin(x_admin_token: Optional[str]) -> None:
     if not PVP_ADMIN_TOKEN:
         raise HTTPException(status_code=403, detail={"code": "ADMIN_DISABLED", "message": "PVP_ADMIN_TOKEN not set"})
@@ -118,17 +120,63 @@ def _require_admin(x_admin_token: Optional[str]) -> None:
         raise HTTPException(status_code=403, detail={"code": "FORBIDDEN", "message": "Invalid admin token"})
 
 
-async def _get_or_create_user_with_bonus(session: AsyncSession, telegram_id: int) -> User:
+async def _cleanup_expired(session: AsyncSession) -> None:
     """
-    Для invite-онбординга: если пользователя нет — создаём и выдаём 50k total_xp.
+    Лёгкий best-effort cleanup без cron:
+    - истёкшие invites: created -> expired
+    - истёкшие queue: waiting -> expired
+    - истёкшие sessions: active -> expired
+    """
+    now = datetime.now(timezone.utc)
+
+    # invites
+    inv_q = (
+        select(PvpInvite)
+        .where(PvpInvite.status == "created")
+        .where(PvpInvite.expires_at.isnot(None))
+        .where(PvpInvite.expires_at < now)
+        .limit(200)
+    )
+    invs = (await session.execute(inv_q)).scalars().all()
+    for inv in invs:
+        inv.status = "expired"
+    # queue
+    q_q = (
+        select(PvpQueue)
+        .where(PvpQueue.status == "waiting")
+        .where(PvpQueue.expires_at.isnot(None))
+        .where(PvpQueue.expires_at < now)
+        .limit(200)
+    )
+    qs = (await session.execute(q_q)).scalars().all()
+    for q in qs:
+        q.status = "expired"
+    # sessions
+    s_q = (
+        select(PvpSession)
+        .where(PvpSession.status == "active")
+        .where(PvpSession.expires_at.isnot(None))
+        .where(PvpSession.expires_at < now)
+        .limit(200)
+    )
+    ss = (await session.execute(s_q)).scalars().all()
+    for s in ss:
+        s.status = "expired"
+
+    await session.flush()
+
+
+async def _require_registered_user(session: AsyncSession, telegram_id: int) -> User:
+    """
+    ✅ P1: больше НЕ создаём пустых пользователей тут.
+    Если юзера нет — значит не прошёл стандартную регистрацию.
     """
     user = await get_user(session, telegram_id)
-    if user:
-        return user
-
-    user = User(telegram_id=telegram_id, total_xp=PVP_DEFAULT_STAKE)
-    session.add(user)
-    await session.flush()  # нужен user.id
+    if not user:
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "USER_NOT_REGISTERED", "message": "User is not registered. Call /api/user/register first."},
+        )
     return user
 
 
@@ -155,48 +203,53 @@ async def get_config():
 
 @router.post("/live/finish")
 async def live_finish(body: LiveFinishRequest, session: AsyncSession = Depends(get_async_session)):
-    u1 = await get_user(session, body.telegram_id)
-    if not u1:
-        raise HTTPException(status_code=404, detail="User not found")
+    """
+    ✅ Безопасно: финализация только по match_token и только для участников сессии.
+    """
+    await _cleanup_expired(session)
 
-    u2 = await get_user(session, body.opponent_telegram_id)
-    if not u2:
-        raise HTTPException(status_code=404, detail="Opponent not found")
+    u1 = await _require_registered_user(session, body.telegram_id)
+    u2 = await _require_registered_user(session, body.opponent_telegram_id)
 
     try:
-        result = await finish_live_pvp(
+        result = await finish_live_pvp_session(
             session,
-            player1_id=u1.id,
-            player2_id=u2.id,
-            player1_clicks=body.player1_clicks,
-            player2_clicks=body.player2_clicks,
-            stake=body.stake,
+            match_token=body.match_token,
+            requester_user_id=u1.id,
+            opponent_user_id=u2.id,
+            requester_clicks=body.requester_clicks,
+            opponent_clicks=body.opponent_clicks,
+            stake_fixed=PVP_DEFAULT_STAKE,
         )
         await session.commit()
         return {
             "ok": True,
             "match_id": result.match_id,
             "is_draw": result.is_draw,
-            "winner_id": result.winner_id,  # user.id
+            "winner_id": result.winner_id,
             "player1": {
                 "user_id": result.player1_id,
-                "telegram_id": body.telegram_id,
                 "clicks": result.player1_clicks,
                 "coins_delta": result.player1_coins_delta,
                 "total_xp": result.player1_total_xp,
             },
             "player2": {
                 "user_id": result.player2_id,
-                "telegram_id": body.opponent_telegram_id,
                 "clicks": result.player2_clicks,
                 "coins_delta": result.player2_coins_delta,
                 "total_xp": result.player2_total_xp,
             },
             "stake": result.stake,
         }
-    except UserNotFound:
+    except SessionNotFound:
         await session.rollback()
-        raise HTTPException(status_code=404, detail="User not found")
+        raise HTTPException(status_code=404, detail={"code": "SESSION_NOT_FOUND", "message": "Match session not found"})
+    except SessionExpired:
+        await session.rollback()
+        raise HTTPException(status_code=409, detail={"code": "SESSION_EXPIRED", "message": "Match session expired"})
+    except SessionNotActive as e:
+        await session.rollback()
+        raise HTTPException(status_code=409, detail={"code": "SESSION_NOT_ACTIVE", "message": str(e)})
     except InsufficientCoins as e:
         await session.rollback()
         raise HTTPException(status_code=409, detail={"code": "INSUFFICIENT_COINS", "message": str(e)})
@@ -210,13 +263,8 @@ async def live_finish(body: LiveFinishRequest, session: AsyncSession = Depends(g
 
 @router.post("/challenge/run")
 async def challenge_run(body: ChallengeRunRequest, session: AsyncSession = Depends(get_async_session)):
-    challenger = await get_user(session, body.telegram_id)
-    if not challenger:
-        raise HTTPException(status_code=404, detail="User not found")
-
-    opponent = await get_user(session, body.opponent_telegram_id)
-    if not opponent:
-        raise HTTPException(status_code=404, detail="Opponent not found")
+    challenger = await _require_registered_user(session, body.telegram_id)
+    opponent = await _require_registered_user(session, body.opponent_telegram_id)
 
     try:
         result = await run_challenge(
@@ -285,10 +333,7 @@ async def leaderboard(limit: int = 50, session: AsyncSession = Depends(get_async
 
 @router.get("/me")
 async def me(telegram_id: int, session: AsyncSession = Depends(get_async_session)):
-    user = await get_user(session, telegram_id)
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-
+    user = await _require_registered_user(session, telegram_id)
     rank = await get_pvp_rank_for_user(session, user_id=user.id)
 
     return {
@@ -315,9 +360,7 @@ async def challenge_status(
     daily_limit: int = CHALLENGE_DAILY_LIMIT_DEFAULT,
     session: AsyncSession = Depends(get_async_session),
 ):
-    user = await get_user(session, telegram_id)
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
+    user = await _require_registered_user(session, telegram_id)
 
     attempts_today = await count_today_challenge_attempts(session, challenger_id=user.id)
     _, end = baku_day_bounds()
@@ -341,9 +384,7 @@ async def challenge_opponent(
     pct: float = CHALLENGE_RANGE_PCT_DEFAULT,
     session: AsyncSession = Depends(get_async_session),
 ):
-    me_user = await get_user(session, telegram_id)
-    if not me_user:
-        raise HTTPException(status_code=404, detail="User not found")
+    me_user = await _require_registered_user(session, telegram_id)
 
     my_best = int(getattr(me_user, "pvp_best_result", 0) or 0)
     low, high = calc_best_result_range(best_result=my_best, pct=float(pct), min_floor=0)
@@ -410,9 +451,7 @@ async def live_history(
     offset: int = 0,
     session: AsyncSession = Depends(get_async_session),
 ):
-    user = await get_user(session, telegram_id)
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
+    user = await _require_registered_user(session, telegram_id)
 
     limit = max(1, min(limit, 100))
     offset = max(0, offset)
@@ -444,9 +483,7 @@ async def challenge_history(
     offset: int = 0,
     session: AsyncSession = Depends(get_async_session),
 ):
-    user = await get_user(session, telegram_id)
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
+    user = await _require_registered_user(session, telegram_id)
 
     limit = max(1, min(limit, 100))
     offset = max(0, offset)
@@ -475,11 +512,12 @@ async def challenge_history(
 
 @router.post("/invite/create")
 async def invite_create(body: InviteCreateRequest, session: AsyncSession = Depends(get_async_session)):
-    creator = await get_user(session, body.telegram_id)
-    if not creator:
-        raise HTTPException(status_code=404, detail="User not found")
+    await _cleanup_expired(session)
 
-    if body.stake > 0 and int(getattr(creator, "total_xp", 0) or 0) < body.stake:
+    creator = await _require_registered_user(session, body.telegram_id)
+
+    # stake фиксированный 50k, и для создания invite проверяем, что у создателя есть 50k
+    if int(getattr(creator, "total_xp", 0) or 0) < PVP_DEFAULT_STAKE:
         raise HTTPException(status_code=409, detail={"code": "INSUFFICIENT_COINS", "message": "Not enough coins for stake"})
 
     code = _gen_invite_code()
@@ -488,7 +526,7 @@ async def invite_create(body: InviteCreateRequest, session: AsyncSession = Depen
     inv = PvpInvite(
         code=code,
         creator_user_id=creator.id,
-        stake=body.stake,
+        stake=PVP_DEFAULT_STAKE,
         status="created",
         expires_at=expires_at,
     )
@@ -503,7 +541,7 @@ async def invite_create(body: InviteCreateRequest, session: AsyncSession = Depen
     return {
         "ok": True,
         "invite_code": code,
-        "stake": body.stake,
+        "stake": PVP_DEFAULT_STAKE,
         "expires_at": expires_at.isoformat(),
         "start_param": f"pvp_{code}",
     }
@@ -511,48 +549,110 @@ async def invite_create(body: InviteCreateRequest, session: AsyncSession = Depen
 
 @router.get("/invite/status")
 async def invite_status(invite_code: str, session: AsyncSession = Depends(get_async_session)):
+    await _cleanup_expired(session)
+
+    inv = (await session.execute(select(PvpInvite).where(PvpInvite.code == invite_code).limit(1))).scalar_one_or_none()
+
+    if not inv:
+        raise HTTPException(status_code=404, detail={"code": "INVITE_NOT_FOUND", "message": "Invite not found"})
+
+    return {
+        "ok": True,
+        "invite_code": inv.code,
+        "status": inv.status,
+        "stake": int(inv.stake or PVP_DEFAULT_STAKE),
+        "creator_user_id": inv.creator_user_id,
+        "opponent_user_id": inv.opponent_user_id,
+        "expires_at": inv.expires_at.isoformat() if inv.expires_at else None,
+        "accepted_at": inv.accepted_at.isoformat() if inv.accepted_at else None,
+    }
+
+
+@router.post("/invite/accept")
+async def invite_accept(body: InviteAcceptRequest, session: AsyncSession = Depends(get_async_session)):
+    """
+    ✅ При accept создаём PvpSession и выдаём match_token.
+    """
+    await _cleanup_expired(session)
+
+    opponent = await _require_registered_user(session, body.telegram_id)
+
     inv = (
-        await session.execute(select(PvpInvite).where(PvpInvite.code == invite_code).limit(1))
+        await session.execute(
+            select(PvpInvite)
+            .where(PvpInvite.code == body.invite_code)
+            .with_for_update()
+            .limit(1)
+        )
     ).scalar_one_or_none()
 
     if not inv:
         raise HTTPException(status_code=404, detail={"code": "INVITE_NOT_FOUND", "message": "Invite not found"})
 
-    # авто-expire (best effort)
-    if inv.status == "created" and inv.expires_at and inv.expires_at <= datetime.now(timezone.utc):
+    if inv.status != "created":
+        raise HTTPException(status_code=409, detail={"code": "INVITE_NOT_ACTIVE", "message": f"Invite is {inv.status}"})
+
+    if inv.expires_at and inv.expires_at < datetime.now(timezone.utc):
         inv.status = "expired"
-        try:
-            await session.commit()
-        except Exception:
-            await session.rollback()
+        await session.commit()
+        raise HTTPException(status_code=409, detail={"code": "INVITE_EXPIRED", "message": "Invite expired"})
+
+    if inv.creator_user_id == opponent.id:
+        raise HTTPException(status_code=400, detail={"code": "INVALID_PAYLOAD", "message": "Cannot accept own invite"})
+
+    creator = await _require_registered_user(session, telegram_id=int((await session.execute(select(User.telegram_id).where(User.id == inv.creator_user_id))).scalar_one_or_none() or 0))
+    # ↑ safety: если вдруг creator удалён/битый — _require_registered_user отловит.
+
+    # stake фиксированный 50k: проверяем балансы обеих сторон
+    if int(getattr(creator, "total_xp", 0) or 0) < PVP_DEFAULT_STAKE:
+        raise HTTPException(status_code=409, detail={"code": "CREATOR_INSUFFICIENT_COINS", "message": "Creator has not enough coins"})
+    if int(getattr(opponent, "total_xp", 0) or 0) < PVP_DEFAULT_STAKE:
+        raise HTTPException(status_code=409, detail={"code": "OPPONENT_INSUFFICIENT_COINS", "message": "Opponent has not enough coins"})
+
+    inv.status = "accepted"
+    inv.opponent_user_id = opponent.id
+    inv.accepted_at = datetime.now(timezone.utc)
+    inv.stake = PVP_DEFAULT_STAKE
+
+    match_token = _gen_match_token()
+    expires_at = datetime.now(timezone.utc) + timedelta(seconds=(PVP_MATCH_DURATION_SEC + 90))  # окно финализации
+
+    sess = PvpSession(
+        match_token=match_token,
+        mode="invite",
+        status="active",
+        player1_id=inv.creator_user_id,
+        player2_id=opponent.id,
+        stake=PVP_DEFAULT_STAKE,
+        invite_id=inv.id,
+        expires_at=expires_at,
+    )
+    session.add(sess)
+
+    await session.commit()
 
     return {
         "ok": True,
-        "invite": {
-            "code": inv.code,
-            "creator_user_id": inv.creator_user_id,
-            "opponent_user_id": inv.opponent_user_id,
-            "stake": inv.stake,
-            "status": inv.status,
-            "created_at": inv.created_at.isoformat() if inv.created_at else None,
-            "accepted_at": inv.accepted_at.isoformat() if inv.accepted_at else None,
-            "cancelled_at": inv.cancelled_at.isoformat() if inv.cancelled_at else None,
-            "expires_at": inv.expires_at.isoformat() if inv.expires_at else None,
+        "match_token": match_token,
+        "stake": PVP_DEFAULT_STAKE,
+        "expires_at": expires_at.isoformat(),
+        "players": {
+            "player1_user_id": inv.creator_user_id,
+            "player2_user_id": opponent.id,
         },
     }
 
 
 @router.post("/invite/cancel")
 async def invite_cancel(body: InviteCancelRequest, session: AsyncSession = Depends(get_async_session)):
-    user = await get_user(session, body.telegram_id)
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
+    await _cleanup_expired(session)
+
+    user = await _require_registered_user(session, body.telegram_id)
 
     inv = (
         await session.execute(
             select(PvpInvite)
             .where(PvpInvite.code == body.invite_code)
-            .where(PvpInvite.creator_user_id == user.id)
             .with_for_update()
             .limit(1)
         )
@@ -561,294 +661,195 @@ async def invite_cancel(body: InviteCancelRequest, session: AsyncSession = Depen
     if not inv:
         raise HTTPException(status_code=404, detail={"code": "INVITE_NOT_FOUND", "message": "Invite not found"})
 
+    if inv.creator_user_id != user.id:
+        raise HTTPException(status_code=403, detail={"code": "FORBIDDEN", "message": "Not invite creator"})
+
     if inv.status != "created":
-        raise HTTPException(status_code=409, detail={"code": "INVITE_NOT_CANCELLABLE", "message": f"Invite status = {inv.status}"})
+        raise HTTPException(status_code=409, detail={"code": "INVITE_NOT_ACTIVE", "message": f"Invite is {inv.status}"})
 
     inv.status = "cancelled"
     inv.cancelled_at = datetime.now(timezone.utc)
 
-    try:
-        await session.commit()
-    except Exception as e:
-        await session.rollback()
-        raise HTTPException(status_code=500, detail={"code": "INVITE_CANCEL_FAILED", "message": str(e)})
-
-    return {"ok": True, "invite_code": body.invite_code, "status": inv.status}
+    await session.commit()
+    return {"ok": True}
 
 
-@router.post("/invite/accept")
-async def invite_accept(body: InviteAcceptRequest, session: AsyncSession = Depends(get_async_session)):
-    """
-    Invite accept:
-    - если пользователя нет -> создаём и начисляем 50k total_xp (как ты зафиксировал)
-    - проверяем ставку у принимающего
-    - лочим invite, чтобы не приняли дважды
-    """
-    user = await _get_or_create_user_with_bonus(session, body.telegram_id)
+# -----------------------------------------------------------------------------
+# 6) Matchmaking (DB queue)
+# -----------------------------------------------------------------------------
 
-    inv = (
+@router.post("/matchmaking/join")
+async def matchmaking_join(body: MatchmakingJoinRequest, session: AsyncSession = Depends(get_async_session)):
+    await _cleanup_expired(session)
+
+    user = await _require_registered_user(session, body.telegram_id)
+
+    # stake фиксированный 50k: проверка баланса для участия
+    if int(getattr(user, "total_xp", 0) or 0) < PVP_DEFAULT_STAKE:
+        raise HTTPException(status_code=409, detail={"code": "INSUFFICIENT_COINS", "message": "Not enough coins for stake"})
+
+    expires_at = datetime.now(timezone.utc) + timedelta(seconds=body.ttl_seconds)
+
+    stmt = pg_insert(PvpQueue).values(
+        user_id=user.id,
+        stake=PVP_DEFAULT_STAKE,
+        status="waiting",
+        expires_at=expires_at,
+    ).on_conflict_do_update(
+        index_elements=[PvpQueue.user_id],
+        set_={
+            "stake": PVP_DEFAULT_STAKE,
+            "status": "waiting",
+            "matched_user_id": None,
+            "match_token": None,
+            "expires_at": expires_at,
+            "updated_at": func.now(),
+        },
+    )
+
+    await session.execute(stmt)
+    await session.commit()
+
+    return {"ok": True, "status": "waiting", "stake": PVP_DEFAULT_STAKE, "expires_at": expires_at.isoformat()}
+
+
+@router.post("/matchmaking/leave")
+async def matchmaking_leave(body: MatchmakingLeaveRequest, session: AsyncSession = Depends(get_async_session)):
+    await _cleanup_expired(session)
+
+    user = await _require_registered_user(session, body.telegram_id)
+
+    q = (
         await session.execute(
-            select(PvpInvite)
-            .where(PvpInvite.code == body.invite_code)
+            select(PvpQueue)
+            .where(PvpQueue.user_id == user.id)
             .with_for_update()
             .limit(1)
         )
     ).scalar_one_or_none()
 
-    if not inv:
-        await session.rollback()
-        raise HTTPException(status_code=404, detail={"code": "INVITE_NOT_FOUND", "message": "Invite not found"})
-
-    if inv.status != "created":
-        await session.rollback()
-        raise HTTPException(status_code=409, detail={"code": "INVITE_NOT_ACTIVE", "message": f"Invite status = {inv.status}"})
-
-    if inv.expires_at and inv.expires_at <= datetime.now(timezone.utc):
-        inv.status = "expired"
-        await session.commit()
-        raise HTTPException(status_code=409, detail={"code": "INVITE_EXPIRED", "message": "Invite expired"})
-
-    stake = int(inv.stake or 0)
-
-    if stake > 0 and int(getattr(user, "total_xp", 0) or 0) < stake:
-        await session.rollback()
-        raise HTTPException(status_code=409, detail={"code": "INSUFFICIENT_COINS", "message": "Not enough coins to accept stake"})
-
-    inv.opponent_user_id = user.id
-    inv.status = "accepted"
-    inv.accepted_at = datetime.now(timezone.utc)
-
-    try:
-        await session.commit()
-    except Exception as e:
-        await session.rollback()
-        raise HTTPException(status_code=500, detail={"code": "INVITE_ACCEPT_FAILED", "message": str(e)})
-
-    return {
-        "ok": True,
-        "invite_code": body.invite_code,
-        "stake": stake,
-        "creator_user_id": inv.creator_user_id,
-        "opponent_user_id": user.id,
-        "match_duration_sec": PVP_MATCH_DURATION_SEC,
-    }
-
-
-# -----------------------------------------------------------------------------
-# 6) Matchmaking queue (ORM + UPSERT + SKIP LOCKED)
-# -----------------------------------------------------------------------------
-
-@router.post("/matchmaking/join")
-async def matchmaking_join(body: MatchmakingJoinRequest, session: AsyncSession = Depends(get_async_session)):
-    user = await get_user(session, body.telegram_id)
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-
-    if body.stake > 0 and int(getattr(user, "total_xp", 0) or 0) < body.stake:
-        raise HTTPException(status_code=409, detail={"code": "INSUFFICIENT_COINS", "message": "Not enough coins for stake"})
-
-    # TTL мы храним только как информацию на фронт (таблица не имеет expires_at),
-    # очистку "старых" waiting можно делать позже отдельным джобом/эндпоинтом.
-    expires_at = datetime.now(timezone.utc) + timedelta(seconds=body.ttl_seconds)
-
-    stmt = pg_insert(PvpQueue).values(
-        user_id=user.id,
-        stake=body.stake,
-        status="waiting",
-        matched_user_id=None,
-        match_token=None,
-    ).on_conflict_do_update(
-        index_elements=[PvpQueue.user_id],
-        set_={
-            "stake": body.stake,
-            "status": "waiting",
-            "matched_user_id": None,
-            "match_token": None,
-            "updated_at": func.now(),
-        },
-    )
-
-    try:
-        await session.execute(stmt)
-        await session.commit()
-        return {
-            "ok": True,
-            "status": "waiting",
-            "stake": body.stake,
-            "expires_at": expires_at.isoformat(),
-            "poll_hint_seconds": 1,
-        }
-    except Exception as e:
-        await session.rollback()
-        raise HTTPException(status_code=500, detail={"code": "MATCHMAKING_JOIN_FAILED", "message": str(e)})
-
-
-@router.post("/matchmaking/leave")
-async def matchmaking_leave(body: MatchmakingLeaveRequest, session: AsyncSession = Depends(get_async_session)):
-    user = await get_user(session, body.telegram_id)
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-
-    try:
-        q = (
-            await session.execute(
-                select(PvpQueue).where(PvpQueue.user_id == user.id).limit(1)
-            )
-        ).scalar_one_or_none()
-
-        if q and q.status == "waiting":
-            await session.delete(q)
-
-        await session.commit()
+    if not q:
         return {"ok": True, "status": "left"}
-    except Exception as e:
-        await session.rollback()
-        raise HTTPException(status_code=500, detail={"code": "MATCHMAKING_LEAVE_FAILED", "message": str(e)})
+
+    q.status = "left"
+    q.matched_user_id = None
+    q.match_token = None
+    await session.commit()
+    return {"ok": True, "status": "left"}
 
 
 @router.post("/matchmaking/poll")
 async def matchmaking_poll(telegram_id: int, session: AsyncSession = Depends(get_async_session)):
     """
-    Poll:
-    - если уже matched -> вернуть opponent + match_token
-    - если waiting -> попытаться сматчить с другим waiting:
-        SELECT ... FOR UPDATE SKIP LOCKED
+    Возвращает:
+    - waiting: если пары нет
+    - matched: если пара найдена (возвращаем match_token)
     """
-    me_user = await get_user(session, telegram_id)
-    if not me_user:
-        raise HTTPException(status_code=404, detail="User not found")
+    await _cleanup_expired(session)
 
-    try:
-        me_q = (
-            await session.execute(select(PvpQueue).where(PvpQueue.user_id == me_user.id).limit(1))
-        ).scalar_one_or_none()
+    me = await _require_registered_user(session, telegram_id)
 
-        if not me_q:
-            return {"ok": True, "status": "not_in_queue"}
+    # если я уже matched — отдадим токен
+    my_row = (
+        await session.execute(
+            select(PvpQueue).where(PvpQueue.user_id == me.id).limit(1)
+        )
+    ).scalar_one_or_none()
 
-        if me_q.status == "matched" and me_q.matched_user_id and me_q.match_token:
-            opp = (
-                await session.execute(select(User).where(User.id == me_q.matched_user_id).limit(1))
-            ).scalar_one_or_none()
-
-            return {
-                "ok": True,
-                "status": "matched",
-                "stake": int(me_q.stake or 0),
-                "match_token": me_q.match_token,
-                "opponent": {
-                    "user_id": me_q.matched_user_id,
-                    "telegram_id": int(opp.telegram_id) if opp else None,
-                    "username": opp.username if opp else None,
-                    "first_name": opp.first_name if opp else None,
-                    "last_name": opp.last_name if opp else None,
-                },
-                "match_duration_sec": PVP_MATCH_DURATION_SEC,
-            }
-
-        if me_q.status != "waiting":
-            return {"ok": True, "status": me_q.status}
-
-        # lock my row
-        me_locked = (
-            await session.execute(
-                select(PvpQueue)
-                .where(PvpQueue.user_id == me_user.id)
-                .where(PvpQueue.status == "waiting")
-                .with_for_update()
-                .limit(1)
-            )
-        ).scalar_one_or_none()
-        if not me_locked:
-            await session.commit()
-            return {"ok": True, "status": "waiting"}
-
-        # find candidate (skip locked)
-        cand = (
-            await session.execute(
-                select(PvpQueue)
-                .where(PvpQueue.status == "waiting")
-                .where(PvpQueue.user_id != me_user.id)
-                .order_by(PvpQueue.created_at.asc())
-                .with_for_update(skip_locked=True)
-                .limit(1)
-            )
-        ).scalar_one_or_none()
-
-        if not cand:
-            await session.commit()
-            return {"ok": True, "status": "waiting"}
-
-        match_token = secrets.token_urlsafe(12)
-
-        # stake strategy: use my stake (как было)
-        stake = int(me_locked.stake or 0)
-
-        me_locked.status = "matched"
-        me_locked.matched_user_id = cand.user_id
-        me_locked.match_token = match_token
-
-        cand.status = "matched"
-        cand.matched_user_id = me_user.id
-        cand.match_token = match_token
-
-        opp_user = (
-            await session.execute(select(User).where(User.id == cand.user_id).limit(1))
-        ).scalar_one_or_none()
-
-        await session.commit()
-
+    if my_row and my_row.status == "matched" and my_row.match_token:
         return {
             "ok": True,
             "status": "matched",
-            "stake": stake,
-            "match_token": match_token,
-            "opponent": {
-                "user_id": cand.user_id,
-                "telegram_id": int(opp_user.telegram_id) if opp_user else None,
-                "username": opp_user.username if opp_user else None,
-                "first_name": opp_user.first_name if opp_user else None,
-                "last_name": opp_user.last_name if opp_user else None,
-            },
+            "match_token": my_row.match_token,
+            "opponent_user_id": my_row.matched_user_id,
+            "stake": PVP_DEFAULT_STAKE,
             "match_duration_sec": PVP_MATCH_DURATION_SEC,
         }
 
-    except Exception as e:
-        await session.rollback()
-        raise HTTPException(status_code=500, detail={"code": "MATCHMAKING_POLL_FAILED", "message": str(e)})
+    # если меня нет в очереди — считаем что не join
+    if not my_row or my_row.status not in ("waiting", "matched"):
+        return {"ok": True, "status": "not_in_queue"}
 
+    # Лочим мою строку (я waiting)
+    my_locked = (
+        await session.execute(
+            select(PvpQueue)
+            .where(PvpQueue.user_id == me.id)
+            .with_for_update()
+            .limit(1)
+        )
+    ).scalar_one_or_none()
 
-# -----------------------------------------------------------------------------
-# 7) Weekly reset admin
-# -----------------------------------------------------------------------------
-
-@router.get("/admin/reset-preview")
-async def reset_preview(x_admin_token: Optional[str] = Header(default=None), session: AsyncSession = Depends(get_async_session)):
-    _require_admin(x_admin_token)
-
-    users = await get_pvp_leaderboard_top(session, limit=5)
-    sample = [
-        {
-            "user_id": u.id,
-            "telegram_id": int(u.telegram_id),
-            "pvp_victories": int(getattr(u, "pvp_victories", 0) or 0),
-            "pvp_best_result": int(getattr(u, "pvp_best_result", 0) or 0),
-        }
-        for u in users
-    ]
-
-    return {"ok": True, "top_sample": sample}
-
-
-@router.post("/admin/reset-week")
-async def reset_week(x_admin_token: Optional[str] = Header(default=None), session: AsyncSession = Depends(get_async_session)):
-    _require_admin(x_admin_token)
-
-    try:
-        affected = await reset_weekly_pvp_victories_for_all(session)
+    if not my_locked or my_locked.status != "waiting":
         await session.commit()
-        return {"ok": True, "reset": True, "affected_rows": affected}
-    except Exception as e:
-        await session.rollback()
-        raise HTTPException(status_code=500, detail={"code": "RESET_FAILED", "message": str(e)})
+        return {"ok": True, "status": "waiting"}
+
+    # Ищем кандидата: waiting, не я, не истёк, stake фиксированный
+    now = datetime.now(timezone.utc)
+    cand_q = (
+        select(PvpQueue)
+        .where(PvpQueue.status == "waiting")
+        .where(PvpQueue.user_id != me.id)
+        .where(PvpQueue.stake == PVP_DEFAULT_STAKE)
+        .where(and_(PvpQueue.expires_at.is_(None), True) | (PvpQueue.expires_at >= now))
+        .order_by(PvpQueue.updated_at.asc())
+        .with_for_update(skip_locked=True)
+        .limit(1)
+    )
+    candidate = (await session.execute(cand_q)).scalar_one_or_none()
+
+    if not candidate:
+        await session.commit()
+        return {"ok": True, "status": "waiting"}
+
+    # Матчим
+    token = _gen_match_token()
+    my_locked.status = "matched"
+    my_locked.matched_user_id = candidate.user_id
+    my_locked.match_token = token
+
+    candidate.status = "matched"
+    candidate.matched_user_id = my_locked.user_id
+    candidate.match_token = token
+
+    # Создаём сессию (валидная основа для finish)
+    expires_at = datetime.now(timezone.utc) + timedelta(seconds=(PVP_MATCH_DURATION_SEC + 90))
+    sess = PvpSession(
+        match_token=token,
+        mode="matchmaking",
+        status="active",
+        player1_id=my_locked.user_id,
+        player2_id=candidate.user_id,
+        stake=PVP_DEFAULT_STAKE,
+        expires_at=expires_at,
+    )
+    session.add(sess)
+
+    await session.commit()
+
+    return {
+        "ok": True,
+        "status": "matched",
+        "match_token": token,
+        "opponent_user_id": int(candidate.user_id),
+        "stake": PVP_DEFAULT_STAKE,
+        "expires_at": expires_at.isoformat(),
+        "match_duration_sec": PVP_MATCH_DURATION_SEC,
+    }
+
+
+# -----------------------------------------------------------------------------
+# 7) Admin weekly reset
+# -----------------------------------------------------------------------------
+
+@router.post("/admin/reset-weekly")
+async def admin_reset_weekly(
+    x_admin_token: Optional[str] = Header(default=None),
+    session: AsyncSession = Depends(get_async_session),
+):
+    _require_admin(x_admin_token)
+    await reset_weekly_pvp_victories_for_all(session)
+    await session.commit()
+    return {"ok": True}
+
 
