@@ -27,7 +27,12 @@ class PvpFinalizeResult:
     stake: int
 
 
-def _resolve_pvp_winner(player1_id: int, player2_id: int, player1_clicks: int, player2_clicks: int) -> Tuple[bool, Optional[int], Optional[int]]:
+def _resolve_pvp_winner(
+    player1_id: int,
+    player2_id: int,
+    player1_clicks: int,
+    player2_clicks: int,
+) -> Tuple[bool, Optional[int], Optional[int]]:
     """
     Возвращает (is_draw, winner_id, loser_id)
     """
@@ -51,12 +56,12 @@ async def create_pvp_match(
     player2_id: int,
     player1_clicks: int,
     player2_clicks: int,
-    stake: int = 50000,
+    stake: int,
 ) -> PvpMatch:
     """
-    Создаёт запись PvP-матча (история). Тут же фиксируем победителя/ничью.
-    Награды/списания монет — отдельной логикой (обычно в сервисе), но
-    победы и best_result можно обновлять тут.
+    Создаёт запись pvp_matches и обновляет у пользователей:
+    - pvp_victories (+2 победителю)
+    - pvp_best_result (максимум кликов)
     """
     is_draw, winner_id, loser_id = _resolve_pvp_winner(
         player1_id=player1_id,
@@ -71,19 +76,18 @@ async def create_pvp_match(
         player1_clicks=player1_clicks,
         player2_clicks=player2_clicks,
         stake=stake,
-        winner_id=winner_id,
         is_draw=is_draw,
+        winner_id=winner_id,
     )
-
     session.add(match)
 
-    # Обновление best_result обоих игроков (постоянный рекорд)
-    await _update_best_result(session, user_id=player1_id, new_result=player1_clicks)
-    await _update_best_result(session, user_id=player2_id, new_result=player2_clicks)
-
-    # Победы: PvP Live = +2 победы победителю, ничья = 0
+    # Update stats (victories/best_result)
     if not is_draw and winner_id is not None:
         await _add_victories(session, user_id=winner_id, delta=2)
+
+    # best_result для обоих игроков
+    await _update_best_result(session, user_id=player1_id, candidate=player1_clicks)
+    await _update_best_result(session, user_id=player2_id, candidate=player2_clicks)
 
     await session.flush()
     return match
@@ -110,6 +114,19 @@ async def list_recent_pvp_matches_for_user(
     return list(res.scalars().all())
 
 
+# Compatibility aliases (used by routers/pvp.py)
+async def list_recent_pvp_matches(
+    session: AsyncSession,
+    *,
+    user_id: int,
+    limit: int = 20,
+) -> List[PvpMatch]:
+    """
+    Backward-compatible name expected by routers.
+    """
+    return await list_recent_pvp_matches_for_user(session, user_id=user_id, limit=limit, offset=0)
+
+
 async def get_pvp_match_by_id(session: AsyncSession, match_id: int) -> Optional[PvpMatch]:
     q = select(PvpMatch).where(PvpMatch.id == match_id)
     res = await session.execute(q)
@@ -129,8 +146,9 @@ async def create_challenge_match(
     opponent_best_result: int,
 ) -> ChallengeMatch:
     """
-    Создаёт запись Challenge-матча и, если победа, начисляет +1 победу.
-    best_result челленджера обновляем по факту кликов (постоянный рекорд).
+    Создаёт запись challenge_matches и обновляет у challenger:
+    - pvp_victories (+1 при победе)
+    - pvp_best_result (кандидат = challenger_clicks)
     """
     is_win = challenger_clicks > opponent_best_result
 
@@ -143,12 +161,10 @@ async def create_challenge_match(
     )
     session.add(match)
 
-    # best_result челленджера — постоянный рекорд
-    await _update_best_result(session, user_id=challenger_id, new_result=challenger_clicks)
-
-    # Победы: Challenge = +1 победа только при win
     if is_win:
         await _add_victories(session, user_id=challenger_id, delta=1)
+
+    await _update_best_result(session, user_id=challenger_id, candidate=challenger_clicks)
 
     await session.flush()
     return match
@@ -175,6 +191,25 @@ async def list_recent_challenge_matches_for_user(
     return list(res.scalars().all())
 
 
+async def list_recent_challenge_matches(
+    session: AsyncSession,
+    *,
+    challenger_id: int,
+    limit: int = 20,
+) -> List[ChallengeMatch]:
+    """
+    Backward-compatible helper expected by routers: returns matches where the user is challenger.
+    """
+    q = (
+        select(ChallengeMatch)
+        .where(ChallengeMatch.challenger_id == challenger_id)
+        .order_by(desc(ChallengeMatch.created_at))
+        .limit(limit)
+    )
+    res = await session.execute(q)
+    return list(res.scalars().all())
+
+
 async def count_today_challenge_attempts(
     session: AsyncSession,
     *,
@@ -182,46 +217,37 @@ async def count_today_challenge_attempts(
     tz: str = "Asia/Baku",
 ) -> int:
     """
-    Считает количество Challenge запусков за "сегодня" (по Баку).
-    Лимит 5/день — проверяй этим методом в сервисе/эндпоинте.
-
-    Реализация через date_trunc с таймзоной на стороне Postgres.
+    Считает количество запусков Challenge за "сегодня" для challenger_id.
+    Важно: tz оставлен как было (если у тебя использовался elsewhere).
     """
-    # created_at у нас timestamptz, поэтому считаем границы дня в TZ
-    # start_of_day = date_trunc('day', now() at time zone 'Asia/Baku') interpreted as timestamp without tz,
-    # then back to timestamptz via timezone().
-    start_of_day = func.timezone(
-        tz,
-        func.date_trunc("day", func.timezone(tz, func.now()))
-    )
-    # end = start + 1 day
-    end_of_day = start_of_day + func.make_interval(days=1)
+    # Берём границы суток в UTC, используя timezone в Postgres.
+    # Упрощённо: считаем в tz через now() AT TIME ZONE.
+    # Если захочешь строго по AZ (UTC+4) — у тебя это уже есть в helpers.
+    q = select(func.count(ChallengeMatch.id)).where(ChallengeMatch.challenger_id == challenger_id)
 
-    q = (
-        select(func.count(ChallengeMatch.id))
-        .where(ChallengeMatch.challenger_id == challenger_id)
-        .where(ChallengeMatch.created_at >= start_of_day)
-        .where(ChallengeMatch.created_at < end_of_day)
-    )
+    # Ограничение по дню: created_at >= start_of_day && < next_day
+    # Используем timezone(tz, now()) чтобы получить локальный "сейчас", затем date_trunc('day', ...)
+    start_local = func.date_trunc("day", func.timezone(tz, func.now()))
+    end_local = start_local + func.make_interval(0, 0, 0, 1)  # +1 day
+
+    q = q.where(func.timezone(tz, ChallengeMatch.created_at) >= start_local)
+    q = q.where(func.timezone(tz, ChallengeMatch.created_at) < end_local)
+
     res = await session.execute(q)
     return int(res.scalar_one() or 0)
 
 
 # ----------------------------
-# Leaderboard / рейтинги
+# Leaderboard / Rank
 # ----------------------------
 
-async def get_pvp_leaderboard_top(
-    session: AsyncSession,
-    *,
-    limit: int = 50,
-) -> List[User]:
+async def get_pvp_leaderboard_top(session: AsyncSession, *, limit: int = 10) -> List[User]:
     """
-    Топ пользователей по pvp_victories (weekly).
+    ТОП по pvp_victories, затем best_result.
     """
     q = (
         select(User)
-        .order_by(desc(User.pvp_victories), desc(User.pvp_best_result), desc(User.total_xp), User.id.asc())
+        .order_by(desc(func.coalesce(User.pvp_victories, 0)), desc(func.coalesce(User.pvp_best_result, 0)))
         .limit(limit)
     )
     res = await session.execute(q)
@@ -230,27 +256,37 @@ async def get_pvp_leaderboard_top(
 
 async def get_pvp_rank_for_user(session: AsyncSession, *, user_id: int) -> Optional[int]:
     """
-    Возвращает место пользователя в общем рейтинге (1..N) по pvp_victories.
-    Делает ранжирование на стороне БД (window function).
+    Ранг пользователя среди всех по pvp_victories, затем best_result.
+    Возвращает 1..N или None если user не найден.
     """
-    ranked = (
-        select(
-            User.id.label("user_id"),
-            func.rank().over(
-                order_by=(desc(User.pvp_victories), desc(User.pvp_best_result), desc(User.total_xp), User.id.asc())
-            ).label("rnk"),
-        )
-        .subquery()
-    )
+    # Подтверждаем что user есть
+    u = (await session.execute(select(User.id).where(User.id == user_id))).scalar_one_or_none()
+    if not u:
+        return None
 
-    q = select(ranked.c.rnk).where(ranked.c.user_id == user_id)
-    res = await session.execute(q)
-    rnk = res.scalar_one_or_none()
-    return int(rnk) if rnk is not None else None
+    # Ранг = 1 + количество пользователей, у которых (victories, best) строго больше
+    me_q = select(func.coalesce(User.pvp_victories, 0), func.coalesce(User.pvp_best_result, 0)).where(User.id == user_id)
+    me_row = (await session.execute(me_q)).first()
+    if not me_row:
+        return None
+
+    my_v, my_best = int(me_row[0] or 0), int(me_row[1] or 0)
+
+    better_q = select(func.count(User.id)).where(
+        or_(
+            func.coalesce(User.pvp_victories, 0) > my_v,
+            func.and_(
+                func.coalesce(User.pvp_victories, 0) == my_v,
+                func.coalesce(User.pvp_best_result, 0) > my_best,
+            ),
+        )
+    )
+    better = int((await session.execute(better_q)).scalar_one() or 0)
+    return better + 1
 
 
 # ----------------------------
-# Weekly reset (victories only)
+# Weekly reset
 # ----------------------------
 
 async def reset_weekly_pvp_victories_for_all(session: AsyncSession) -> int:
@@ -258,46 +294,32 @@ async def reset_weekly_pvp_victories_for_all(session: AsyncSession) -> int:
     Сбрасывает pvp_victories у всех пользователей.
     Возвращает количество затронутых строк.
     """
-    from sqlalchemy import update
-
-    q = update(User).values(pvp_victories=0)
-    res = await session.execute(q)
-    # res.rowcount может быть None в некоторых драйверах; возвращаем 0 если так
-    return int(res.rowcount or 0)
+    res = await session.execute(
+        User.__table__.update().values(pvp_victories=0)  # type: ignore
+    )
+    await session.flush()
+    return int(getattr(res, "rowcount", 0) or 0)
 
 
 # ----------------------------
-# Internal user updates
+# Internal update helpers
 # ----------------------------
 
 async def _add_victories(session: AsyncSession, *, user_id: int, delta: int) -> None:
-    """
-    pvp_victories += delta
-    """
-    from sqlalchemy import update
-
-    q = (
-        update(User)
+    await session.execute(
+        User.__table__
+        .update()
         .where(User.id == user_id)
-        .values(pvp_victories=User.pvp_victories + delta)
+        .values(pvp_victories=func.coalesce(User.pvp_victories, 0) + int(delta))  # type: ignore
     )
-    await session.execute(q)
 
 
-async def _update_best_result(session: AsyncSession, *, user_id: int, new_result: int) -> None:
-    """
-    pvp_best_result = max(pvp_best_result, new_result)
-    """
-    from sqlalchemy import update, case
-
-    q = (
-        update(User)
+async def _update_best_result(session: AsyncSession, *, user_id: int, candidate: int) -> None:
+    # best = max(best, candidate)
+    await session.execute(
+        User.__table__
+        .update()
         .where(User.id == user_id)
-        .values(
-            pvp_best_result=case(
-                (User.pvp_best_result < new_result, new_result),
-                else_=User.pvp_best_result,
-            )
-        )
+        .values(pvp_best_result=func.greatest(func.coalesce(User.pvp_best_result, 0), int(candidate)))  # type: ignore
     )
-    await session.execute(q)
+
