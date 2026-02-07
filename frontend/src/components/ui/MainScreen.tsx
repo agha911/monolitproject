@@ -4,11 +4,12 @@ import Tasks from './Tasks';
 import Friends from './Friends';
 import NavigationTabs from './NavigationTabs';
 import Shop from './Shop';
-// import Tournament from './Tournament'; // ❌ больше не используем
-import Governance from './Governance';     // ✅ новая страница
+// import Governance from './Governance'; // ⛔ временно отключили (можно включить обратно)
+import Pvp from './Pvp'; // ✅ новая страница PvP
 import LanguageSwitcher from './LanguageSwitcher';
 
-type Tab = 'home' | 'tasks' | 'friends' | 'shop' | 'governance';
+type Tab = 'home' | 'tasks' | 'friends' | 'shop' | 'pvp'; 
+// | 'governance'; // ⛔ вернуть обратно при необходимости
 
 const MainScreen: React.FC = () => {
   const [activeTab, setActiveTab] = useState<Tab>('home');
@@ -21,7 +22,9 @@ const MainScreen: React.FC = () => {
       {activeTab === 'tasks' && <Tasks />}
       {activeTab === 'friends' && <Friends />}
       {activeTab === 'shop' && <Shop />}
-      {activeTab === 'governance' && <Governance />}{/* ✅ рендер новой страницы */}
+      {activeTab === 'pvp' && <Pvp />}
+
+      {/* {activeTab === 'governance' && <Governance />} */}{/* ⛔ отключено */}
 
       <NavigationTabs activeTab={activeTab} setActiveTab={setActiveTab} />
     </div>
@@ -29,4 +32,5 @@ const MainScreen: React.FC = () => {
 };
 
 export default MainScreen;
+
 
