@@ -17,14 +17,10 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import relationship
 
-# ВАЖНО: используем тот же Base, что и User
 from app.database import Base
 
 
 class PvpMatch(Base):
-    """
-    PvP Live матч (история): 2 игрока, ставка, клики, победитель или ничья.
-    """
     __tablename__ = "pvp_matches"
 
     id = Column(Integer, primary_key=True)
@@ -37,7 +33,6 @@ class PvpMatch(Base):
 
     stake = Column(Integer, nullable=False, default=50000)
 
-    # winner_id = NULL если ничья
     winner_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
     is_draw = Column(Boolean, nullable=False, default=False)
 
@@ -52,17 +47,12 @@ class PvpMatch(Base):
         CheckConstraint("player2_clicks >= 0", name="ck_pvp_matches_player2_clicks_nonneg"),
         CheckConstraint("stake >= 0", name="ck_pvp_matches_stake_nonneg"),
         CheckConstraint("player1_id <> player2_id", name="ck_pvp_matches_players_not_equal"),
-        # Если ничья — winner_id должен быть NULL
         CheckConstraint("(is_draw = false) OR (winner_id IS NULL)", name="ck_pvp_matches_draw_winner_null"),
         Index("ix_pvp_matches_players_pair_created", "player1_id", "player2_id", "created_at"),
     )
 
 
 class ChallengeMatch(Base):
-    """
-    Challenge матч (асинхрон): игрок против best_result оппонента.
-    Без ставок. Победа = +1 victory (логикой), лимит 5/день (логикой).
-    """
     __tablename__ = "challenge_matches"
 
     id = Column(Integer, primary_key=True)
@@ -89,11 +79,6 @@ class ChallengeMatch(Base):
 
 
 class PvpInvite(Base):
-    """
-    Инвайт на PvP-дуэль по ссылке.
-    Жизненный цикл:
-      created -> accepted | cancelled | expired
-    """
     __tablename__ = "pvp_invites"
 
     id = Column(Integer, primary_key=True)
@@ -128,13 +113,6 @@ class PvpInvite(Base):
 
 
 class PvpQueue(Base):
-    """
-    Очередь матчмейкинга PvP Live без Redis.
-
-    - user_id уникален (1 заявка на пользователя)
-    - status: waiting | matched | left | expired
-    - matched_user_id + match_token проставляются при подборе
-    """
     __tablename__ = "pvp_queue"
 
     id = Column(Integer, primary_key=True)
@@ -148,6 +126,9 @@ class PvpQueue(Base):
 
     matched_user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
     match_token = Column(String(128), nullable=True, index=True)
+
+    # ✅ используется в join/poll/cleanup
+    expires_at = Column(DateTime(timezone=True), nullable=True, index=True)
 
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), index=True)
     updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now(), index=True)
@@ -172,17 +153,11 @@ class PvpQueue(Base):
         ),
         Index("ix_pvp_queue_status_created_at", "status", "created_at"),
         Index("ix_pvp_queue_status_updated_at", "status", "updated_at"),
+        Index("ix_pvp_queue_status_expires_at", "status", "expires_at"),
     )
 
 
 class PvpSession(Base):
-    """
-    Сессия матча (R0/R1 защита):
-    фиксирует активный матч по match_token, чтобы:
-    - нельзя было "finish" без созданной/активной сессии
-    - нельзя было "finish" два раза
-    - можно было хранить expires_at (expires_at + duration)
-    """
     __tablename__ = "pvp_sessions"
 
     id = Column(Integer, primary_key=True)
@@ -194,6 +169,12 @@ class PvpSession(Base):
 
     stake = Column(Integer, nullable=False, default=50000)
 
+    # ✅ роутер создаёт sess(mode="invite"/"matchmaking")
+    mode = Column(String(16), nullable=True, index=True)
+
+    # ✅ роутер создаёт sess(invite_id=inv.id) для invite flow
+    invite_id = Column(Integer, ForeignKey("pvp_invites.id", ondelete="SET NULL"), nullable=True, index=True)
+
     # status: active | finished | expired | cancelled
     status = Column(String(16), nullable=False, default="active", index=True)
 
@@ -204,6 +185,8 @@ class PvpSession(Base):
     player1 = relationship("User", foreign_keys=[player1_id], lazy="joined")
     player2 = relationship("User", foreign_keys=[player2_id], lazy="joined")
 
+    invite = relationship("PvpInvite", foreign_keys=[invite_id], lazy="joined")
+
     __table_args__ = (
         UniqueConstraint("match_token", name="uq_pvp_sessions_match_token"),
         CheckConstraint("stake >= 0", name="ck_pvp_sessions_stake_nonneg"),
@@ -211,6 +194,10 @@ class PvpSession(Base):
         CheckConstraint(
             "status IN ('active','finished','expired','cancelled')",
             name="ck_pvp_sessions_status_allowed",
+        ),
+        CheckConstraint(
+            "(mode IS NULL) OR (mode IN ('invite','matchmaking'))",
+            name="ck_pvp_sessions_mode_allowed",
         ),
         Index("ix_pvp_sessions_status_created_at", "status", "created_at"),
         Index("ix_pvp_sessions_status_expires_at", "status", "expires_at"),
