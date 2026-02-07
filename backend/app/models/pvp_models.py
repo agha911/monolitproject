@@ -1,216 +1,360 @@
-# backend/app/models/pvp_models.py
-# PvP/Challenge + state tables (invites, matchmaking queue, sessions)
+# backend/app/services/pvp_service.py
 
-from sqlalchemy import (
-    Boolean,
-    CheckConstraint,
-    Column,
-    DateTime,
-    ForeignKey,
-    Integer,
-    Index,
-    String,
-    UniqueConstraint,
-    func,
+from __future__ import annotations
+
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from typing import Optional
+
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
+
+from app.models.user import User
+from app.models.pvp_models import PvpSession
+
+from app.crud.crud_pvp import (
+    create_pvp_match,
+    create_challenge_match,
+    count_today_challenge_attempts,
 )
-from sqlalchemy.orm import relationship
 
-# ✅ Унифицируем Base: используем тот же Base, что и User
-from app.database import Base
+from app.helpers.pvp_helpers import (
+    resolve_pvp_outcome,
+    calc_pvp_payout,
+    resolve_challenge_outcome,
+)
 
 
-class PvpMatch(Base):
-    __tablename__ = "pvp_matches"
+@dataclass(frozen=True)
+class LivePvpResult:
+    match_id: int
+    is_draw: bool
+    winner_id: Optional[int]
+    player1_id: int
+    player2_id: int
+    player1_clicks: int
+    player2_clicks: int
+    stake: int
+    player1_coins_delta: int
+    player2_coins_delta: int
+    player1_total_xp: int
+    player2_total_xp: int
 
-    id = Column(Integer, primary_key=True)
 
-    player1_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
-    player2_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+@dataclass(frozen=True)
+class ChallengeResult:
+    match_id: int
+    challenger_id: int
+    opponent_id: int
+    challenger_clicks: int
+    opponent_best_result: int
+    is_win: bool
+    victories_delta: int
+    challenger_total_xp: int
+    challenger_best_result: int
 
-    player1_clicks = Column(Integer, nullable=False)
-    player2_clicks = Column(Integer, nullable=False)
 
-    stake = Column(Integer, nullable=False, default=50000)
+class PvpError(Exception):
+    code: str = "pvp_error"
 
-    winner_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
-    is_draw = Column(Boolean, nullable=False, default=False)
 
-    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), index=True)
+class UserNotFound(PvpError):
+    code = "pvp_user_not_found"
 
-    player1 = relationship("User", foreign_keys=[player1_id], lazy="joined")
-    player2 = relationship("User", foreign_keys=[player2_id], lazy="joined")
-    winner = relationship("User", foreign_keys=[winner_id], lazy="joined")
 
-    __table_args__ = (
-        CheckConstraint("player1_clicks >= 0", name="ck_pvp_matches_player1_clicks_nonneg"),
-        CheckConstraint("player2_clicks >= 0", name="ck_pvp_matches_player2_clicks_nonneg"),
-        CheckConstraint("stake >= 0", name="ck_pvp_matches_stake_nonneg"),
-        CheckConstraint("player1_id <> player2_id", name="ck_pvp_matches_players_not_equal"),
-        CheckConstraint("(is_draw = false) OR (winner_id IS NULL)", name="ck_pvp_matches_draw_winner_null"),
-        Index("ix_pvp_matches_players_pair_created", "player1_id", "player2_id", "created_at"),
+class InsufficientCoins(PvpError):
+    code = "pvp_insufficient_coins"
+
+
+class ChallengeLimitExceeded(PvpError):
+    code = "challenge_limit_exceeded"
+
+
+class InvalidPayload(PvpError):
+    code = "pvp_invalid_payload"
+
+
+class SessionNotFound(PvpError):
+    code = "pvp_session_not_found"
+
+
+class SessionNotActive(PvpError):
+    code = "pvp_session_not_active"
+
+
+class SessionExpired(PvpError):
+    code = "pvp_session_expired"
+
+
+async def _get_user_for_update(session: AsyncSession, user_id: int) -> User:
+    q = select(User).where(User.id == user_id).with_for_update()
+    res = await session.execute(q)
+    user = res.scalar_one_or_none()
+    if not user:
+        raise UserNotFound(f"User not found: {user_id}")
+    return user
+
+
+async def _get_session_for_update(session: AsyncSession, match_token: str) -> PvpSession:
+    q = (
+        select(PvpSession)
+        .where(PvpSession.match_token == match_token)
+        .with_for_update()
+        .limit(1)
+    )
+    res = await session.execute(q)
+    s = res.scalar_one_or_none()
+    if not s:
+        raise SessionNotFound("Session not found")
+    return s
+
+
+def _calc_coin_deltas_from_stored(winner_id: Optional[int], is_draw: bool, p1_id: int, p2_id: int, stake: int) -> tuple[int, int]:
+    # PvP Live: win = +stake / -stake, draw = 0/0
+    if is_draw or winner_id is None:
+        return 0, 0
+    if winner_id == p1_id:
+        return stake, -stake
+    if winner_id == p2_id:
+        return -stake, stake
+    # fallback
+    return 0, 0
+
+
+async def finish_live_pvp(
+    session: AsyncSession,
+    *,
+    player1_id: int,
+    player2_id: int,
+    player1_clicks: int,
+    player2_clicks: int,
+    stake: int = 50000,
+) -> LivePvpResult:
+    if player1_id == player2_id:
+        raise InvalidPayload("player1_id and player2_id must be different")
+    if player1_clicks < 0 or player2_clicks < 0:
+        raise InvalidPayload("clicks must be >= 0")
+    if stake < 0:
+        raise InvalidPayload("stake must be >= 0")
+
+    first_id, second_id = (player1_id, player2_id) if player1_id < player2_id else (player2_id, player1_id)
+
+    u_first = await _get_user_for_update(session, first_id)
+    u_second = await _get_user_for_update(session, second_id)
+
+    if u_first.id == player1_id:
+        u1, u2 = u_first, u_second
+    else:
+        u1, u2 = u_second, u_first
+
+    if stake > 0:
+        if u1.total_xp < stake:
+            raise InsufficientCoins(f"Player1 has not enough coins (total_xp). need={stake}, has={u1.total_xp}")
+        if u2.total_xp < stake:
+            raise InsufficientCoins(f"Player2 has not enough coins (total_xp). need={stake}, has={u2.total_xp}")
+
+    outcome = resolve_pvp_outcome(
+        player1_id=player1_id,
+        player2_id=player2_id,
+        player1_clicks=player1_clicks,
+        player2_clicks=player2_clicks,
+    )
+    payout = calc_pvp_payout(
+        player1_id=player1_id,
+        player2_id=player2_id,
+        outcome=outcome,
+        stake=stake,
+    )
+
+    if stake > 0:
+        u1.total_xp -= stake
+        u2.total_xp -= stake
+
+    if outcome.is_draw:
+        if stake > 0:
+            u1.total_xp += stake
+            u2.total_xp += stake
+    else:
+        if payout.player1_delta > 0:
+            u1.total_xp += (2 * stake)
+        else:
+            u2.total_xp += (2 * stake)
+
+    match = await create_pvp_match(
+        session,
+        player1_id=player1_id,
+        player2_id=player2_id,
+        player1_clicks=player1_clicks,
+        player2_clicks=player2_clicks,
+        stake=stake,
+    )
+
+    await session.flush()
+
+    return LivePvpResult(
+        match_id=match.id,
+        is_draw=outcome.is_draw,
+        winner_id=outcome.winner_id,
+        player1_id=player1_id,
+        player2_id=player2_id,
+        player1_clicks=player1_clicks,
+        player2_clicks=player2_clicks,
+        stake=stake,
+        player1_coins_delta=payout.player1_delta,
+        player2_coins_delta=payout.player2_delta,
+        player1_total_xp=u1.total_xp,
+        player2_total_xp=u2.total_xp,
     )
 
 
-class ChallengeMatch(Base):
-    __tablename__ = "challenge_matches"
-
-    id = Column(Integer, primary_key=True)
-
-    challenger_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
-    opponent_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
-
-    challenger_clicks = Column(Integer, nullable=False)
-    opponent_best_result = Column(Integer, nullable=False)
-
-    is_win = Column(Boolean, nullable=False)
-
-    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), index=True)
-
-    challenger = relationship("User", foreign_keys=[challenger_id], lazy="joined")
-    opponent = relationship("User", foreign_keys=[opponent_id], lazy="joined")
-
-    __table_args__ = (
-        CheckConstraint("challenger_clicks >= 0", name="ck_challenge_matches_challenger_clicks_nonneg"),
-        CheckConstraint("opponent_best_result >= 0", name="ck_challenge_matches_opponent_best_result_nonneg"),
-        CheckConstraint("challenger_id <> opponent_id", name="ck_challenge_matches_players_not_equal"),
-        Index("ix_challenge_matches_pair_created", "challenger_id", "opponent_id", "created_at"),
-    )
-
-
-class PvpInvite(Base):
-    __tablename__ = "pvp_invites"
-
-    id = Column(Integer, primary_key=True)
-
-    code = Column(String(64), nullable=False, unique=True, index=True)
-
-    creator_user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
-    opponent_user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
-
-    stake = Column(Integer, nullable=False, default=50000)
-
-    # status: created | accepted | cancelled | expired
-    status = Column(String(16), nullable=False, default="created", index=True)
-
-    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), index=True)
-    accepted_at = Column(DateTime(timezone=True), nullable=True)
-    cancelled_at = Column(DateTime(timezone=True), nullable=True)
-    expires_at = Column(DateTime(timezone=True), nullable=True, index=True)
-
-    creator = relationship("User", foreign_keys=[creator_user_id], lazy="joined")
-    opponent = relationship("User", foreign_keys=[opponent_user_id], lazy="joined")
-
-    __table_args__ = (
-        CheckConstraint("stake >= 0", name="ck_pvp_invites_stake_nonneg"),
-        CheckConstraint("creator_user_id <> opponent_user_id", name="ck_pvp_invites_users_not_equal"),
-        CheckConstraint(
-            "status IN ('created','accepted','cancelled','expired')",
-            name="ck_pvp_invites_status_allowed",
-        ),
-        Index("ix_pvp_invites_creator_status_created", "creator_user_id", "status", "created_at"),
-    )
-
-
-class PvpQueue(Base):
-    __tablename__ = "pvp_queue"
-
-    id = Column(Integer, primary_key=True)
-
-    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, unique=True, index=True)
-
-    stake = Column(Integer, nullable=False, default=50000)
-
-    # status: waiting | matched | left | expired
-    status = Column(String(16), nullable=False, default="waiting", index=True)
-
-    matched_user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
-
-    match_token = Column(String(128), nullable=True, index=True)
-
-    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), index=True)
-    updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now(), index=True)
-
-    # ✅ TTL: запись считается просроченной, если expires_at < now()
-    expires_at = Column(DateTime(timezone=True), nullable=True, index=True)
-
-    user = relationship("User", foreign_keys=[user_id], lazy="joined")
-    matched_user = relationship("User", foreign_keys=[matched_user_id], lazy="joined")
-
-    __table_args__ = (
-        UniqueConstraint("user_id", name="uq_pvp_queue_user_id"),
-        CheckConstraint("stake >= 0", name="ck_pvp_queue_stake_nonneg"),
-        CheckConstraint(
-            "status IN ('waiting','matched','left','expired')",
-            name="ck_pvp_queue_status_allowed",
-        ),
-        CheckConstraint(
-            "(status <> 'matched') OR (matched_user_id IS NOT NULL AND match_token IS NOT NULL)",
-            name="ck_pvp_queue_matched_requires_fields",
-        ),
-        CheckConstraint(
-            "user_id <> matched_user_id",
-            name="ck_pvp_queue_users_not_equal",
-        ),
-        Index("ix_pvp_queue_status_created_at", "status", "created_at"),
-        Index("ix_pvp_queue_status_updated_at", "status", "updated_at"),
-        Index("ix_pvp_queue_expires_at", "expires_at"),
-    )
-
-
-class PvpSession(Base):
+async def finish_live_pvp_session(
+    session: AsyncSession,
+    *,
+    match_token: str,
+    requester_user_id: int,
+    opponent_user_id: int,
+    requester_clicks: int,
+    opponent_clicks: int,
+    stake_fixed: int = 50000,
+) -> LivePvpResult:
     """
-    Сессия активной PvP Live дуэли.
-    Создаётся при matchmaking match или invite accept.
-    Finish разрешён только по match_token.
+    Безопасная финализация:
+    - ищем session по match_token FOR UPDATE
+    - проверяем status/expire
+    - проверяем участников
+    - если уже finished -> idempotent ответ без повторного списания
+    - иначе вызываем finish_live_pvp и фиксируем поля сессии
     """
-    __tablename__ = "pvp_sessions"
+    if requester_user_id == opponent_user_id:
+        raise InvalidPayload("requester_user_id and opponent_user_id must be different")
+    if requester_clicks < 0 or opponent_clicks < 0:
+        raise InvalidPayload("clicks must be >= 0")
 
-    id = Column(Integer, primary_key=True)
+    s = await _get_session_for_update(session, match_token)
 
-    match_token = Column(String(128), nullable=False, unique=True, index=True)
+    # expire check
+    now = datetime.now(timezone.utc)
+    if s.expires_at is not None and s.expires_at < now:
+        if s.status == "active":
+            s.status = "expired"
+            await session.flush()
+        raise SessionExpired("Session expired")
 
-    # mode: matchmaking | invite
-    mode = Column(String(16), nullable=False)
+    if s.status != "active":
+        # idempotent path if finished
+        if s.status == "finished" and s.pvp_match_id is not None:
+            # вернём сохранённые clicks/outcome, а балансы — текущие
+            u1 = await _get_user_for_update(session, s.player1_id)
+            u2 = await _get_user_for_update(session, s.player2_id)
+            p1_delta, p2_delta = _calc_coin_deltas_from_stored(
+                winner_id=s.winner_id,
+                is_draw=bool(s.is_draw),
+                p1_id=s.player1_id,
+                p2_id=s.player2_id,
+                stake=int(s.stake or stake_fixed),
+            )
+            return LivePvpResult(
+                match_id=int(s.pvp_match_id),
+                is_draw=bool(s.is_draw),
+                winner_id=int(s.winner_id) if s.winner_id is not None else None,
+                player1_id=int(s.player1_id),
+                player2_id=int(s.player2_id),
+                player1_clicks=int(s.player1_clicks or 0),
+                player2_clicks=int(s.player2_clicks or 0),
+                stake=int(s.stake or stake_fixed),
+                player1_coins_delta=p1_delta,
+                player2_coins_delta=p2_delta,
+                player1_total_xp=int(u1.total_xp or 0),
+                player2_total_xp=int(u2.total_xp or 0),
+            )
+        raise SessionNotActive(f"Session is not active: {s.status}")
 
-    # status: active | finished | expired | cancelled
-    status = Column(String(16), nullable=False, default="active", index=True)
+    # validate participants (оба допустимые пары)
+    allowed = {s.player1_id, s.player2_id}
+    if requester_user_id not in allowed or opponent_user_id not in allowed:
+        raise InvalidPayload("Players do not match this session")
+    if requester_user_id == opponent_user_id:
+        raise InvalidPayload("Invalid participants")
 
-    player1_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
-    player2_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    # нормализуем player1/player2 под сессию
+    if requester_user_id == s.player1_id:
+        p1_clicks = requester_clicks
+        p2_clicks = opponent_clicks
+    else:
+        # requester = player2
+        p1_clicks = opponent_clicks
+        p2_clicks = requester_clicks
 
-    stake = Column(Integer, nullable=False, default=50000)
+    # stake фиксированный
+    stake = stake_fixed
 
-    invite_id = Column(Integer, ForeignKey("pvp_invites.id", ondelete="SET NULL"), nullable=True, index=True)
+    result = await finish_live_pvp(
+        session,
+        player1_id=s.player1_id,
+        player2_id=s.player2_id,
+        player1_clicks=p1_clicks,
+        player2_clicks=p2_clicks,
+        stake=stake,
+    )
 
-    started_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), index=True)
-    expires_at = Column(DateTime(timezone=True), nullable=True, index=True)
-    finished_at = Column(DateTime(timezone=True), nullable=True)
+    s.status = "finished"
+    s.finished_at = now
+    s.pvp_match_id = result.match_id
+    s.winner_id = result.winner_id
+    s.is_draw = bool(result.is_draw)
+    s.stake = stake
+    s.player1_clicks = p1_clicks
+    s.player2_clicks = p2_clicks
 
-    # idempotency
-    pvp_match_id = Column(Integer, ForeignKey("pvp_matches.id", ondelete="SET NULL"), nullable=True, index=True)
-    winner_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
-    is_draw = Column(Boolean, nullable=False, default=False)
+    await session.flush()
+    return result
 
-    player1_clicks = Column(Integer, nullable=True)
-    player2_clicks = Column(Integer, nullable=True)
 
-    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), index=True)
+async def run_challenge(
+    session: AsyncSession,
+    *,
+    challenger_id: int,
+    opponent_id: int,
+    challenger_clicks: int,
+    daily_limit: int = 5,
+) -> ChallengeResult:
+    if challenger_id == opponent_id:
+        raise InvalidPayload("challenger_id and opponent_id must be different")
+    if challenger_clicks < 0:
+        raise InvalidPayload("challenger_clicks must be >= 0")
 
-    player1 = relationship("User", foreign_keys=[player1_id], lazy="joined")
-    player2 = relationship("User", foreign_keys=[player2_id], lazy="joined")
-    invite = relationship("PvpInvite", foreign_keys=[invite_id], lazy="joined")
+    challenger = await _get_user_for_update(session, challenger_id)
+    opponent = await _get_user_for_update(session, opponent_id)
 
-    __table_args__ = (
-        CheckConstraint("stake >= 0", name="ck_pvp_sessions_stake_nonneg"),
-        CheckConstraint("player1_id <> player2_id", name="ck_pvp_sessions_players_not_equal"),
-        CheckConstraint(
-            "mode IN ('matchmaking','invite')",
-            name="ck_pvp_sessions_mode_allowed",
-        ),
-        CheckConstraint(
-            "status IN ('active','finished','expired','cancelled')",
-            name="ck_pvp_sessions_status_allowed",
-        ),
-        Index("ix_pvp_sessions_status_started", "status", "started_at"),
-        Index("ix_pvp_sessions_expires_at", "expires_at"),
+    attempts_today = await count_today_challenge_attempts(session, challenger_id=challenger_id)
+    if attempts_today >= daily_limit:
+        raise ChallengeLimitExceeded(f"Daily challenge limit exceeded: {attempts_today}/{daily_limit}")
+
+    opponent_best = int(opponent.pvp_best_result or 0)
+
+    outcome = resolve_challenge_outcome(
+        challenger_clicks=challenger_clicks,
+        opponent_best_result=opponent_best,
+    )
+
+    match = await create_challenge_match(
+        session,
+        challenger_id=challenger_id,
+        opponent_id=opponent_id,
+        challenger_clicks=challenger_clicks,
+        opponent_best_result=opponent_best,
+    )
+
+    await session.flush()
+
+    return ChallengeResult(
+        match_id=match.id,
+        challenger_id=challenger_id,
+        opponent_id=opponent_id,
+        challenger_clicks=challenger_clicks,
+        opponent_best_result=opponent_best,
+        is_win=bool(outcome.is_win),
+        victories_delta=1 if outcome.is_win else 0,
+        challenger_total_xp=int(challenger.total_xp or 0),
+        challenger_best_result=int(challenger.pvp_best_result or 0),
     )
