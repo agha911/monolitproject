@@ -46,6 +46,8 @@ class User(Base):
     daily_booster_claims_coins = Column(Integer, nullable=False, default=0, server_default="0")
     daily_booster_claims_mult = Column(Integer, nullable=False, default=0, server_default="0")
     boosters_last_reset = Column(Date, nullable=False, default=date.today)
+    pvp_victories = Column(Integer, nullable=False, default=0)
+    pvp_best_result = Column(Integer, nullable=False, default=0)
     
     
 
