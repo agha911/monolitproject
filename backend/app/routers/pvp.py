@@ -664,16 +664,28 @@ async def matchmaking_poll(telegram_id: int, session: AsyncSession = Depends(get
 
         me = await _ensure_registered_user(session, telegram_id)
 
-        my_q = (await session.execute(select(PvpQueue).where(PvpQueue.user_id == me.id))).scalar_one_or_none()
+        # 1) Берём ID моей очереди (без JOIN) и при необходимости лочим уже через session.get
+        my_q_id = (
+            await session.execute(
+                select(PvpQueue.id).where(PvpQueue.user_id == me.id).limit(1)
+            )
+        ).scalar_one_or_none()
+
+        if not my_q_id:
+            return {"ok": True, "status": "not_in_queue"}
+
+        my_q = await session.get(PvpQueue, my_q_id, with_for_update=True)
         if not my_q:
             return {"ok": True, "status": "not_in_queue"}
 
+        # 2) Если уже matched — просто отдаём match_token (сессию тоже читаем без FOR UPDATE)
         if my_q.status == "matched" and my_q.match_token:
-            # session already created?
             sess = (
-                (await session.execute(select(PvpSession).where(PvpSession.match_token == my_q.match_token)))
-                .scalar_one_or_none()
-            )
+                await session.execute(
+                    select(PvpSession).where(PvpSession.match_token == my_q.match_token).limit(1)
+                )
+            ).scalar_one_or_none()
+
             if sess:
                 return {
                     "ok": True,
@@ -687,39 +699,36 @@ async def matchmaking_poll(telegram_id: int, session: AsyncSession = Depends(get
                     "player2_id": int(sess.player2_id),
                 }
 
-        # try to find opponent
-        opp_q = (
-            (await session.execute(
-                select(PvpQueue)
+        # 3) Ищем оппонента: ЛОЧИМ только pvp_queue.id (без JOIN) с SKIP LOCKED
+        opp_q_id = (
+            await session.execute(
+                select(PvpQueue.id)
                 .where(PvpQueue.status == "waiting")
                 .where(PvpQueue.user_id != me.id)
                 .order_by(PvpQueue.created_at.asc())
                 .limit(1)
                 .with_for_update(skip_locked=True)
-            ))
-            .scalars()
-            .first()
-        )
+            )
+        ).scalar_one_or_none()
 
-        if not opp_q:
+        if not opp_q_id:
             return {"ok": True, "status": my_q.status}
 
-        # lock my queue row too
-        my_q = (
-            (await session.execute(
-                select(PvpQueue)
-                .where(PvpQueue.user_id == me.id)
-                .with_for_update()
-            ))
-            .scalar_one()
-        )
+        # 4) Лочим строку оппонента отдельным session.get — без JOIN, без outer join проблем
+        opp_q = await session.get(PvpQueue, opp_q_id, with_for_update=True)
+        if not opp_q:
+            return {"ok": True, "status": "waiting"}
 
+        # 5) Проверяем, что я всё ещё waiting
         if my_q.status != "waiting":
             return {"ok": True, "status": my_q.status}
 
-        opponent = (await session.execute(select(User).where(User.id == opp_q.user_id))).scalar_one()
+        # 6) Подтягиваем оппонента (можно без lock, но stake-check нужен)
+        opponent = (
+            await session.execute(select(User).where(User.id == opp_q.user_id).limit(1))
+        ).scalar_one()
 
-        # stake checks (оппонент мог потратить монеты пока был в очереди)
+        # stake checks (оппонент мог потратить монеты)
         if int(getattr(opponent, "total_xp", 0) or 0) < PVP_DEFAULT_STAKE:
             opp_q.status = "expired"
             await session.flush()
@@ -730,10 +739,10 @@ async def matchmaking_poll(telegram_id: int, session: AsyncSession = Depends(get
             await session.flush()
             return {"ok": True, "status": "expired", "message": "Not enough coins anymore"}
 
+        # 7) Матчим
         match_token = _gen_match_token()
         expires_at = datetime.now(timezone.utc) + timedelta(seconds=PVP_SESSION_TTL_SEC)
 
-        # match both queue rows
         my_q.status = "matched"
         my_q.matched_user_id = opponent.id
         my_q.match_token = match_token
@@ -744,7 +753,7 @@ async def matchmaking_poll(telegram_id: int, session: AsyncSession = Depends(get
         opp_q.match_token = match_token
         opp_q.expires_at = None
 
-        # create session
+        # 8) Создаём session матча
         sess = PvpSession(
             match_token=match_token,
             player1_id=me.id,
