@@ -32,6 +32,7 @@ from app.routers import store_drops, user_card, partner_drops
 from app.routers import boosters
 from app.routers import dao as dao_router
 from app.routers.t_shirt_routers import router as tshirt_router
+from app.models.pvp_models import PvpInvite
 
 # ---------------- logging setup ----------------
 
@@ -124,11 +125,61 @@ def get_user_info_from_bot_api(user_id: int) -> dict:
 async def handle_start(message: types.Message):
     user_telegram_id = str(message.from_user.id)
     parts = (message.text or "").split()
-    if len(parts) > 1 and parts[1].isdigit():
-        inviter_telegram_id = str(int(parts[1]))
-        referral_cache[user_telegram_id] = inviter_telegram_id
-        api_log.info("REF-CACHE set | user=%s invited_by=%s", user_telegram_id, inviter_telegram_id)
+    arg = parts[1] if len(parts) > 1 else ""
 
+    # --- 1) Старая логика: /start <inviter_telegram_id> ---
+    if arg and arg.isdigit():
+        inviter_telegram_id = str(int(arg))
+        referral_cache[user_telegram_id] = inviter_telegram_id
+        api_log.info(
+            "REF-CACHE set | user=%s invited_by=%s (legacy_start_param)",
+            user_telegram_id, inviter_telegram_id
+        )
+
+    # --- 2) Новая логика: /start pvp_<invite_code> ---
+    elif arg and arg.startswith("pvp_"):
+        invite_code = arg.replace("pvp_", "", 1).strip()
+
+        if invite_code:
+            try:
+                async with async_session_maker() as session:
+                    # 2.1) найти инвайт
+                    inv_res = await session.execute(
+                        select(PvpInvite).where(PvpInvite.code == invite_code).limit(1)
+                    )
+                    invite = inv_res.scalar_one_or_none()
+
+                    if not invite:
+                        api_log.info(
+                            "PVP start_param | invite not found | user=%s code=%s",
+                            user_telegram_id, invite_code
+                        )
+                    else:
+                        # 2.2) найти telegram_id создателя инвайта
+                        creator_res = await session.execute(
+                            select(User.telegram_id).where(User.id == invite.creator_user_id).limit(1)
+                        )
+                        creator_telegram_id = creator_res.scalar_one_or_none()
+
+                        if not creator_telegram_id:
+                            api_log.info(
+                                "PVP start_param | creator not found | user=%s code=%s creator_user_id=%s",
+                                user_telegram_id, invite_code, invite.creator_user_id
+                            )
+                        else:
+                            referral_cache[user_telegram_id] = str(int(creator_telegram_id))
+                            api_log.info(
+                                "REF-CACHE set | user=%s invited_by=%s (pvp_start_param=%s)",
+                                user_telegram_id, str(int(creator_telegram_id)), invite_code
+                            )
+
+            except Exception:
+                api_log.exception(
+                    "PVP start_param failed | user=%s arg=%s",
+                    user_telegram_id, arg
+                )
+
+    # (опционально) лог user info — оставляю как было, если тебе надо
     info = get_user_info_from_bot_api(int(user_telegram_id))
     api_log.info("USER INFO | %s", info)
 
@@ -141,7 +192,6 @@ async def handle_start(message: types.Message):
               "Oyuna başlamaq üçün aşağıdakı düyməni kliklə."),
         reply_markup=markup
     )
-
 # ---------------- API models ----------------
 
 class ClicksFlushIn(BaseModel):
