@@ -686,18 +686,23 @@ async def matchmaking_poll(telegram_id: int, session: AsyncSession = Depends(get
                 )
             ).scalar_one_or_none()
 
-            if sess:
+             if sess:
+                opponent_user_id = int(sess.player2_id) if int(sess.player1_id) == int(me.id) else int(sess.player1_id)
+            
                 return {
-                    "ok": True,
-                    "status": "matched",
-                    "match_token": sess.match_token,
-                    "expires_at": sess.expires_at.isoformat() if sess.expires_at else None,
-                    "stake": sess.stake,
-                    "match_duration_sec": PVP_MATCH_DURATION_SEC,
-                    "mode": "matchmaking",
-                    "player1_id": int(sess.player1_id),
-                    "player2_id": int(sess.player2_id),
-                }
+                        "ok": True,
+                        "status": "matched",
+                        "match_token": match_token,
+                        "expires_at": expires_at.isoformat(),
+                        "stake": PVP_DEFAULT_STAKE,
+                        "match_duration_sec": PVP_MATCH_DURATION_SEC,
+                        "mode": "matchmaking",
+                        "player1_id": int(sess.player1_id),
+                        "player2_id": int(sess.player2_id),
+                        "opponent_user_id": int(opponent.id),  # <-- вот это добавь
+                    }
+
+
 
         # 3) Ищем оппонента: ЛОЧИМ только pvp_queue.id (без JOIN) с SKIP LOCKED
         opp_q_id = (
