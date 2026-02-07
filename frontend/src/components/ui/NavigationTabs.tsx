@@ -2,8 +2,12 @@ import React from 'react';
 import { useTranslation } from 'react-i18next';
 
 interface Props {
-  activeTab: 'home' | 'tasks' | 'friends' | 'shop' | 'governance';
-  setActiveTab: (tab: 'home' | 'tasks' | 'friends' | 'shop' | 'governance') => void;
+  activeTab: 'home' | 'tasks' | 'friends' | 'shop' | 'pvp';
+  setActiveTab: (tab: 'home' | 'tasks' | 'friends' | 'shop' | 'pvp') => void;
+
+  // ⛔ если вернёшь governance, просто добавь сюда обратно:
+  // activeTab: 'home' | 'tasks' | 'friends' | 'shop' | 'pvp' | 'governance';
+  // setActiveTab: (tab: 'home' | 'tasks' | 'friends' | 'shop' | 'pvp' | 'governance') => void;
 }
 
 const NavigationTabs: React.FC<Props> = ({ activeTab, setActiveTab }) => {
@@ -50,7 +54,16 @@ const NavigationTabs: React.FC<Props> = ({ activeTab, setActiveTab }) => {
         <span className="text-[11px] mt-0.5">{t('tab_shop')}</span>
       </button>
 
-      {/* Governance вместо Tournament */}
+      {/* ✅ новая вкладка PvP */}
+      <button
+        onClick={() => setActiveTab('pvp')}
+        className={`${baseBtn} ${activeTab === 'pvp' ? active : inactive}`}
+      >
+        <span className="text-lg">⚔️</span>
+        <span className="text-[11px] mt-0.5">{t('tab_pvp', { defaultValue: 'PvP' })}</span>
+      </button>
+
+      {/* ⛔ Governance временно выключили (можно вернуть обратно)
       <button
         onClick={() => setActiveTab('governance')}
         className={`${baseBtn} ${activeTab === 'governance' ? active : inactive}`}
@@ -58,11 +71,13 @@ const NavigationTabs: React.FC<Props> = ({ activeTab, setActiveTab }) => {
         <span className="text-lg">⚖️</span>
         <span className="text-[11px] mt-0.5">{t('tab_governance')}</span>
       </button>
+      */}
     </div>
   );
 };
 
 export default NavigationTabs;
+
 
 
 
