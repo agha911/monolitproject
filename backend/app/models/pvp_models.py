@@ -38,9 +38,10 @@ class PvpMatch(Base):
 
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), index=True)
 
-    player1 = relationship("User", foreign_keys=[player1_id], lazy="joined")
-    player2 = relationship("User", foreign_keys=[player2_id], lazy="joined")
-    winner = relationship("User", foreign_keys=[winner_id], lazy="joined")
+    # ⚠️ важно: НЕ joined, иначе SELECT с FOR UPDATE может тащить JOIN-ы
+    player1 = relationship("User", foreign_keys=[player1_id], lazy="selectin")
+    player2 = relationship("User", foreign_keys=[player2_id], lazy="selectin")
+    winner = relationship("User", foreign_keys=[winner_id], lazy="selectin")
 
     __table_args__ = (
         CheckConstraint("player1_clicks >= 0", name="ck_pvp_matches_player1_clicks_nonneg"),
@@ -67,8 +68,8 @@ class ChallengeMatch(Base):
 
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), index=True)
 
-    challenger = relationship("User", foreign_keys=[challenger_id], lazy="joined")
-    opponent = relationship("User", foreign_keys=[opponent_id], lazy="joined")
+    challenger = relationship("User", foreign_keys=[challenger_id], lazy="selectin")
+    opponent = relationship("User", foreign_keys=[opponent_id], lazy="selectin")
 
     __table_args__ = (
         CheckConstraint("challenger_clicks >= 0", name="ck_challenge_matches_challenger_clicks_nonneg"),
@@ -98,8 +99,8 @@ class PvpInvite(Base):
     cancelled_at = Column(DateTime(timezone=True), nullable=True)
     expires_at = Column(DateTime(timezone=True), nullable=True, index=True)
 
-    creator = relationship("User", foreign_keys=[creator_user_id], lazy="joined")
-    opponent = relationship("User", foreign_keys=[opponent_user_id], lazy="joined")
+    creator = relationship("User", foreign_keys=[creator_user_id], lazy="selectin")
+    opponent = relationship("User", foreign_keys=[opponent_user_id], lazy="selectin")
 
     __table_args__ = (
         CheckConstraint("stake >= 0", name="ck_pvp_invites_stake_nonneg"),
@@ -127,14 +128,14 @@ class PvpQueue(Base):
     matched_user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
     match_token = Column(String(128), nullable=True, index=True)
 
-    # ✅ используется в join/poll/cleanup
     expires_at = Column(DateTime(timezone=True), nullable=True, index=True)
 
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), index=True)
     updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now(), index=True)
 
-    user = relationship("User", foreign_keys=[user_id], lazy="joined")
-    matched_user = relationship("User", foreign_keys=[matched_user_id], lazy="joined")
+    # ✅ КЛЮЧЕВО: убрать joined, иначе FOR UPDATE ломается из-за LEFT OUTER JOIN
+    user = relationship("User", foreign_keys=[user_id], lazy="selectin")
+    matched_user = relationship("User", foreign_keys=[matched_user_id], lazy="selectin")
 
     __table_args__ = (
         UniqueConstraint("user_id", name="uq_pvp_queue_user_id"),
@@ -169,10 +170,8 @@ class PvpSession(Base):
 
     stake = Column(Integer, nullable=False, default=50000)
 
-    # ✅ роутер создаёт sess(mode="invite"/"matchmaking")
     mode = Column(String(16), nullable=True, index=True)
 
-    # ✅ роутер создаёт sess(invite_id=inv.id) для invite flow
     invite_id = Column(Integer, ForeignKey("pvp_invites.id", ondelete="SET NULL"), nullable=True, index=True)
 
     # status: active | finished | expired | cancelled
@@ -182,10 +181,10 @@ class PvpSession(Base):
     expires_at = Column(DateTime(timezone=True), nullable=True, index=True)
     finished_at = Column(DateTime(timezone=True), nullable=True)
 
-    player1 = relationship("User", foreign_keys=[player1_id], lazy="joined")
-    player2 = relationship("User", foreign_keys=[player2_id], lazy="joined")
+    player1 = relationship("User", foreign_keys=[player1_id], lazy="selectin")
+    player2 = relationship("User", foreign_keys=[player2_id], lazy="selectin")
 
-    invite = relationship("PvpInvite", foreign_keys=[invite_id], lazy="joined")
+    invite = relationship("PvpInvite", foreign_keys=[invite_id], lazy="selectin")
 
     __table_args__ = (
         UniqueConstraint("match_token", name="uq_pvp_sessions_match_token"),
