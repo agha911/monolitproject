@@ -10,7 +10,7 @@ from typing import Optional, Any, Dict, List
 import requests
 from fastapi import APIRouter, Depends, HTTPException, Header
 from pydantic import BaseModel, Field
-from sqlalchemy import select, func, and_, or_
+from sqlalchemy import select, func, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
@@ -59,7 +59,7 @@ PVP_MULTITOUCH_LIMIT = 2
 CHALLENGE_DAILY_LIMIT_DEFAULT = 5
 CHALLENGE_RANGE_PCT_DEFAULT = 0.15
 
-# ✅ NEW: стартовый бонус новому по дуэль-инвайту
+# ✅ стартовый бонус новому по дуэль-инвайту
 PVP_NEW_USER_START_BONUS = 50000
 
 PVP_ADMIN_TOKEN = os.getenv("PVP_ADMIN_TOKEN", "")
@@ -130,7 +130,7 @@ def _require_admin(x_admin_token: Optional[str]) -> None:
 
 def _get_user_info_from_bot_api(user_id: int) -> dict:
     """
-    Копия логики main.py: getChat -> first_name/last_name/username.
+    getChat -> first_name/last_name/username.
     """
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/getChat"
     params = {"chat_id": user_id}
@@ -196,11 +196,11 @@ async def _cleanup_expired(session: AsyncSession) -> None:
 
 async def _ensure_registered_user(session: AsyncSession, telegram_id: int) -> User:
     """
-    ✅ "Стандартная регистрация" для PvP (аналог main.py, но без init_data):
+    "Стандартная регистрация" для PvP (аналог main.py, но без init_data):
     - Если user есть: дозаполняем username/first/last через Bot API.
       Если есть referral_cache и invited_by пустой — применяем реферала (inviter +50k).
     - Если user нет: создаём с Bot API данными, учитываем referral_cache.
-      ✅ NEW: если user новый и пришёл по дуэль-инвайту (referral_cache есть) -> даём ему +50k.
+      ✅ новый, пришедший по дуэль-инвайту -> получает +50k.
     """
     res = await session.execute(select(User).where(User.telegram_id == telegram_id))
     user = res.scalar_one_or_none()
@@ -252,7 +252,7 @@ async def _ensure_registered_user(session: AsyncSession, telegram_id: int) -> Us
             session.add(inviter)
             await session.flush()
 
-    # ✅ NEW: стартовые 50k — только если это новый юзер и он пришёл по дуэль-инвайту (inviter есть)
+    # стартовые 50k — только если это новый юзер и он пришёл по дуэль-инвайту (inviter есть)
     start_bonus = PVP_NEW_USER_START_BONUS if inviter is not None else 0
 
     new_user = User(
@@ -262,7 +262,7 @@ async def _ensure_registered_user(session: AsyncSession, telegram_id: int) -> Us
         username=info.get("username") or None,
         first_name=info.get("first_name") or None,
         last_name=info.get("last_name") or None,
-        total_xp=start_bonus,  # ✅ вот здесь выдаём 50k новому
+        total_xp=start_bonus,
     )
     session.add(new_user)
     await session.flush()
@@ -272,6 +272,22 @@ async def _ensure_registered_user(session: AsyncSession, telegram_id: int) -> Us
 async def _ensure_registered_user_from_init_data(session: AsyncSession, init_data: str) -> User:
     telegram_id = int(parse_telegram_user_id(init_data))
     return await _ensure_registered_user(session, telegram_id)
+
+
+async def _get_session_expires_at(session: AsyncSession, match_token: str) -> Optional[str]:
+    """
+    ✅ NEW: достаём expires_at из pvp_sessions по match_token для фронта
+    """
+    s = (
+        await session.execute(
+            select(PvpSession.expires_at)
+            .where(PvpSession.match_token == match_token)
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    if not s:
+        return None
+    return s.isoformat() if s else None
 
 
 # -----------------------------------------------------------------------------
@@ -624,6 +640,7 @@ async def invite_create(body: InviteCreateRequest, session: AsyncSession = Depen
             "stake": PVP_DEFAULT_STAKE,
             "expires_at": expires_at.isoformat(),
             "start_param": f"pvp_{code}",
+            "match_duration_sec": PVP_MATCH_DURATION_SEC,  # ✅ NEW (удобно сразу)
         }
 
 
@@ -644,6 +661,7 @@ async def invite_status(invite_code: str, session: AsyncSession = Depends(get_as
         "opponent_user_id": inv.opponent_user_id,
         "expires_at": inv.expires_at.isoformat() if inv.expires_at else None,
         "accepted_at": inv.accepted_at.isoformat() if inv.accepted_at else None,
+        "match_duration_sec": PVP_MATCH_DURATION_SEC,  # ✅ NEW
     }
 
 
@@ -710,6 +728,7 @@ async def invite_accept(body: InviteAcceptRequest, session: AsyncSession = Depen
             "match_token": match_token,
             "stake": PVP_DEFAULT_STAKE,
             "expires_at": expires_at.isoformat(),
+            "match_duration_sec": PVP_MATCH_DURATION_SEC,  # ✅ NEW
             "players": {
                 "player1_user_id": inv.creator_user_id,
                 "player2_user_id": opponent.id,
@@ -820,6 +839,9 @@ async def matchmaking_poll(telegram_id: int, session: AsyncSession = Depends(get
 
         my_row = (await session.execute(select(PvpQueue).where(PvpQueue.user_id == me.id).limit(1))).scalar_one_or_none()
         if my_row and my_row.status == "matched" and my_row.match_token:
+            # ✅ NEW: подтягиваем expires_at из pvp_sessions
+            expires_at_iso = await _get_session_expires_at(session, my_row.match_token)
+
             return {
                 "ok": True,
                 "status": "matched",
@@ -827,6 +849,7 @@ async def matchmaking_poll(telegram_id: int, session: AsyncSession = Depends(get
                 "opponent_user_id": my_row.matched_user_id,
                 "stake": PVP_DEFAULT_STAKE,
                 "match_duration_sec": PVP_MATCH_DURATION_SEC,
+                "expires_at": expires_at_iso,  # ✅ NEW
             }
 
         if not my_row or my_row.status not in ("waiting", "matched"):
@@ -908,6 +931,7 @@ async def admin_reset_weekly(
     async with session.begin():
         await reset_weekly_pvp_victories_for_all(session)
     return {"ok": True}
+
 
 
 
