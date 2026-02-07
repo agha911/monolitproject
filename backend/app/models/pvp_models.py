@@ -1,5 +1,5 @@
 # backend/app/models/pvp_models.py
-# Отдельный файл под PvP/Challenge таблицы
+# PvP/Challenge + state tables (invites, matchmaking queue)
 
 from sqlalchemy import (
     Boolean,
@@ -9,6 +9,8 @@ from sqlalchemy import (
     ForeignKey,
     Integer,
     Index,
+    String,
+    UniqueConstraint,
     func,
 )
 from sqlalchemy.orm import relationship
@@ -40,7 +42,6 @@ class PvpMatch(Base):
 
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), index=True)
 
-    # Relationships (опционально, но удобно для админки/истории)
     player1 = relationship("User", foreign_keys=[player1_id], lazy="joined")
     player2 = relationship("User", foreign_keys=[player2_id], lazy="joined")
     winner = relationship("User", foreign_keys=[winner_id], lazy="joined")
@@ -52,9 +53,6 @@ class PvpMatch(Base):
         CheckConstraint("player1_id <> player2_id", name="ck_pvp_matches_players_not_equal"),
         # Если ничья — winner_id должен быть NULL
         CheckConstraint("(is_draw = false) OR (winner_id IS NULL)", name="ck_pvp_matches_draw_winner_null"),
-        # Если не ничья — winner_id может быть NULL только если ты это допускаешь (обычно нет)
-        # Если хочешь строго: раскомментируй строку ниже
-        # CheckConstraint("(is_draw = true) OR (winner_id IS NOT NULL)", name="ck_pvp_matches_not_draw_winner_not_null"),
         Index("ix_pvp_matches_players_pair_created", "player1_id", "player2_id", "created_at"),
     )
 
@@ -86,4 +84,92 @@ class ChallengeMatch(Base):
         CheckConstraint("opponent_best_result >= 0", name="ck_challenge_matches_opponent_best_result_nonneg"),
         CheckConstraint("challenger_id <> opponent_id", name="ck_challenge_matches_players_not_equal"),
         Index("ix_challenge_matches_pair_created", "challenger_id", "opponent_id", "created_at"),
+    )
+
+
+class PvpInvite(Base):
+    """
+    Инвайт на PvP-дуэль по ссылке.
+    Жизненный цикл:
+      created -> accepted | cancelled | expired
+    """
+    __tablename__ = "pvp_invites"
+
+    id = Column(Integer, primary_key=True)
+
+    code = Column(String(64), nullable=False, unique=True, index=True)
+
+    creator_user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    opponent_user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+
+    stake = Column(Integer, nullable=False, default=50000)
+
+    # status: created | accepted | cancelled | expired
+    status = Column(String(16), nullable=False, default="created", index=True)
+
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), index=True)
+    accepted_at = Column(DateTime(timezone=True), nullable=True)
+    cancelled_at = Column(DateTime(timezone=True), nullable=True)
+    expires_at = Column(DateTime(timezone=True), nullable=True, index=True)
+
+    creator = relationship("User", foreign_keys=[creator_user_id], lazy="joined")
+    opponent = relationship("User", foreign_keys=[opponent_user_id], lazy="joined")
+
+    __table_args__ = (
+        CheckConstraint("stake >= 0", name="ck_pvp_invites_stake_nonneg"),
+        CheckConstraint("creator_user_id <> opponent_user_id", name="ck_pvp_invites_users_not_equal"),
+        CheckConstraint(
+            "status IN ('created','accepted','cancelled','expired')",
+            name="ck_pvp_invites_status_allowed",
+        ),
+        Index("ix_pvp_invites_creator_status_created", "creator_user_id", "status", "created_at"),
+    )
+
+
+class PvpQueue(Base):
+    """
+    Очередь матчмейкинга PvP Live без Redis.
+
+    - user_id уникален (1 заявка на пользователя)
+    - status: waiting | matched | left | expired
+    - matched_user_id + match_token проставляются при подборе
+    """
+    __tablename__ = "pvp_queue"
+
+    id = Column(Integer, primary_key=True)
+
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, unique=True, index=True)
+
+    stake = Column(Integer, nullable=False, default=50000)
+
+    # status: waiting | matched | left | expired
+    status = Column(String(16), nullable=False, default="waiting", index=True)
+
+    matched_user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+
+    match_token = Column(String(128), nullable=True, index=True)
+
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), index=True)
+    updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now(), index=True)
+
+    user = relationship("User", foreign_keys=[user_id], lazy="joined")
+    matched_user = relationship("User", foreign_keys=[matched_user_id], lazy="joined")
+
+    __table_args__ = (
+        UniqueConstraint("user_id", name="uq_pvp_queue_user_id"),
+        CheckConstraint("stake >= 0", name="ck_pvp_queue_stake_nonneg"),
+        CheckConstraint(
+            "status IN ('waiting','matched','left','expired')",
+            name="ck_pvp_queue_status_allowed",
+        ),
+        CheckConstraint(
+            "(status <> 'matched') OR (matched_user_id IS NOT NULL AND match_token IS NOT NULL)",
+            name="ck_pvp_queue_matched_requires_fields",
+        ),
+        CheckConstraint(
+            "user_id <> matched_user_id",
+            name="ck_pvp_queue_users_not_equal",
+        ),
+        Index("ix_pvp_queue_status_created_at", "status", "created_at"),
+        Index("ix_pvp_queue_status_updated_at", "status", "updated_at"),
     )
