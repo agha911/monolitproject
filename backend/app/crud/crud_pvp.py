@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.user import User
 from app.models.pvp_models import PvpMatch, ChallengeMatch
+from sqlalchemy import and_, or_
 
 
 # ----------------------------
