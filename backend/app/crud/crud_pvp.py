@@ -265,7 +265,10 @@ async def get_pvp_rank_for_user(session: AsyncSession, *, user_id: int) -> Optio
         return None
 
     # Ранг = 1 + количество пользователей, у которых (victories, best) строго больше
-    me_q = select(func.coalesce(User.pvp_victories, 0), func.coalesce(User.pvp_best_result, 0)).where(User.id == user_id)
+    me_q = select(
+        func.coalesce(User.pvp_victories, 0),
+        func.coalesce(User.pvp_best_result, 0),
+    ).where(User.id == user_id)
     me_row = (await session.execute(me_q)).first()
     if not me_row:
         return None
@@ -275,12 +278,13 @@ async def get_pvp_rank_for_user(session: AsyncSession, *, user_id: int) -> Optio
     better_q = select(func.count(User.id)).where(
         or_(
             func.coalesce(User.pvp_victories, 0) > my_v,
-            func.and_(
+            and_(
                 func.coalesce(User.pvp_victories, 0) == my_v,
                 func.coalesce(User.pvp_best_result, 0) > my_best,
             ),
         )
     )
+
     better = int((await session.execute(better_q)).scalar_one() or 0)
     return better + 1
 
