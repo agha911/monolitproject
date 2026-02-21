@@ -91,6 +91,13 @@ class ChallengeRunRequest(BaseModel):
     my_clicks: int = Field(ge=0)
 
 
+
+class LiveSubmitRequest(BaseModel):
+    telegram_id: int
+    match_token: str
+    my_clicks: int = Field(ge=0)
+
+
 # -----------------------------------------------------------------------------
 # Helpers (общие)
 # -----------------------------------------------------------------------------
