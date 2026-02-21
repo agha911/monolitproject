@@ -16,7 +16,6 @@ from sqlalchemy import (
     func,
 )
 from sqlalchemy.orm import relationship
-from sqlalchemy.sql import func
 
 from app.database import Base
 
@@ -134,7 +133,6 @@ class PvpQueue(Base):
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), index=True)
     updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now(), index=True)
 
-    # ✅ КЛЮЧЕВО: убрать joined, иначе FOR UPDATE ломается из-за LEFT OUTER JOIN
     user = relationship("User", foreign_keys=[user_id], lazy="selectin")
     matched_user = relationship("User", foreign_keys=[matched_user_id], lazy="selectin")
 
@@ -182,10 +180,20 @@ class PvpSession(Base):
     expires_at = Column(DateTime(timezone=True), nullable=True, index=True)
     finished_at = Column(DateTime(timezone=True), nullable=True)
 
+    # ---- NEW: each player submits their own clicks ----
+    player1_reported_clicks = Column(Integer, nullable=True)
+    player2_reported_clicks = Column(Integer, nullable=True)
+    player1_reported_at = Column(DateTime(timezone=True), nullable=True)
+    player2_reported_at = Column(DateTime(timezone=True), nullable=True)
+
+    # store created match id to serve status quickly
+    match_id = Column(Integer, ForeignKey("pvp_matches.id", ondelete="SET NULL"), nullable=True, index=True)
+
     player1 = relationship("User", foreign_keys=[player1_id], lazy="selectin")
     player2 = relationship("User", foreign_keys=[player2_id], lazy="selectin")
 
     invite = relationship("PvpInvite", foreign_keys=[invite_id], lazy="selectin")
+    match = relationship("PvpMatch", foreign_keys=[match_id], lazy="selectin")
 
     __table_args__ = (
         UniqueConstraint("match_token", name="uq_pvp_sessions_match_token"),
