@@ -297,6 +297,11 @@ async def finish_live_pvp_session(
         player2_clicks=int(player2_clicks),
         stake=int(stake_fixed),
     )
+    try:
+        sess.match_id = int(result.match_id)
+    except Exception:
+        sess.match_id = None
+    await session.flush()
 
     return result
 
