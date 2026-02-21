@@ -35,10 +35,8 @@ async function apiRequest<T>(path: string, opts?: RequestInit): Promise<T> {
 type Screen = 'lobby' | 'duel' | 'result';
 type DuelMode = 'live' | 'challenge';
 
-const BOT_USERNAME =
-  (import.meta as any)?.env?.VITE_TELEGRAM_BOT_USERNAME ||
-  (window as any)?.__BOT_USERNAME__ ||
-  'gappick_bot';
+// IMPORTANT: Telegram usernames must NOT include "@" in t.me links.
+const BOT_USERNAME = 'monolit_42_bot';
 
 function buildInviteLink(code: string) {
   return `https://t.me/${BOT_USERNAME}?startapp=pvp_${code}`;
@@ -62,13 +60,10 @@ const Pvp: React.FC = () => {
   const [meUserId, setMeUserId] = useState<number | null>(null);
   const [meInfo, setMeInfo] = useState<any>(null);
 
-  const [inviteCode, setInviteCode] = useState('');
   const [createdInvite, setCreatedInvite] = useState<any>(null);
   const invitePollRef = useRef<number | null>(null);
 
-  const [queueStatus, setQueueStatus] = useState<'idle' | 'waiting' | 'matched'>('idle');
   const [matchInfo, setMatchInfo] = useState<any>(null);
-  const pollTimerRef = useRef<number | null>(null);
 
   const [screen, setScreen] = useState<Screen>('lobby');
   const [duelMode, setDuelMode] = useState<DuelMode>('live');
@@ -97,13 +92,6 @@ const Pvp: React.FC = () => {
     }
   };
 
-  const stopQueuePoll = () => {
-    if (pollTimerRef.current) {
-      window.clearInterval(pollTimerRef.current);
-      pollTimerRef.current = null;
-    }
-  };
-
   const stopLivePoll = () => {
     if (livePollRef.current) {
       window.clearInterval(livePollRef.current);
@@ -127,7 +115,6 @@ const Pvp: React.FC = () => {
     })();
 
     return () => {
-      stopQueuePoll();
       stopDuelTimer();
       stopInvitePoll();
       stopLivePoll();
@@ -155,8 +142,6 @@ const Pvp: React.FC = () => {
     const code = sp.replace('pvp_', '').trim();
     if (!code) return;
 
-    setInviteCode(code);
-
     (async () => {
       setError('');
       setLoading(true);
@@ -166,7 +151,6 @@ const Pvp: React.FC = () => {
           body: JSON.stringify({ telegram_id: telegramId, invite_code: code }),
         });
         setMatchInfo(data);
-        setQueueStatus(data?.match_token ? 'matched' : 'idle');
 
         if (data?.match_token) startDuel('live');
       } catch (e: any) {
@@ -177,29 +161,6 @@ const Pvp: React.FC = () => {
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [telegramId]);
-
-  const startQueuePolling = () => {
-    stopQueuePoll();
-    pollTimerRef.current = window.setInterval(async () => {
-      if (!telegramId) return;
-      try {
-        const data = await apiRequest<any>(`/api/pvp/matchmaking/poll?telegram_id=${telegramId}`, { method: 'POST' });
-        if (data?.status === 'matched') {
-          setQueueStatus('matched');
-          setMatchInfo(data);
-          stopQueuePoll();
-        } else if (data?.status === 'waiting') {
-          setQueueStatus('waiting');
-        } else {
-          setQueueStatus('idle');
-        }
-      } catch (e: any) {
-        setError(e?.message || 'poll failed');
-        setQueueStatus('idle');
-        stopQueuePoll();
-      }
-    }, 1200);
-  };
 
   const startInvitePolling = (code: string) => {
     stopInvitePoll();
@@ -216,7 +177,6 @@ const Pvp: React.FC = () => {
             player1_id: st.player1_id,
             player2_id: st.player2_id,
           });
-          setQueueStatus('matched');
           stopInvitePoll();
         }
         if (st?.status === 'expired' || st?.status === 'cancelled') stopInvitePoll();
@@ -358,7 +318,7 @@ const Pvp: React.FC = () => {
     }
   };
 
-  // ---- Challenge (как было) ----
+  // ---- Challenge (as is) ----
   const onChallengeStart = async () => {
     if (!telegramId) return;
     setError('');
@@ -458,67 +418,6 @@ const Pvp: React.FC = () => {
     }
   };
 
-  const onAcceptInviteManual = async () => {
-    if (!telegramId) return;
-    const code = inviteCode.trim();
-    if (!code) return;
-
-    setError('');
-    setLoading(true);
-    try {
-      const data = await apiRequest<any>('/api/pvp/invite/accept', {
-        method: 'POST',
-        body: JSON.stringify({ telegram_id: telegramId, invite_code: code }),
-      });
-      setMatchInfo(data);
-      if (data?.match_token) {
-        setQueueStatus('matched');
-        startDuel('live');
-      }
-    } catch (e: any) {
-      setError(e?.message || 'invite accept failed');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const onJoinQueue = async () => {
-    if (!telegramId) return;
-    setError('');
-    setLoading(true);
-    try {
-      await apiRequest<any>('/api/pvp/matchmaking/join', {
-        method: 'POST',
-        body: JSON.stringify({ telegram_id: telegramId, ttl_seconds: 120 }),
-      });
-      setQueueStatus('waiting');
-      startQueuePolling();
-    } catch (e: any) {
-      setError(e?.message || 'join failed');
-      setQueueStatus('idle');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const onLeaveQueue = async () => {
-    if (!telegramId) return;
-    setError('');
-    setLoading(true);
-    try {
-      await apiRequest<any>('/api/pvp/matchmaking/leave', {
-        method: 'POST',
-        body: JSON.stringify({ telegram_id: telegramId }),
-      });
-      setQueueStatus('idle');
-      stopQueuePoll();
-    } catch (e: any) {
-      setError(e?.message || 'leave failed');
-    } finally {
-      setLoading(false);
-    }
-  };
-
   const isChallenge = duelMode === 'challenge';
 
   return (
@@ -574,7 +473,10 @@ const Pvp: React.FC = () => {
             <div className="rounded-xl bg-[#0b1320] border border-[#00f0ff20] p-3">
               <div className="text-xs opacity-70">Opponent</div>
               <div className="text-sm opacity-90">
-                id: <span className="font-mono">{isChallenge ? challengeOpponent?.user_id ?? '—' : computeOpponentUserId() ?? '—'}</span>
+                id:{' '}
+                <span className="font-mono">
+                  {isChallenge ? challengeOpponent?.user_id ?? '—' : computeOpponentUserId() ?? '—'}
+                </span>
               </div>
             </div>
           </div>
@@ -593,7 +495,10 @@ const Pvp: React.FC = () => {
           </div>
 
           <div className="mt-4 flex gap-2">
-            <button onClick={resetToLobby} className="flex-1 rounded-xl bg-[#0b1320] border border-[#00f0ff30] py-2 text-sm">
+            <button
+              onClick={resetToLobby}
+              className="flex-1 rounded-xl bg-[#0b1320] border border-[#00f0ff30] py-2 text-sm"
+            >
               Back
             </button>
           </div>
@@ -615,7 +520,9 @@ const Pvp: React.FC = () => {
               </button>
 
               {challengeFinishResp && (
-                <div className="mt-3 text-xs whitespace-pre-wrap opacity-90">{JSON.stringify(challengeFinishResp, null, 2)}</div>
+                <div className="mt-3 text-xs whitespace-pre-wrap opacity-90">
+                  {JSON.stringify(challengeFinishResp, null, 2)}
+                </div>
               )}
             </div>
           ) : (
@@ -625,15 +532,28 @@ const Pvp: React.FC = () => {
                 onClick={onLiveSubmit}
                 className="w-full rounded-xl bg-[#00f0ff] text-black font-bold py-2 disabled:opacity-60"
               >
-                {loading ? 'Loading...' : liveSubmitState === 'waiting' ? 'Waiting opponent...' : liveSubmitState === 'finished' ? 'Finished' : 'Submit result'}
+                {loading
+                  ? 'Loading...'
+                  : liveSubmitState === 'waiting'
+                  ? 'Waiting opponent...'
+                  : liveSubmitState === 'finished'
+                  ? 'Finished'
+                  : 'Submit result'}
               </button>
 
-              {finishResponse && <div className="mt-3 text-xs whitespace-pre-wrap opacity-90">{JSON.stringify(finishResponse, null, 2)}</div>}
+              {finishResponse && (
+                <div className="mt-3 text-xs whitespace-pre-wrap opacity-90">
+                  {JSON.stringify(finishResponse, null, 2)}
+                </div>
+              )}
             </div>
           )}
 
           <div className="mt-4 flex gap-2">
-            <button onClick={resetToLobby} className="flex-1 rounded-xl bg-[#0b1320] border border-[#00f0ff30] py-2 text-sm">
+            <button
+              onClick={resetToLobby}
+              className="flex-1 rounded-xl bg-[#0b1320] border border-[#00f0ff30] py-2 text-sm"
+            >
               Back to lobby
             </button>
           </div>
@@ -642,6 +562,7 @@ const Pvp: React.FC = () => {
 
       {screen === 'lobby' && (
         <div className="mt-4 space-y-4">
+          {/* Live duel link */}
           <div className="rounded-2xl bg-[#0e1a2b] border border-[#00f0ff40] p-4">
             <div className="flex items-center justify-between">
               <div className="font-bold">🔗 Live duel link</div>
@@ -649,9 +570,14 @@ const Pvp: React.FC = () => {
             </div>
 
             <div className="mt-3 grid grid-cols-2 gap-2">
-              <button disabled={loading} onClick={onCreateInvite} className="rounded-xl bg-[#00f0ff] text-black font-bold py-2 disabled:opacity-60">
+              <button
+                disabled={loading}
+                onClick={onCreateInvite}
+                className="rounded-xl bg-[#00f0ff] text-black font-bold py-2 disabled:opacity-60"
+              >
                 Create link
               </button>
+
               <button
                 disabled={loading || !createdInvite?.invite_code}
                 onClick={onCancelInvite}
@@ -663,40 +589,32 @@ const Pvp: React.FC = () => {
 
             {createdInvite?.invite_code && (
               <div className="mt-3 rounded-xl bg-[#0b1320] border border-[#00f0ff20] p-3 text-xs">
-                <div className="opacity-80">invite_code:</div>
-                <div className="font-mono text-sm">{createdInvite.invite_code}</div>
-
-                <div className="mt-2 opacity-80">link:</div>
+                <div className="opacity-80">link:</div>
                 <div className="font-mono break-all">{buildInviteLink(createdInvite.invite_code)}</div>
 
                 <div className="mt-2 grid grid-cols-2 gap-2">
-                  <button onClick={() => copyText(buildInviteLink(createdInvite.invite_code))} className="rounded-xl bg-[#0b1320] border border-[#00f0ff30] py-2 text-sm">
-                    Copy link
+                  <button
+                    onClick={() => copyText(buildInviteLink(createdInvite.invite_code))}
+                    className="rounded-xl bg-[#0b1320] border border-[#00f0ff30] py-2 text-sm"
+                  >
+                    Copy
                   </button>
-                  <button onClick={() => shareInvite(createdInvite.invite_code)} className="rounded-xl bg-[#00f0ff] text-black font-bold py-2">
+
+                  <button
+                    onClick={() => shareInvite(createdInvite.invite_code)}
+                    className="rounded-xl bg-[#00f0ff] text-black font-bold py-2"
+                  >
                     Share
                   </button>
                 </div>
 
-                <div className="mt-2 text-[11px] opacity-60">After friend opens the link, match will appear automatically.</div>
+                <div className="mt-2 text-[11px] opacity-60">Friend opens link → duel starts automatically.</div>
               </div>
             )}
-
-            <div className="mt-4 text-xs opacity-80">Manual (fallback): paste invite_code</div>
-            <div className="mt-2 flex gap-2">
-              <input
-                value={inviteCode}
-                onChange={(e) => setInviteCode(e.target.value)}
-                placeholder="invite_code"
-                className="flex-1 rounded-xl bg-[#0b1320] border border-[#00f0ff20] px-3 py-2 text-sm font-mono"
-              />
-              <button disabled={loading} onClick={onAcceptInviteManual} className="rounded-xl bg-[#00f0ff] text-black font-bold px-4 py-2 disabled:opacity-60">
-                Join
-              </button>
-            </div>
           </div>
 
-          {queueStatus === 'matched' && matchInfo?.match_token && (
+          {/* Match ready */}
+          {matchInfo?.match_token && (
             <div className="rounded-2xl bg-[#0e1a2b] border border-[#00f0ff40] p-4">
               <div className="font-bold">✅ Match ready</div>
               <div className="mt-2 text-xs opacity-80">
@@ -705,42 +623,33 @@ const Pvp: React.FC = () => {
               <div className="mt-1 text-xs opacity-80">
                 opponent: <span className="font-mono">{computeOpponentUserId() ?? '—'}</span>
               </div>
-              <button onClick={() => startDuel('live')} className="mt-3 w-full rounded-xl bg-[#00f0ff] text-black font-bold py-2">
+              <button
+                onClick={() => startDuel('live')}
+                className="mt-3 w-full rounded-xl bg-[#00f0ff] text-black font-bold py-2"
+              >
                 Start duel
               </button>
             </div>
           )}
 
-          <div className="rounded-2xl bg-[#0e1a2b] border border-[#00f0ff40] p-4">
-            <div className="font-bold">🎲 Random matchmaking</div>
-
-            <div className="mt-3 grid grid-cols-2 gap-2">
-              <button
-                disabled={loading || queueStatus === 'waiting'}
-                onClick={onJoinQueue}
-                className="rounded-xl bg-[#00f0ff] text-black font-bold py-2 disabled:opacity-60"
-              >
-                {queueStatus === 'waiting' ? 'Searching...' : 'Find opponent'}
-              </button>
-              <button
-                disabled={loading || queueStatus !== 'waiting'}
-                onClick={onLeaveQueue}
-                className="rounded-xl bg-[#0b1320] border border-[#00f0ff30] py-2 text-sm disabled:opacity-60"
-              >
-                Stop
-              </button>
-            </div>
-          </div>
-
+          {/* Challenge */}
           <div className="rounded-2xl bg-[#0e1a2b] border border-[#00f0ff40] p-4">
             <div className="font-bold">🧱 Challenge</div>
             <div className="mt-1 text-xs opacity-70">Play vs someone’s best result (no stake). Limit: 5/day.</div>
 
-            <button disabled={loading} onClick={onChallengeStart} className="mt-3 w-full rounded-xl bg-[#00f0ff] text-black font-bold py-2 disabled:opacity-60">
+            <button
+              disabled={loading}
+              onClick={onChallengeStart}
+              className="mt-3 w-full rounded-xl bg-[#00f0ff] text-black font-bold py-2 disabled:opacity-60"
+            >
               {loading ? 'Loading...' : 'Start challenge'}
             </button>
 
-            {challengeStartResp && <div className="mt-3 text-xs opacity-80 whitespace-pre-wrap">{JSON.stringify(challengeStartResp, null, 2)}</div>}
+            {challengeStartResp && (
+              <div className="mt-3 text-xs opacity-80 whitespace-pre-wrap">
+                {JSON.stringify(challengeStartResp, null, 2)}
+              </div>
+            )}
           </div>
         </div>
       )}
