@@ -35,7 +35,7 @@ async function apiRequest<T>(path: string, opts?: RequestInit): Promise<T> {
 type Screen = 'lobby' | 'duel' | 'result';
 type DuelMode = 'live' | 'challenge';
 
-// IMPORTANT: Telegram usernames must NOT include "@" in t.me links.
+// Telegram username must be WITHOUT "@"
 const BOT_USERNAME = 'monolit_42_bot';
 
 function buildInviteLink(code: string) {
@@ -44,6 +44,27 @@ function buildInviteLink(code: string) {
 
 function buildShareLink(url: string, text: string) {
   return `https://t.me/share/url?url=${encodeURIComponent(url)}&text=${encodeURIComponent(text)}`;
+}
+
+function pickVictories(me: any): number {
+  // support multiple backend shapes
+  const v =
+    me?.pvp_victories ??
+    me?.victories ??
+    me?.pvp_weekly_victories ??
+    me?.weekly_victories ??
+    0;
+  return Number.isFinite(Number(v)) ? Number(v) : 0;
+}
+
+function pickBest(me: any): number {
+  const b =
+    me?.pvp_best_result ??
+    me?.best_result ??
+    me?.best ??
+    me?.pvp_best ??
+    0;
+  return Number.isFinite(Number(b)) ? Number(b) : 0;
 }
 
 const Pvp: React.FC = () => {
@@ -106,6 +127,15 @@ const Pvp: React.FC = () => {
     }
   };
 
+  const refreshMe = async () => {
+    if (!telegramId) return;
+    try {
+      const me = await apiRequest<any>(`/api/pvp/me?telegram_id=${telegramId}`);
+      if (me?.user_id) setMeUserId(me.user_id);
+      setMeInfo(me);
+    } catch {}
+  };
+
   useEffect(() => {
     (async () => {
       try {
@@ -119,89 +149,13 @@ const Pvp: React.FC = () => {
       stopInvitePoll();
       stopLivePoll();
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
-    (async () => {
-      if (!telegramId) return;
-      try {
-        const me = await apiRequest<any>(`/api/pvp/me?telegram_id=${telegramId}`);
-        if (me?.user_id) setMeUserId(me.user_id);
-        setMeInfo(me);
-      } catch {}
-    })();
-  }, [telegramId]);
-
-  useEffect(() => {
-    // Auto-accept by deep link: start_param = pvp_<code>
-    const sp = (WebApp.initDataUnsafe as any)?.start_param;
-    if (!telegramId) return;
-    if (!sp || typeof sp !== 'string') return;
-    if (!sp.startsWith('pvp_')) return;
-
-    const code = sp.replace('pvp_', '').trim();
-    if (!code) return;
-
-    (async () => {
-      setError('');
-      setLoading(true);
-      try {
-        const data = await apiRequest<any>('/api/pvp/invite/accept', {
-          method: 'POST',
-          body: JSON.stringify({ telegram_id: telegramId, invite_code: code }),
-        });
-        setMatchInfo(data);
-
-        if (data?.match_token) startDuel('live');
-      } catch (e: any) {
-        setError(e?.message || 'invite accept failed');
-      } finally {
-        setLoading(false);
-      }
-    })();
+    refreshMe();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [telegramId]);
-
-  const startInvitePolling = (code: string) => {
-    stopInvitePoll();
-    invitePollRef.current = window.setInterval(async () => {
-      try {
-        const st = await apiRequest<any>(`/api/pvp/invite/status?invite_code=${encodeURIComponent(code)}`);
-        if (st?.status === 'accepted' && st?.match_token) {
-          setMatchInfo({
-            ok: true,
-            match_token: st.match_token,
-            stake: st.stake ?? stakeDefault,
-            match_duration_sec: st.match_duration_sec ?? matchDurationSec,
-            mode: 'invite',
-            player1_id: st.player1_id,
-            player2_id: st.player2_id,
-          });
-          stopInvitePoll();
-        }
-        if (st?.status === 'expired' || st?.status === 'cancelled') stopInvitePoll();
-      } catch {}
-    }, 1200);
-  };
-
-  const copyText = async (txt: string) => {
-    try {
-      await navigator.clipboard.writeText(txt);
-      WebApp.showToast?.(t('copied', { defaultValue: 'Copied' }));
-    } catch {}
-  };
-
-  const shareInvite = (code: string) => {
-    const url = buildInviteLink(code);
-    const text = t('pvp_invite_share_text', { defaultValue: '⚔️ Join my duel in Gappick! Open this link:' });
-    const tgShare = buildShareLink(url, text);
-
-    try {
-      (WebApp as any).openTelegramLink?.(tgShare);
-    } catch {
-      window.open(tgShare, '_blank');
-    }
-  };
 
   const computeOpponentUserId = (): number | null => {
     if (matchInfo?.opponent_user_id) return matchInfo.opponent_user_id;
@@ -240,6 +194,86 @@ const Pvp: React.FC = () => {
     }, 200);
   };
 
+  // AUTO-ACCEPT (receiver) — when opened by link
+  useEffect(() => {
+    const sp = (WebApp.initDataUnsafe as any)?.start_param;
+    if (!telegramId) return;
+    if (!sp || typeof sp !== 'string') return;
+    if (!sp.startsWith('pvp_')) return;
+
+    const code = sp.replace('pvp_', '').trim();
+    if (!code) return;
+
+    (async () => {
+      setError('');
+      setLoading(true);
+      try {
+        const data = await apiRequest<any>('/api/pvp/invite/accept', {
+          method: 'POST',
+          body: JSON.stringify({ telegram_id: telegramId, invite_code: code }),
+        });
+        setMatchInfo(data);
+
+        // receiver starts duel automatically
+        if (data?.match_token) startDuel('live');
+      } catch (e: any) {
+        setError(e?.message || 'invite accept failed');
+      } finally {
+        setLoading(false);
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [telegramId]);
+
+  // Poll invite status for sender and auto-start duel when accepted
+  const startInvitePolling = (code: string) => {
+    stopInvitePoll();
+    invitePollRef.current = window.setInterval(async () => {
+      try {
+        const st = await apiRequest<any>(`/api/pvp/invite/status?invite_code=${encodeURIComponent(code)}`);
+
+        if (st?.status === 'accepted' && st?.match_token) {
+          const mi = {
+            ok: true,
+            match_token: st.match_token,
+            stake: st.stake ?? stakeDefault,
+            match_duration_sec: st.match_duration_sec ?? matchDurationSec,
+            mode: 'invite',
+            player1_id: st.player1_id,
+            player2_id: st.player2_id,
+            // sometimes backend doesn't return opponent_user_id here
+          };
+          setMatchInfo(mi);
+          stopInvitePoll();
+
+          // ✅ sender starts duel automatically too
+          if (screen !== 'duel') startDuel('live');
+        }
+
+        if (st?.status === 'expired' || st?.status === 'cancelled') stopInvitePoll();
+      } catch {}
+    }, 800);
+  };
+
+  const copyText = async (txt: string) => {
+    try {
+      await navigator.clipboard.writeText(txt);
+      WebApp.showToast?.(t('copied', { defaultValue: 'Copied' }));
+    } catch {}
+  };
+
+  const shareInvite = (code: string) => {
+    const url = buildInviteLink(code);
+    const text = t('pvp_invite_share_text', { defaultValue: '⚔️ Join my duel in Gappick! Open this link:' });
+    const tgShare = buildShareLink(url, text);
+
+    try {
+      (WebApp as any).openTelegramLink?.(tgShare);
+    } catch {
+      window.open(tgShare, '_blank');
+    }
+  };
+
   const addClicks = (delta: number) => {
     if (screen !== 'duel') return;
     if (duelSecondsLeft <= 0) return;
@@ -261,23 +295,20 @@ const Pvp: React.FC = () => {
         const st = await apiRequest<any>(
           `/api/pvp/live/status?telegram_id=${telegramId}&match_token=${encodeURIComponent(matchToken)}`
         );
+
         if (st?.status === 'finished' && (st?.result || st?.match_id)) {
           setLiveSubmitState('finished');
           setFinishResponse(st?.result || st);
           stopLivePoll();
-
-          try {
-            const me = await apiRequest<any>(`/api/pvp/me?telegram_id=${telegramId}`);
-            if (me?.user_id) setMeUserId(me.user_id);
-            setMeInfo(me);
-          } catch {}
+          await refreshMe();
         }
+
         if (st?.status === 'expired') {
           setError('Session expired');
           stopLivePoll();
         }
       } catch {}
-    }, 1200);
+    }, 900);
   };
 
   const onLiveSubmit = async () => {
@@ -301,12 +332,7 @@ const Pvp: React.FC = () => {
       if (res?.status === 'finished') {
         setLiveSubmitState('finished');
         setFinishResponse(res);
-
-        try {
-          const me = await apiRequest<any>(`/api/pvp/me?telegram_id=${telegramId}`);
-          if (me?.user_id) setMeUserId(me.user_id);
-          setMeInfo(me);
-        } catch {}
+        await refreshMe();
       } else {
         setLiveSubmitState('waiting');
         pollLiveStatus(matchInfo.match_token);
@@ -318,7 +344,7 @@ const Pvp: React.FC = () => {
     }
   };
 
-  // ---- Challenge (as is) ----
+  // Challenge
   const onChallengeStart = async () => {
     if (!telegramId) return;
     setError('');
@@ -353,12 +379,7 @@ const Pvp: React.FC = () => {
         body: JSON.stringify({ telegram_id: telegramId, attempt_id: challengeAttemptId, my_clicks: myClicks }),
       });
       setChallengeFinishResp(res);
-
-      try {
-        const me = await apiRequest<any>(`/api/pvp/me?telegram_id=${telegramId}`);
-        if (me?.user_id) setMeUserId(me.user_id);
-        setMeInfo(me);
-      } catch {}
+      await refreshMe();
     } catch (e: any) {
       setError(e?.message || 'challenge finish failed');
     } finally {
@@ -419,6 +440,8 @@ const Pvp: React.FC = () => {
   };
 
   const isChallenge = duelMode === 'challenge';
+  const victories = pickVictories(meInfo);
+  const best = pickBest(meInfo);
 
   return (
     <div className="px-4 pt-4 text-white">
@@ -441,7 +464,7 @@ const Pvp: React.FC = () => {
         {meInfo && (
           <div className="mt-3 text-xs opacity-80">
             <div>you: #{meInfo.user_id} @{meInfo.username || '—'}</div>
-            <div>victories: {meInfo.pvp_victories ?? 0} | best: {meInfo.pvp_best_result ?? 0}</div>
+            <div>victories: {victories} | best: {best}</div>
           </div>
         )}
       </div>
@@ -495,10 +518,7 @@ const Pvp: React.FC = () => {
           </div>
 
           <div className="mt-4 flex gap-2">
-            <button
-              onClick={resetToLobby}
-              className="flex-1 rounded-xl bg-[#0b1320] border border-[#00f0ff30] py-2 text-sm"
-            >
+            <button onClick={resetToLobby} className="flex-1 rounded-xl bg-[#0b1320] border border-[#00f0ff30] py-2 text-sm">
               Back
             </button>
           </div>
@@ -520,9 +540,7 @@ const Pvp: React.FC = () => {
               </button>
 
               {challengeFinishResp && (
-                <div className="mt-3 text-xs whitespace-pre-wrap opacity-90">
-                  {JSON.stringify(challengeFinishResp, null, 2)}
-                </div>
+                <div className="mt-3 text-xs whitespace-pre-wrap opacity-90">{JSON.stringify(challengeFinishResp, null, 2)}</div>
               )}
             </div>
           ) : (
@@ -542,18 +560,13 @@ const Pvp: React.FC = () => {
               </button>
 
               {finishResponse && (
-                <div className="mt-3 text-xs whitespace-pre-wrap opacity-90">
-                  {JSON.stringify(finishResponse, null, 2)}
-                </div>
+                <div className="mt-3 text-xs whitespace-pre-wrap opacity-90">{JSON.stringify(finishResponse, null, 2)}</div>
               )}
             </div>
           )}
 
           <div className="mt-4 flex gap-2">
-            <button
-              onClick={resetToLobby}
-              className="flex-1 rounded-xl bg-[#0b1320] border border-[#00f0ff30] py-2 text-sm"
-            >
+            <button onClick={resetToLobby} className="flex-1 rounded-xl bg-[#0b1320] border border-[#00f0ff30] py-2 text-sm">
               Back to lobby
             </button>
           </div>
@@ -608,29 +621,10 @@ const Pvp: React.FC = () => {
                   </button>
                 </div>
 
-                <div className="mt-2 text-[11px] opacity-60">Friend opens link → duel starts automatically.</div>
+                <div className="mt-2 text-[11px] opacity-60">Friend opens link → duel starts automatically for both.</div>
               </div>
             )}
           </div>
-
-          {/* Match ready */}
-          {matchInfo?.match_token && (
-            <div className="rounded-2xl bg-[#0e1a2b] border border-[#00f0ff40] p-4">
-              <div className="font-bold">✅ Match ready</div>
-              <div className="mt-2 text-xs opacity-80">
-                token: <span className="font-mono">{matchInfo.match_token}</span>
-              </div>
-              <div className="mt-1 text-xs opacity-80">
-                opponent: <span className="font-mono">{computeOpponentUserId() ?? '—'}</span>
-              </div>
-              <button
-                onClick={() => startDuel('live')}
-                className="mt-3 w-full rounded-xl bg-[#00f0ff] text-black font-bold py-2"
-              >
-                Start duel
-              </button>
-            </div>
-          )}
 
           {/* Challenge */}
           <div className="rounded-2xl bg-[#0e1a2b] border border-[#00f0ff40] p-4">
@@ -646,9 +640,7 @@ const Pvp: React.FC = () => {
             </button>
 
             {challengeStartResp && (
-              <div className="mt-3 text-xs opacity-80 whitespace-pre-wrap">
-                {JSON.stringify(challengeStartResp, null, 2)}
-              </div>
+              <div className="mt-3 text-xs opacity-80 whitespace-pre-wrap">{JSON.stringify(challengeStartResp, null, 2)}</div>
             )}
           </div>
         </div>
