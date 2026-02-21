@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -19,6 +20,7 @@ from app.services.pvp_service import (
 from app.routers.pvp_common import (
     CHALLENGE_DAILY_LIMIT,
     ChallengeRunRequest,
+    PVP_MATCH_DURATION_SEC,
     _cleanup_expired,
     _ensure_registered_user,
 )
@@ -26,8 +28,90 @@ from app.routers.pvp_common import (
 router = APIRouter(prefix="/api/pvp", tags=["pvp"])
 
 
+class ChallengeStartRequest(BaseModel):
+    telegram_id: int
+
+
+@router.post("/challenge/start")
+async def challenge_start(body: ChallengeStartRequest, session: AsyncSession = Depends(get_async_session)):
+    """
+    Challenge = кнопка запуска (без ссылок, без инвайтов).
+    Возвращаем:
+      - opponent_user_id
+      - opponent_best_result
+      - attempts_today / attempts_left
+      - match_duration_sec (30)
+    """
+    async with session.begin():
+        await _cleanup_expired(session)
+
+        me_user = await _ensure_registered_user(session, body.telegram_id)
+
+        attempts_today = await count_today_challenge_attempts(session, challenger_id=me_user.id)
+        if attempts_today >= CHALLENGE_DAILY_LIMIT:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "CHALLENGE_LIMIT",
+                    "message": f"Daily limit reached: {attempts_today}/{CHALLENGE_DAILY_LIMIT}",
+                    "attempts_today": attempts_today,
+                    "limit": CHALLENGE_DAILY_LIMIT,
+                },
+            )
+
+        my_best = int(getattr(me_user, "pvp_best_result", 0) or 0)
+        low, high = calc_best_result_range(my_best)
+
+        # Пытаемся подобрать по диапазону
+        q = (
+            select(User)
+            .where(User.id != me_user.id)
+            .where(func.coalesce(User.pvp_best_result, 0).between(low, high))
+            .order_by(func.random())
+            .limit(1)
+        )
+        opp = (await session.execute(q)).scalar_one_or_none()
+
+        # Фолбэк: любой случайный
+        if not opp:
+            opp = (
+                await session.execute(
+                    select(User).where(User.id != me_user.id).order_by(func.random()).limit(1)
+                )
+            ).scalar_one_or_none()
+
+        if not opp:
+            return {
+                "ok": False,
+                "code": "NO_OPPONENT",
+                "message": "No opponent found",
+                "attempts_today": attempts_today,
+                "attempts_left": max(0, CHALLENGE_DAILY_LIMIT - attempts_today),
+                "match_duration_sec": PVP_MATCH_DURATION_SEC,
+            }
+
+        return {
+            "ok": True,
+            "attempts_today": attempts_today,
+            "attempts_left": max(0, CHALLENGE_DAILY_LIMIT - attempts_today),
+            "match_duration_sec": PVP_MATCH_DURATION_SEC,
+            "opponent": {
+                "user_id": opp.id,
+                "telegram_id": opp.telegram_id,
+                "username": getattr(opp, "username", None),
+                "first_name": getattr(opp, "first_name", None),
+                "best_result": int(getattr(opp, "pvp_best_result", 0) or 0),
+                "victories": int(getattr(opp, "pvp_victories", 0) or 0),
+            },
+        }
+
+
 @router.post("/challenge/run")
 async def challenge_run(body: ChallengeRunRequest, session: AsyncSession = Depends(get_async_session)):
+    """
+    Фиксация результата Challenge.
+    (Это и есть "finish" в текущей модели БД: запись создаётся после игры.)
+    """
     async with session.begin():
         await _cleanup_expired(session)
 
