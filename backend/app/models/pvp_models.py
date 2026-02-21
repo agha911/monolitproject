@@ -16,6 +16,7 @@ from sqlalchemy import (
     func,
 )
 from sqlalchemy.orm import relationship
+from sqlalchemy.sql import func
 
 from app.database import Base
 
@@ -202,3 +203,25 @@ class PvpSession(Base):
         Index("ix_pvp_sessions_status_expires_at", "status", "expires_at"),
     )
 
+
+class PvpChallengeAttempt(Base):
+    __tablename__ = "pvp_challenge_attempts"
+
+    id = Column(Integer, primary_key=True, index=True)
+
+    challenger_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    opponent_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+
+    opponent_best_result = Column(Integer, nullable=False)
+
+    status = Column(String(16), nullable=False, server_default="started")  # started | finished | expired
+
+    started_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    expires_at = Column(DateTime(timezone=True), nullable=False, server_default=(func.now() + func.make_interval(0, 0, 0, 0, 0, 10, 0)))  # +10 minutes
+
+    finished_at = Column(DateTime(timezone=True), nullable=True)
+    challenger_clicks = Column(Integer, nullable=True)
+    is_win = Column(Boolean, nullable=True)
+
+    challenger = relationship("User", foreign_keys=[challenger_id])
+    opponent = relationship("User", foreign_keys=[opponent_id])
