@@ -5,21 +5,19 @@ from __future__ import annotations
 import os
 import secrets
 from datetime import datetime, timedelta, timezone
-from typing import Optional, Any, Dict, List
+from typing import Optional, Any, Dict
 
 import requests
 from fastapi import APIRouter, Depends, HTTPException, Header
 from pydantic import BaseModel, Field
-from sqlalchemy import select, func, or_
+from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.database import get_async_session
 from app.models.user import User
-from app.models.pvp_models import PvpInvite, PvpQueue, PvpSession, PvpMatch, ChallengeMatch
+from app.models.pvp_models import PvpInvite, PvpQueue, PvpSession
 from app.helpers.pvp_helpers import (
-    az_now,
-    az_day_bounds_utc,
     calc_best_result_range,
 )
 from app.crud.crud_pvp import (
@@ -55,7 +53,6 @@ CHALLENGE_DAILY_LIMIT = 5
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 
-# referral_cache ожидается в main (как у тебя уже сделано)
 try:
     from app.main import referral_cache  # type: ignore
 except Exception:
@@ -185,12 +182,6 @@ async def _cleanup_expired(session: AsyncSession) -> None:
 
 
 async def _ensure_registered_user(session: AsyncSession, telegram_id: int) -> User:
-    """
-    "Стандартная регистрация" для PvP (аналог main.py, но без init_data):
-    - Если user есть: дозаполняем username/first/last через Bot API.
-      Если есть referral_cache и invited_by — можно начислять бонусы (как у тебя заведено).
-    - Если нет: создаём user.
-    """
     q = select(User).where(User.telegram_id == telegram_id)
     user = (await session.execute(q)).scalar_one_or_none()
 
@@ -411,9 +402,6 @@ async def challenge_status(telegram_id: int, session: AsyncSession = Depends(get
 
 @router.get("/challenge/opponent")
 async def challenge_pick_opponent(telegram_id: int, session: AsyncSession = Depends(get_async_session)):
-    """
-    Подбор оппонента по диапазону best_result (best +/- %)
-    """
     me = await _ensure_registered_user(session, telegram_id)
     my_best = int(getattr(me, "pvp_best_result", 0) or 0)
 
@@ -428,7 +416,6 @@ async def challenge_pick_opponent(telegram_id: int, session: AsyncSession = Depe
     )
     opp = (await session.execute(q)).scalar_one_or_none()
     if not opp:
-        # fallback: кто угодно
         opp = (await session.execute(select(User).where(User.id != me.id).order_by(func.random()).limit(1))).scalar_one_or_none()
 
     if not opp:
@@ -479,7 +466,7 @@ async def invite_create(body: InviteCreateRequest, session: AsyncSession = Depen
             "stake": PVP_DEFAULT_STAKE,
             "expires_at": expires_at.isoformat(),
             "start_param": f"pvp_{code}",
-            "match_duration_sec": PVP_MATCH_DURATION_SEC,  # ✅ NEW (удобно сразу)
+            "match_duration_sec": PVP_MATCH_DURATION_SEC,
         }
 
 
@@ -511,8 +498,13 @@ async def invite_accept(body: InviteAcceptRequest, session: AsyncSession = Depen
 
         opponent = await _ensure_registered_user(session, body.telegram_id)
 
+        # ✅ ВАЖНО: блокируем инвайт, чтобы два человека не приняли одновременно
         inv = (
-            (await session.execute(select(PvpInvite).where(PvpInvite.code == body.invite_code)))
+            (await session.execute(
+                select(PvpInvite)
+                .where(PvpInvite.code == body.invite_code)
+                .with_for_update()
+            ))
             .scalar_one_or_none()
         )
         if not inv:
@@ -524,7 +516,6 @@ async def invite_accept(body: InviteAcceptRequest, session: AsyncSession = Depen
         if inv.creator_user_id == opponent.id:
             raise HTTPException(status_code=409, detail={"code": "INVITE_SELF", "message": "Can't accept your own invite"})
 
-        # stake checks
         if int(getattr(opponent, "total_xp", 0) or 0) < PVP_DEFAULT_STAKE:
             raise HTTPException(status_code=409, detail={"code": "INSUFFICIENT_COINS", "message": "Not enough coins for stake"})
 
@@ -604,7 +595,6 @@ async def matchmaking_join(body: MatchmakingJoinRequest, session: AsyncSession =
         if int(getattr(user, "total_xp", 0) or 0) < PVP_DEFAULT_STAKE:
             raise HTTPException(status_code=409, detail={"code": "INSUFFICIENT_COINS", "message": "Not enough coins for stake"})
 
-        # upsert into queue
         expires_at = datetime.now(timezone.utc) + timedelta(seconds=PVP_QUEUE_TTL_SEC)
 
         stmt = pg_insert(PvpQueue).values(
@@ -662,9 +652,10 @@ async def matchmaking_poll(telegram_id: int, session: AsyncSession = Depends(get
     async with session.begin():
         await _cleanup_expired(session)
 
+        now = datetime.now(timezone.utc)
+
         me = await _ensure_registered_user(session, telegram_id)
 
-        # 1) Берём ID моей очереди (без JOIN) и при необходимости лочим уже через session.get
         my_q_id = (
             await session.execute(
                 select(PvpQueue.id).where(PvpQueue.user_id == me.id).limit(1)
@@ -678,7 +669,13 @@ async def matchmaking_poll(telegram_id: int, session: AsyncSession = Depends(get
         if not my_q:
             return {"ok": True, "status": "not_in_queue"}
 
-        # 2) Если уже matched — просто отдаём match_token (сессию тоже читаем без FOR UPDATE)
+        # если очередь уже протухла — маркируем и отдаём expired
+        if my_q.status == "waiting" and my_q.expires_at and my_q.expires_at < now:
+            my_q.status = "expired"
+            await session.flush()
+            return {"ok": True, "status": "expired"}
+
+        # 2) Если уже matched — отдаём session и opponent_user_id корректно
         if my_q.status == "matched" and my_q.match_token:
             sess = (
                 await session.execute(
@@ -687,6 +684,7 @@ async def matchmaking_poll(telegram_id: int, session: AsyncSession = Depends(get
             ).scalar_one_or_none()
 
             if sess:
+                opponent_user_id = int(sess.player2_id) if int(sess.player1_id) == int(me.id) else int(sess.player1_id)
                 return {
                     "ok": True,
                     "status": "matched",
@@ -700,12 +698,15 @@ async def matchmaking_poll(telegram_id: int, session: AsyncSession = Depends(get
                     "opponent_user_id": opponent_user_id,
                 }
 
-        # 3) Ищем оппонента: ЛОЧИМ только pvp_queue.id (без JOIN) с SKIP LOCKED
+        # 3) Ищем оппонента: берём только "живые" waiting
         opp_q_id = (
             await session.execute(
                 select(PvpQueue.id)
                 .where(PvpQueue.status == "waiting")
                 .where(PvpQueue.user_id != me.id)
+                .where(
+                    (PvpQueue.expires_at.is_(None)) | (PvpQueue.expires_at >= now)
+                )
                 .order_by(PvpQueue.created_at.asc())
                 .limit(1)
                 .with_for_update(skip_locked=True)
@@ -715,21 +716,17 @@ async def matchmaking_poll(telegram_id: int, session: AsyncSession = Depends(get
         if not opp_q_id:
             return {"ok": True, "status": my_q.status}
 
-        # 4) Лочим строку оппонента отдельным session.get — без JOIN, без outer join проблем
         opp_q = await session.get(PvpQueue, opp_q_id, with_for_update=True)
         if not opp_q:
             return {"ok": True, "status": "waiting"}
 
-        # 5) Проверяем, что я всё ещё waiting
         if my_q.status != "waiting":
             return {"ok": True, "status": my_q.status}
 
-        # 6) Подтягиваем оппонента (можно без lock, но stake-check нужен)
         opponent = (
             await session.execute(select(User).where(User.id == opp_q.user_id).limit(1))
         ).scalar_one()
 
-        # stake checks (оппонент мог потратить монеты)
         if int(getattr(opponent, "total_xp", 0) or 0) < PVP_DEFAULT_STAKE:
             opp_q.status = "expired"
             await session.flush()
@@ -740,7 +737,6 @@ async def matchmaking_poll(telegram_id: int, session: AsyncSession = Depends(get
             await session.flush()
             return {"ok": True, "status": "expired", "message": "Not enough coins anymore"}
 
-        # 7) Матчим
         match_token = _gen_match_token()
         expires_at = datetime.now(timezone.utc) + timedelta(seconds=PVP_SESSION_TTL_SEC)
 
@@ -754,7 +750,6 @@ async def matchmaking_poll(telegram_id: int, session: AsyncSession = Depends(get
         opp_q.match_token = match_token
         opp_q.expires_at = None
 
-        # 8) Создаём session матча
         sess = PvpSession(
             match_token=match_token,
             player1_id=me.id,
@@ -766,6 +761,8 @@ async def matchmaking_poll(telegram_id: int, session: AsyncSession = Depends(get
             expires_at=expires_at,
         )
         session.add(sess)
+
+        opponent_user_id = int(opponent.id)
 
         return {
             "ok": True,
@@ -787,15 +784,11 @@ async def matchmaking_poll(telegram_id: int, session: AsyncSession = Depends(get
 
 @router.post("/admin/reset-weekly")
 async def admin_reset_weekly(secret_key: Optional[str] = Header(default=None), session: AsyncSession = Depends(get_async_session)):
-    """
-    Простой "админ" эндпоинт: сброс victories раз в неделю.
-    """
     admin_key = os.getenv("PVP_ADMIN_KEY", "")
     if not admin_key or secret_key != admin_key:
         raise HTTPException(status_code=403, detail={"code": "FORBIDDEN", "message": "Invalid admin key"})
 
     async with session.begin():
-        # reset
         await session.execute(
             User.__table__.update().values(pvp_victories=0)  # type: ignore
         )
