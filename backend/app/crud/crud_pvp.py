@@ -11,10 +11,9 @@ from sqlalchemy import select, desc, func, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.user import User
-from app.models.pvp_models import PvpMatch, ChallengeMatch
+from app.models.pvp_models import PvpMatch, ChallengeMatch, PvpChallengeAttempt
 
-# ✅ новая модель попыток Challenge
-from app.models.pvp_challenge_attempt import PvpChallengeAttempt
+
 
 from sqlalchemy import and_, or_
 
