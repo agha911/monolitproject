@@ -11,7 +11,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.database import get_async_session
 from app.models.user import User
-from app.models.pvp_models import PvpInvite, PvpQueue, PvpSession
+from app.models.pvp_models import PvpInvite, PvpQueue, PvpSession, PvpMatch
 from app.services.pvp_service import (
     finish_live_pvp_session,
     InsufficientCoins,
@@ -33,6 +33,7 @@ from app.routers.pvp_common import (
     MatchmakingJoinRequest,
     MatchmakingLeaveRequest,
     LiveFinishRequest,
+    LiveSubmitRequest,
     _cleanup_expired,
     _ensure_registered_user,
     _gen_invite_code,
@@ -44,6 +45,10 @@ router = APIRouter(prefix="/api/pvp", tags=["pvp"])
 
 @router.post("/live/finish")
 async def live_finish(body: LiveFinishRequest, session: AsyncSession = Depends(get_async_session)):
+    """
+    OLD debug endpoint (kept for tests):
+    requester sends both clicks. Frontend should NOT use it in production.
+    """
     async with session.begin():
         await _cleanup_expired(session)
         me = await _ensure_registered_user(session, body.telegram_id)
@@ -78,6 +83,163 @@ async def live_finish(body: LiveFinishRequest, session: AsyncSession = Depends(g
             "player1_total_xp": res.player1_total_xp,
             "player2_total_xp": res.player2_total_xp,
         }
+
+
+@router.post("/live/submit")
+async def live_submit(body: LiveSubmitRequest, session: AsyncSession = Depends(get_async_session)):
+    """
+    PRODUCTION Live PvP:
+    - each player submits ONLY their clicks
+    - second submit triggers finalize
+    """
+    async with session.begin():
+        await _cleanup_expired(session)
+        me = await _ensure_registered_user(session, body.telegram_id)
+
+        sess = (
+            (await session.execute(
+                select(PvpSession).where(PvpSession.match_token == body.match_token).with_for_update()
+            ))
+            .scalar_one_or_none()
+        )
+        if not sess:
+            raise HTTPException(status_code=404, detail={"code": "SESSION_NOT_FOUND", "message": "Match session not found"})
+
+        now = datetime.now(timezone.utc)
+
+        if sess.expires_at and sess.expires_at < now:
+            sess.status = "expired"
+            await session.flush()
+            raise HTTPException(status_code=409, detail={"code": "SESSION_EXPIRED", "message": "Match session expired"})
+
+        if sess.status != "active":
+            raise HTTPException(status_code=409, detail={"code": "SESSION_NOT_ACTIVE", "message": f"Session is not active: {sess.status}"})
+
+        players = {int(sess.player1_id), int(sess.player2_id)}
+        if int(me.id) not in players:
+            raise HTTPException(status_code=403, detail={"code": "FORBIDDEN", "message": "Not a participant"})
+
+        # save my clicks
+        if int(me.id) == int(sess.player1_id):
+            if sess.player1_reported_clicks is not None:
+                raise HTTPException(status_code=409, detail={"code": "ALREADY_SUBMITTED", "message": "You already submitted"})
+            sess.player1_reported_clicks = int(body.my_clicks)
+            sess.player1_reported_at = now
+        else:
+            if sess.player2_reported_clicks is not None:
+                raise HTTPException(status_code=409, detail={"code": "ALREADY_SUBMITTED", "message": "You already submitted"})
+            sess.player2_reported_clicks = int(body.my_clicks)
+            sess.player2_reported_at = now
+
+        await session.flush()
+
+        p1_done = sess.player1_reported_clicks is not None
+        p2_done = sess.player2_reported_clicks is not None
+
+        if p1_done and p2_done:
+            opponent_user_id = int(sess.player2_id) if int(me.id) == int(sess.player1_id) else int(sess.player1_id)
+
+            if int(me.id) == int(sess.player1_id):
+                opponent_clicks = int(sess.player2_reported_clicks or 0)
+                my_clicks = int(sess.player1_reported_clicks or 0)
+            else:
+                opponent_clicks = int(sess.player1_reported_clicks or 0)
+                my_clicks = int(sess.player2_reported_clicks or 0)
+
+            try:
+                res = await finish_live_pvp_session(
+                    session,
+                    match_token=sess.match_token,
+                    requester_user_id=int(me.id),
+                    opponent_user_id=opponent_user_id,
+                    requester_clicks=my_clicks,
+                    opponent_clicks=opponent_clicks,
+                    stake_fixed=PVP_DEFAULT_STAKE,
+                )
+            except (SessionNotFound, SessionNotActive, SessionExpired) as e:
+                raise HTTPException(status_code=409, detail={"code": getattr(e, "code", "PVP_SESSION_ERROR"), "message": str(e)})
+            except InsufficientCoins as e:
+                raise HTTPException(status_code=409, detail={"code": "INSUFFICIENT_COINS", "message": str(e)})
+            except InvalidPayload as e:
+                raise HTTPException(status_code=422, detail={"code": "INVALID_PAYLOAD", "message": str(e)})
+
+            return {
+                "ok": True,
+                "status": "finished",
+                "match_token": sess.match_token,
+                "match_id": res.match_id,
+                "winner_id": res.winner_id,
+                "is_draw": res.is_draw,
+                "player1_id": res.player1_id,
+                "player2_id": res.player2_id,
+                "player1_clicks": res.player1_clicks,
+                "player2_clicks": res.player2_clicks,
+                "stake": res.stake,
+                "player1_total_xp": res.player1_total_xp,
+                "player2_total_xp": res.player2_total_xp,
+            }
+
+        return {
+            "ok": True,
+            "status": "waiting",
+            "match_token": sess.match_token,
+            "expires_at": sess.expires_at.isoformat() if sess.expires_at else None,
+            "player1_id": int(sess.player1_id),
+            "player2_id": int(sess.player2_id),
+            "submitted": {
+                "player1": p1_done,
+                "player2": p2_done,
+            },
+        }
+
+
+@router.get("/live/status")
+async def live_status(telegram_id: int, match_token: str, session: AsyncSession = Depends(get_async_session)):
+    await _cleanup_expired(session)
+    me = await _ensure_registered_user(session, telegram_id)
+
+    sess = (
+        (await session.execute(select(PvpSession).where(PvpSession.match_token == match_token).limit(1)))
+        .scalar_one_or_none()
+    )
+    if not sess:
+        raise HTTPException(status_code=404, detail={"code": "SESSION_NOT_FOUND", "message": "Match session not found"})
+
+    players = {int(sess.player1_id), int(sess.player2_id)}
+    if int(me.id) not in players:
+        raise HTTPException(status_code=403, detail={"code": "FORBIDDEN", "message": "Not a participant"})
+
+    out = {
+        "ok": True,
+        "status": sess.status,
+        "match_token": sess.match_token,
+        "expires_at": sess.expires_at.isoformat() if sess.expires_at else None,
+        "finished_at": sess.finished_at.isoformat() if sess.finished_at else None,
+        "player1_id": int(sess.player1_id),
+        "player2_id": int(sess.player2_id),
+        "submitted": {
+            "player1": sess.player1_reported_clicks is not None,
+            "player2": sess.player2_reported_clicks is not None,
+        },
+        "match_id": int(sess.match_id) if sess.match_id else None,
+    }
+
+    if sess.status == "finished" and sess.match_id:
+        m = (await session.execute(select(PvpMatch).where(PvpMatch.id == sess.match_id).limit(1))).scalar_one_or_none()
+        if m:
+            out["result"] = {
+                "match_id": int(m.id),
+                "winner_id": int(m.winner_id) if m.winner_id else None,
+                "is_draw": bool(m.is_draw),
+                "player1_id": int(m.player1_id),
+                "player2_id": int(m.player2_id),
+                "player1_clicks": int(m.player1_clicks),
+                "player2_clicks": int(m.player2_clicks),
+                "stake": int(m.stake),
+                "created_at": m.created_at.isoformat() if m.created_at else None,
+            }
+
+    return out
 
 
 # -----------------------------------------------------------------------------
@@ -123,13 +285,35 @@ async def invite_status(invite_code: str, session: AsyncSession = Depends(get_as
     if not inv:
         return {"ok": False, "message": "Invite not found"}
 
+    match_token = None
+    player1_id = None
+    player2_id = None
+    if inv.status == "accepted":
+        sess = (
+            (await session.execute(
+                select(PvpSession)
+                .where(PvpSession.invite_id == inv.id)
+                .order_by(PvpSession.created_at.desc())
+                .limit(1)
+            ))
+            .scalar_one_or_none()
+        )
+        if sess:
+            match_token = sess.match_token
+            player1_id = int(sess.player1_id)
+            player2_id = int(sess.player2_id)
+
     return {
         "ok": True,
         "invite_code": inv.code,
         "status": inv.status,
+        "match_token": match_token,
+        "player1_id": player1_id,
+        "player2_id": player2_id,
         "creator_user_id": inv.creator_user_id,
         "opponent_user_id": inv.opponent_user_id,
         "stake": inv.stake,
+        "match_duration_sec": PVP_MATCH_DURATION_SEC,
         "expires_at": inv.expires_at.isoformat() if inv.expires_at else None,
         "accepted_at": inv.accepted_at.isoformat() if inv.accepted_at else None,
         "cancelled_at": inv.cancelled_at.isoformat() if inv.cancelled_at else None,
