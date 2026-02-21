@@ -34,8 +34,8 @@ async function apiRequest<T>(path: string, opts?: RequestInit): Promise<T> {
 
 type Screen = 'lobby' | 'duel' | 'result';
 type DuelMode = 'live' | 'challenge';
+type DuelPhase = 'prep' | 'active';
 
-// Telegram username must be WITHOUT "@"
 const BOT_USERNAME = 'monolit_42_bot';
 
 function buildInviteLink(code: string) {
@@ -47,25 +47,16 @@ function buildShareLink(url: string, text: string) {
 }
 
 function pickVictories(me: any): number {
-  // support multiple backend shapes
-  const v =
-    me?.pvp_victories ??
-    me?.victories ??
-    me?.pvp_weekly_victories ??
-    me?.weekly_victories ??
-    0;
+  const v = me?.pvp_victories ?? me?.victories ?? me?.pvp_weekly_victories ?? me?.weekly_victories ?? 0;
   return Number.isFinite(Number(v)) ? Number(v) : 0;
 }
 
 function pickBest(me: any): number {
-  const b =
-    me?.pvp_best_result ??
-    me?.best_result ??
-    me?.best ??
-    me?.pvp_best ??
-    0;
+  const b = me?.pvp_best_result ?? me?.best_result ?? me?.best ?? me?.pvp_best ?? 0;
   return Number.isFinite(Number(b)) ? Number(b) : 0;
 }
+
+const PREP_SECONDS = 5;
 
 const Pvp: React.FC = () => {
   const { t } = useTranslation();
@@ -89,8 +80,13 @@ const Pvp: React.FC = () => {
   const [screen, setScreen] = useState<Screen>('lobby');
   const [duelMode, setDuelMode] = useState<DuelMode>('live');
 
+  // NEW: countdown phase
+  const [phase, setPhase] = useState<DuelPhase>('prep');
+  const [prepSecondsLeft, setPrepSecondsLeft] = useState<number>(0);
+
   const [duelSecondsLeft, setDuelSecondsLeft] = useState<number>(0);
   const duelTimerRef = useRef<number | null>(null);
+  const prepTimerRef = useRef<number | null>(null);
 
   const [myClicks, setMyClicks] = useState<number>(0);
 
@@ -120,6 +116,13 @@ const Pvp: React.FC = () => {
     }
   };
 
+  const stopPrepTimer = () => {
+    if (prepTimerRef.current) {
+      window.clearInterval(prepTimerRef.current);
+      prepTimerRef.current = null;
+    }
+  };
+
   const stopDuelTimer = () => {
     if (duelTimerRef.current) {
       window.clearInterval(duelTimerRef.current);
@@ -145,6 +148,7 @@ const Pvp: React.FC = () => {
     })();
 
     return () => {
+      stopPrepTimer();
       stopDuelTimer();
       stopInvitePoll();
       stopLivePoll();
@@ -169,6 +173,42 @@ const Pvp: React.FC = () => {
     return null;
   };
 
+  const startActiveTimer = () => {
+    stopDuelTimer();
+
+    const startedAt = Date.now();
+    duelTimerRef.current = window.setInterval(() => {
+      const elapsed = Math.floor((Date.now() - startedAt) / 1000);
+      const left = Math.max(0, matchDurationSec - elapsed);
+      setDuelSecondsLeft(left);
+
+      if (left <= 0) {
+        stopDuelTimer();
+        setScreen('result');
+      }
+    }, 200);
+  };
+
+  const startPrepCountdown = () => {
+    stopPrepTimer();
+    setPhase('prep');
+    setPrepSecondsLeft(PREP_SECONDS);
+
+    const startedAt = Date.now();
+    prepTimerRef.current = window.setInterval(() => {
+      const elapsed = Math.floor((Date.now() - startedAt) / 1000);
+      const left = Math.max(0, PREP_SECONDS - elapsed);
+      setPrepSecondsLeft(left);
+
+      if (left <= 0) {
+        stopPrepTimer();
+        setPhase('active');
+        // стартуем основной таймер только после отсчета
+        startActiveTimer();
+      }
+    }, 150);
+  };
+
   const startDuel = (mode: DuelMode) => {
     setError('');
     setFinishResponse(null);
@@ -178,20 +218,16 @@ const Pvp: React.FC = () => {
     stopLivePoll();
 
     setDuelMode(mode);
+
+    // дуэльный таймер обновится после отсчета,
+    // но мы выставляем стартовое значение, чтобы UI был стабильным.
     setDuelSecondsLeft(matchDurationSec);
+
     setScreen('duel');
 
+    // NEW: 5 sec countdown before duel is active
     stopDuelTimer();
-    const startedAt = Date.now();
-    duelTimerRef.current = window.setInterval(() => {
-      const elapsed = Math.floor((Date.now() - startedAt) / 1000);
-      const left = Math.max(0, matchDurationSec - elapsed);
-      setDuelSecondsLeft(left);
-      if (left <= 0) {
-        stopDuelTimer();
-        setScreen('result');
-      }
-    }, 200);
+    startPrepCountdown();
   };
 
   // AUTO-ACCEPT (receiver) — when opened by link
@@ -241,12 +277,11 @@ const Pvp: React.FC = () => {
             mode: 'invite',
             player1_id: st.player1_id,
             player2_id: st.player2_id,
-            // sometimes backend doesn't return opponent_user_id here
           };
           setMatchInfo(mi);
           stopInvitePoll();
 
-          // ✅ sender starts duel automatically too
+          // sender starts duel automatically too
           if (screen !== 'duel') startDuel('live');
         }
 
@@ -276,6 +311,7 @@ const Pvp: React.FC = () => {
 
   const addClicks = (delta: number) => {
     if (screen !== 'duel') return;
+    if (phase !== 'active') return; // NEW: block clicks during countdown
     if (duelSecondsLeft <= 0) return;
     setMyClicks((prev) => prev + Math.max(0, delta));
   };
@@ -388,8 +424,10 @@ const Pvp: React.FC = () => {
   };
 
   const resetToLobby = () => {
+    stopPrepTimer();
     stopDuelTimer();
     stopLivePoll();
+
     setScreen('lobby');
     setMyClicks(0);
     setFinishResponse(null);
@@ -398,6 +436,9 @@ const Pvp: React.FC = () => {
     setChallengeFinishResp(null);
     setChallengeAttemptId(null);
     setChallengeOpponent(null);
+
+    setPhase('prep');
+    setPrepSecondsLeft(0);
   };
 
   const onCreateInvite = async () => {
@@ -463,7 +504,9 @@ const Pvp: React.FC = () => {
 
         {meInfo && (
           <div className="mt-3 text-xs opacity-80">
-            <div>you: #{meInfo.user_id} @{meInfo.username || '—'}</div>
+            <div>
+              you: #{meInfo.user_id} @{meInfo.username || '—'}
+            </div>
             <div>victories: {victories} | best: {best}</div>
           </div>
         )}
@@ -482,8 +525,12 @@ const Pvp: React.FC = () => {
             </div>
 
             <div className="text-right">
-              <div className="text-xs opacity-80">Time left</div>
-              <div className="text-2xl font-extrabold">{duelSecondsLeft}s</div>
+              <div className="text-xs opacity-80">
+                {phase === 'prep' ? 'Starting in' : 'Time left'}
+              </div>
+              <div className="text-2xl font-extrabold">
+                {phase === 'prep' ? `${prepSecondsLeft}s` : `${duelSecondsLeft}s`}
+              </div>
             </div>
           </div>
 
@@ -504,21 +551,35 @@ const Pvp: React.FC = () => {
             </div>
           </div>
 
-          <div className="mt-4">
+          <div className="mt-4 relative">
             <div
               onTouchStart={onTouchStart}
               onMouseDown={onMouseDown}
-              className="select-none w-full h-40 rounded-2xl border border-[#00f0ff50] bg-[#0b1320] flex items-center justify-center active:scale-[0.99] shadow-[0_0_18px_#00f0ff20]"
+              className={`select-none w-full h-40 rounded-2xl border border-[#00f0ff50] bg-[#0b1320] flex items-center justify-center shadow-[0_0_18px_#00f0ff20] ${
+                phase === 'prep' ? 'opacity-70' : 'active:scale-[0.99]'
+              }`}
             >
               <div className="text-center">
                 <div className="text-2xl font-extrabold">TAP</div>
                 <div className="text-xs opacity-70">multitouch up to 2 fingers</div>
               </div>
             </div>
+
+            {phase === 'prep' && (
+              <div className="absolute inset-0 flex items-center justify-center">
+                <div className="rounded-2xl bg-black/60 border border-white/20 px-6 py-4 text-center">
+                  <div className="text-sm opacity-90">Get ready</div>
+                  <div className="text-4xl font-extrabold">{prepSecondsLeft}</div>
+                </div>
+              </div>
+            )}
           </div>
 
           <div className="mt-4 flex gap-2">
-            <button onClick={resetToLobby} className="flex-1 rounded-xl bg-[#0b1320] border border-[#00f0ff30] py-2 text-sm">
+            <button
+              onClick={resetToLobby}
+              className="flex-1 rounded-xl bg-[#0b1320] border border-[#00f0ff30] py-2 text-sm"
+            >
               Back
             </button>
           </div>
@@ -540,7 +601,9 @@ const Pvp: React.FC = () => {
               </button>
 
               {challengeFinishResp && (
-                <div className="mt-3 text-xs whitespace-pre-wrap opacity-90">{JSON.stringify(challengeFinishResp, null, 2)}</div>
+                <div className="mt-3 text-xs whitespace-pre-wrap opacity-90">
+                  {JSON.stringify(challengeFinishResp, null, 2)}
+                </div>
               )}
             </div>
           ) : (
@@ -560,13 +623,18 @@ const Pvp: React.FC = () => {
               </button>
 
               {finishResponse && (
-                <div className="mt-3 text-xs whitespace-pre-wrap opacity-90">{JSON.stringify(finishResponse, null, 2)}</div>
+                <div className="mt-3 text-xs whitespace-pre-wrap opacity-90">
+                  {JSON.stringify(finishResponse, null, 2)}
+                </div>
               )}
             </div>
           )}
 
           <div className="mt-4 flex gap-2">
-            <button onClick={resetToLobby} className="flex-1 rounded-xl bg-[#0b1320] border border-[#00f0ff30] py-2 text-sm">
+            <button
+              onClick={resetToLobby}
+              className="flex-1 rounded-xl bg-[#0b1320] border border-[#00f0ff30] py-2 text-sm"
+            >
               Back to lobby
             </button>
           </div>
@@ -621,7 +689,9 @@ const Pvp: React.FC = () => {
                   </button>
                 </div>
 
-                <div className="mt-2 text-[11px] opacity-60">Friend opens link → duel starts automatically for both.</div>
+                <div className="mt-2 text-[11px] opacity-60">
+                  Friend opens link → duel starts automatically. (5s countdown)
+                </div>
               </div>
             )}
           </div>
@@ -640,7 +710,9 @@ const Pvp: React.FC = () => {
             </button>
 
             {challengeStartResp && (
-              <div className="mt-3 text-xs opacity-80 whitespace-pre-wrap">{JSON.stringify(challengeStartResp, null, 2)}</div>
+              <div className="mt-3 text-xs opacity-80 whitespace-pre-wrap">
+                {JSON.stringify(challengeStartResp, null, 2)}
+              </div>
             )}
           </div>
         </div>
