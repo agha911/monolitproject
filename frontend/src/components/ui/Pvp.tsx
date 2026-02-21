@@ -80,7 +80,7 @@ const Pvp: React.FC = () => {
   const [screen, setScreen] = useState<Screen>('lobby');
   const [duelMode, setDuelMode] = useState<DuelMode>('live');
 
-  // NEW: countdown phase
+  // countdown
   const [phase, setPhase] = useState<DuelPhase>('prep');
   const [prepSecondsLeft, setPrepSecondsLeft] = useState<number>(0);
 
@@ -203,12 +203,17 @@ const Pvp: React.FC = () => {
       if (left <= 0) {
         stopPrepTimer();
         setPhase('active');
-        // стартуем основной таймер только после отсчета
         startActiveTimer();
       }
     }, 150);
   };
 
+  /**
+   * IMPORTANT: hard restart duel every time it is called:
+   * - stops timers
+   * - resets phase to prep
+   * - starts countdown
+   */
   const startDuel = (mode: DuelMode) => {
     setError('');
     setFinishResponse(null);
@@ -217,16 +222,17 @@ const Pvp: React.FC = () => {
     setLiveSubmitState('idle');
     stopLivePoll();
 
+    // HARD RESET TIMERS + PHASE (fix for sender)
+    stopPrepTimer();
+    stopDuelTimer();
+    setPhase('prep');
+    setPrepSecondsLeft(PREP_SECONDS);
+
     setDuelMode(mode);
-
-    // дуэльный таймер обновится после отсчета,
-    // но мы выставляем стартовое значение, чтобы UI был стабильным.
     setDuelSecondsLeft(matchDurationSec);
-
     setScreen('duel');
 
-    // NEW: 5 sec countdown before duel is active
-    stopDuelTimer();
+    // start countdown (and then active timer)
     startPrepCountdown();
   };
 
@@ -281,8 +287,8 @@ const Pvp: React.FC = () => {
           setMatchInfo(mi);
           stopInvitePoll();
 
-          // sender starts duel automatically too
-          if (screen !== 'duel') startDuel('live');
+          // ✅ ALWAYS start duel (no screen checks) → fixes sender countdown
+          startDuel('live');
         }
 
         if (st?.status === 'expired' || st?.status === 'cancelled') stopInvitePoll();
@@ -311,7 +317,7 @@ const Pvp: React.FC = () => {
 
   const addClicks = (delta: number) => {
     if (screen !== 'duel') return;
-    if (phase !== 'active') return; // NEW: block clicks during countdown
+    if (phase !== 'active') return; // block clicks during countdown
     if (duelSecondsLeft <= 0) return;
     setMyClicks((prev) => prev + Math.max(0, delta));
   };
@@ -525,9 +531,7 @@ const Pvp: React.FC = () => {
             </div>
 
             <div className="text-right">
-              <div className="text-xs opacity-80">
-                {phase === 'prep' ? 'Starting in' : 'Time left'}
-              </div>
+              <div className="text-xs opacity-80">{phase === 'prep' ? 'Starting in' : 'Time left'}</div>
               <div className="text-2xl font-extrabold">
                 {phase === 'prep' ? `${prepSecondsLeft}s` : `${duelSecondsLeft}s`}
               </div>
@@ -643,7 +647,6 @@ const Pvp: React.FC = () => {
 
       {screen === 'lobby' && (
         <div className="mt-4 space-y-4">
-          {/* Live duel link */}
           <div className="rounded-2xl bg-[#0e1a2b] border border-[#00f0ff40] p-4">
             <div className="flex items-center justify-between">
               <div className="font-bold">🔗 Live duel link</div>
@@ -690,13 +693,12 @@ const Pvp: React.FC = () => {
                 </div>
 
                 <div className="mt-2 text-[11px] opacity-60">
-                  Friend opens link → duel starts automatically. (5s countdown)
+                  Friend opens link → duel starts automatically for both. (5s countdown)
                 </div>
               </div>
             )}
           </div>
 
-          {/* Challenge */}
           <div className="rounded-2xl bg-[#0e1a2b] border border-[#00f0ff40] p-4">
             <div className="font-bold">🧱 Challenge</div>
             <div className="mt-1 text-xs opacity-70">Play vs someone’s best result (no stake). Limit: 5/day.</div>
