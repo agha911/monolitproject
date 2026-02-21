@@ -1,11 +1,11 @@
-# app/routers/pvp_challenge.py
+# backend/app/routers/pvp_challenge.py
 
 from __future__ import annotations
 
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
-from sqlalchemy import select, func
+from sqlalchemy import select, func, case
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_async_session
@@ -49,6 +49,16 @@ class ChallengeFinishRequest(BaseModel):
     my_clicks: int = Field(ge=0)
 
 
+def _order_zeros_last():
+    """
+    Сортировка: игроки с best_result <= 0 уходят в конец списка.
+    Потом random().
+    """
+    best = func.coalesce(User.pvp_best_result, 0)
+    zeros_last = case((best <= 0, 1), else_=0)
+    return (zeros_last.asc(), func.random())
+
+
 @router.post("/challenge/start", response_model=ChallengeStartResponse)
 async def challenge_start(body: ChallengeStartRequest, session: AsyncSession = Depends(get_async_session)):
     """
@@ -56,6 +66,10 @@ async def challenge_start(body: ChallengeStartRequest, session: AsyncSession = D
       - лимит считается по попыткам (START)
       - создаём attempt сразу
       - возвращаем attempt_id + opponent snapshot
+
+    Подбор оппонента:
+      - сначала пытаемся среди best_result > 0
+      - если таких нет вообще, допускаем best_result = 0 (иначе на старте проекта кнопка умрёт)
     """
     async with session.begin():
         await _cleanup_expired(session)
@@ -77,23 +91,39 @@ async def challenge_start(body: ChallengeStartRequest, session: AsyncSession = D
         my_best = int(getattr(me, "pvp_best_result", 0) or 0)
         low, high = calc_best_result_range(my_best)
 
-        # подбор по диапазону best_result
-        q = (
+        best_col = func.coalesce(User.pvp_best_result, 0)
+
+        # 1) Диапазон + только best > 0 (основной нормальный режим)
+        q1 = (
             select(User)
             .where(User.id != me.id)
-            .where(func.coalesce(User.pvp_best_result, 0).between(low, high))
-            .order_by(func.random())
+            .where(best_col > 0)
+            .where(best_col.between(low, high))
+            .order_by(*_order_zeros_last())
             .limit(1)
         )
-        opp = (await session.execute(q)).scalar_one_or_none()
+        opp = (await session.execute(q1)).scalar_one_or_none()
 
-        # фолбэк: любой случайный
+        # 2) Любой случайный с best > 0 (фолбэк, если диапазон слишком узкий)
         if not opp:
-            opp = (
-                await session.execute(
-                    select(User).where(User.id != me.id).order_by(func.random()).limit(1)
-                )
-            ).scalar_one_or_none()
+            q2 = (
+                select(User)
+                .where(User.id != me.id)
+                .where(best_col > 0)
+                .order_by(func.random())
+                .limit(1)
+            )
+            opp = (await session.execute(q2)).scalar_one_or_none()
+
+        # 3) Последний фолбэк: разрешаем best = 0 (если реально больше некого)
+        if not opp:
+            q3 = (
+                select(User)
+                .where(User.id != me.id)
+                .order_by(*_order_zeros_last())
+                .limit(1)
+            )
+            opp = (await session.execute(q3)).scalar_one_or_none()
 
         if not opp:
             raise HTTPException(status_code=404, detail={"code": "NO_OPPONENT", "message": "No opponent found"})
@@ -108,7 +138,6 @@ async def challenge_start(body: ChallengeStartRequest, session: AsyncSession = D
             ttl_minutes=10,
         )
 
-        # пересчитываем после создания, чтобы attempts_left был точным
         attempts_today_after = attempts_today + 1
         return {
             "ok": True,
@@ -123,6 +152,7 @@ async def challenge_start(body: ChallengeStartRequest, session: AsyncSession = D
                 "first_name": getattr(opp, "first_name", None),
                 "best_result": int(opp_best),
                 "victories": int(getattr(opp, "pvp_victories", 0) or 0),
+                "is_newbie": bool(opp_best <= 0),
             },
         }
 
@@ -174,26 +204,6 @@ async def challenge_finish(body: ChallengeFinishRequest, session: AsyncSession =
             "is_win": bool(match.is_win),
             "victories_delta": 1 if bool(match.is_win) else 0,
         }
-
-
-# --- Legacy (если где-то фронт ещё дергает старое) ---
-class ChallengeRunRequest(BaseModel):
-    telegram_id: int
-    opponent_user_id: int
-    my_clicks: int = Field(ge=0)
-
-
-@router.post("/challenge/run")
-async def challenge_run_legacy(body: ChallengeRunRequest, session: AsyncSession = Depends(get_async_session)):
-    """
-    Legacy: старый режим без start/finish.
-    Оставил временно, чтобы ничего не сломать.
-    Лучше фронт перевести на /challenge/start + /challenge/finish.
-    """
-    raise HTTPException(
-        status_code=410,
-        detail={"code": "DEPRECATED", "message": "Use /challenge/start and /challenge/finish"},
-    )
 
 
 @router.get("/challenge/status")
