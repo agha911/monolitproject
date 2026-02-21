@@ -33,6 +33,7 @@ async function apiRequest<T>(path: string, opts?: RequestInit): Promise<T> {
 }
 
 type Screen = 'lobby' | 'duel' | 'result';
+type DuelMode = 'live' | 'challenge';
 
 const Pvp: React.FC = () => {
   const { t } = useTranslation();
@@ -61,18 +62,26 @@ const Pvp: React.FC = () => {
 
   // screens / duel
   const [screen, setScreen] = useState<Screen>('lobby');
+  const [duelMode, setDuelMode] = useState<DuelMode>('live');
+
   const [duelSecondsLeft, setDuelSecondsLeft] = useState<number>(0);
   const duelTimerRef = useRef<number | null>(null);
 
   const [myClicks, setMyClicks] = useState<number>(0);
-  const [opponentClicksInput, setOpponentClicksInput] = useState<string>(''); // debug
+  const [opponentClicksInput, setOpponentClicksInput] = useState<string>(''); // debug (live)
   const [finishResponse, setFinishResponse] = useState<any>(null);
 
+  // ---- Challenge (iron mode) state ----
+  const [challengeStartResp, setChallengeStartResp] = useState<any>(null);
+  const [challengeAttemptId, setChallengeAttemptId] = useState<number | null>(null);
+  const [challengeOpponent, setChallengeOpponent] = useState<any>(null);
+  const [challengeFinishResp, setChallengeFinishResp] = useState<any>(null);
+
   const matchDurationSec = config?.match_duration_sec ?? 30;
-  const stakeDefault = config?.stake_default ?? 50000;
+  const stakeDefault = config?.stake ?? config?.stake_default ?? 50000;
 
   useEffect(() => {
-    // best effort: load config (if endpoint exists)
+    // best effort: load config
     (async () => {
       try {
         const cfg = await apiRequest<any>('/api/pvp/config');
@@ -97,7 +106,7 @@ const Pvp: React.FC = () => {
         if (me?.user_id) setMeUserId(me.user_id);
         setMeInfo(me);
       } catch {
-        // if /api/pvp/me missing, duel finish will still show token, but opponent id calc may be unavailable
+        // ignore
       }
     })();
   }, [telegramId]);
@@ -171,7 +180,7 @@ const Pvp: React.FC = () => {
         }),
       });
       setAcceptedInvite(data);
-      setMatchInfo(data); // accept may return match_token, expires_at and players
+      setMatchInfo(data);
       if (data?.match_token) setQueueStatus('matched');
     } catch (e: any) {
       setError(e?.message || 'invite accept failed');
@@ -248,12 +257,14 @@ const Pvp: React.FC = () => {
     }
   };
 
-  const startDuel = () => {
+  const startDuel = (mode: DuelMode) => {
     setError('');
     setFinishResponse(null);
+    setChallengeFinishResp(null);
     setOpponentClicksInput('');
     setMyClicks(0);
 
+    setDuelMode(mode);
     setDuelSecondsLeft(matchDurationSec);
     setScreen('duel');
 
@@ -285,6 +296,9 @@ const Pvp: React.FC = () => {
 
   const onMouseDown = () => addClicks(1);
 
+  // -------------------------
+  // LIVE finish (debug)
+  // -------------------------
   const onFinishDebug = async () => {
     if (!telegramId) return;
     if (!matchInfo?.match_token) {
@@ -297,7 +311,6 @@ const Pvp: React.FC = () => {
       return;
     }
 
-    // For now your backend schema requires opponent_clicks. We'll send what user typed (debug).
     const oppClicks = opponentClicksInput.trim() === '' ? 0 : Number(opponentClicksInput);
     if (Number.isNaN(oppClicks) || oppClicks < 0) {
       setError('opponent_clicks must be >= 0');
@@ -325,14 +338,83 @@ const Pvp: React.FC = () => {
     }
   };
 
+  // -------------------------
+  // CHALLENGE (iron)
+  // -------------------------
+  const onChallengeStart = async () => {
+    if (!telegramId) return;
+    setError('');
+    setLoading(true);
+    try {
+      const res = await apiRequest<any>('/api/pvp/challenge/start', {
+        method: 'POST',
+        body: JSON.stringify({ telegram_id: telegramId }),
+      });
+      // expected:
+      // { ok, attempt_id, match_duration_sec, attempts_today, attempts_left, opponent:{...} }
+      setChallengeStartResp(res);
+      setChallengeAttemptId(res?.attempt_id ?? null);
+      setChallengeOpponent(res?.opponent ?? null);
+
+      // start duel in challenge mode
+      startDuel('challenge');
+    } catch (e: any) {
+      setError(e?.message || 'challenge start failed');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const onChallengeFinish = async () => {
+    if (!telegramId) return;
+    if (!challengeAttemptId) {
+      setError('attempt_id missing');
+      return;
+    }
+    setError('');
+    setLoading(true);
+    try {
+      const res = await apiRequest<any>('/api/pvp/challenge/finish', {
+        method: 'POST',
+        body: JSON.stringify({
+          telegram_id: telegramId,
+          attempt_id: challengeAttemptId,
+          my_clicks: myClicks,
+        }),
+      });
+      setChallengeFinishResp(res);
+
+      // refresh me info for UI
+      try {
+        const me = await apiRequest<any>(`/api/pvp/me?telegram_id=${telegramId}`);
+        if (me?.user_id) setMeUserId(me.user_id);
+        setMeInfo(me);
+      } catch {
+        // ignore
+      }
+    } catch (e: any) {
+      setError(e?.message || 'challenge finish failed');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const resetToLobby = () => {
     stopDuelTimer();
     setScreen('lobby');
     setMyClicks(0);
     setOpponentClicksInput('');
     setFinishResponse(null);
+
+    // challenge state reset
+    setChallengeFinishResp(null);
+    setChallengeAttemptId(null);
+    setChallengeOpponent(null);
+    // keep challengeStartResp so user can see attempts_left in lobby (optional)
     // leave queue state as-is; user may want to reuse matchInfo
   };
+
+  const isChallenge = duelMode === 'challenge';
 
   return (
     <div className="px-4 pt-4 text-white">
@@ -368,10 +450,27 @@ const Pvp: React.FC = () => {
         <div className="mt-4 rounded-2xl bg-[#0e1a2b] border border-[#00f0ff40] p-4">
           <div className="flex items-start justify-between">
             <div>
-              <div className="font-bold text-base">🔥 {t('pvp_duel', { defaultValue: 'Duel' })}</div>
-              <div className="text-xs opacity-80">
-                match_token: <span className="font-mono">{matchInfo?.match_token ?? '—'}</span>
+              <div className="font-bold text-base">
+                🔥 {isChallenge ? t('challenge', { defaultValue: 'Challenge' }) : t('pvp_duel', { defaultValue: 'Duel' })}
               </div>
+
+              {!isChallenge && (
+                <div className="text-xs opacity-80">
+                  match_token: <span className="font-mono">{matchInfo?.match_token ?? '—'}</span>
+                </div>
+              )}
+
+              {isChallenge && (
+                <div className="text-xs opacity-80">
+                  attempt_id: <span className="font-mono">{challengeAttemptId ?? '—'}</span>
+                  {challengeOpponent?.user_id ? (
+                    <div className="mt-1">
+                      opponent_id: <span className="font-mono">{challengeOpponent.user_id}</span> | best:{' '}
+                      <span className="font-mono">{challengeOpponent.best_result ?? 0}</span>
+                    </div>
+                  ) : null}
+                </div>
+              )}
             </div>
 
             <div className="text-right">
@@ -385,15 +484,26 @@ const Pvp: React.FC = () => {
               <div className="text-xs opacity-70">{t('your_clicks', { defaultValue: 'Your clicks' })}</div>
               <div className="text-2xl font-extrabold">{myClicks}</div>
             </div>
-            <div className="rounded-xl bg-[#0b1320] border border-[#00f0ff20] p-3">
-              <div className="text-xs opacity-70">{t('opponent', { defaultValue: 'Opponent' })}</div>
-              <div className="text-sm opacity-90">
-                id: <span className="font-mono">{computeOpponentUserId() ?? '—'}</span>
+
+            {!isChallenge ? (
+              <div className="rounded-xl bg-[#0b1320] border border-[#00f0ff20] p-3">
+                <div className="text-xs opacity-70">{t('opponent', { defaultValue: 'Opponent' })}</div>
+                <div className="text-sm opacity-90">
+                  id: <span className="font-mono">{computeOpponentUserId() ?? '—'}</span>
+                </div>
+                <div className="text-xs opacity-60 mt-1">(for now calculated via /api/pvp/me)</div>
               </div>
-              <div className="text-xs opacity-60 mt-1">
-                (for now calculated via /api/pvp/me)
+            ) : (
+              <div className="rounded-xl bg-[#0b1320] border border-[#00f0ff20] p-3">
+                <div className="text-xs opacity-70">{t('opponent', { defaultValue: 'Opponent' })}</div>
+                <div className="text-sm opacity-90">
+                  id: <span className="font-mono">{challengeOpponent?.user_id ?? '—'}</span>
+                </div>
+                <div className="text-xs opacity-60 mt-1">
+                  best: <span className="font-mono">{challengeOpponent?.best_result ?? 0}</span>
+                </div>
               </div>
-            </div>
+            )}
           </div>
 
           <div className="mt-4">
@@ -403,10 +513,8 @@ const Pvp: React.FC = () => {
               className="select-none w-full h-40 rounded-2xl border border-[#00f0ff50] bg-[#0b1320] flex items-center justify-center active:scale-[0.99] shadow-[0_0_18px_#00f0ff20]"
             >
               <div className="text-center">
-                <div className="text-xl font-extrabold">TAP</div>
-                <div className="text-xs opacity-70 mt-1">
-                  {t('multitouch_hint', { defaultValue: 'Multitouch up to 2 fingers (best effort)' })}
-                </div>
+                <div className="text-2xl font-extrabold">{t('tap', { defaultValue: 'TAP' })}</div>
+                <div className="text-xs opacity-70">{t('pvp_multitouch_hint', { defaultValue: 'multitouch up to 2 fingers' })}</div>
               </div>
             </div>
           </div>
@@ -415,7 +523,7 @@ const Pvp: React.FC = () => {
             onClick={() => setScreen('result')}
             className="mt-3 w-full rounded-xl border border-[#00f0ff40] py-2 text-xs hover:bg-[#00f0ff10]"
           >
-            {t('finish_now', { defaultValue: 'Finish now (go to result)' })}
+            {t('finish', { defaultValue: 'Finish' })}
           </button>
         </div>
       )}
@@ -423,45 +531,79 @@ const Pvp: React.FC = () => {
       {/* RESULT SCREEN */}
       {screen === 'result' && (
         <div className="mt-4 rounded-2xl bg-[#0e1a2b] border border-[#00f0ff40] p-4">
-          <div className="font-bold">🏁 {t('result', { defaultValue: 'Result' })}</div>
-          <div className="text-sm mt-2">
-            {t('your_clicks', { defaultValue: 'Your clicks' })}:{' '}
-            <span className="font-extrabold">{myClicks}</span>
+          <div className="font-bold text-base">
+            🧾 {t('result', { defaultValue: 'Result' })} {isChallenge ? '(Challenge)' : '(Live)'}
           </div>
 
-          <div className="mt-3 text-xs opacity-70">
-            Сейчас `live_finish` в бэке требует `opponent_clicks`, поэтому для теста можно
-            ввести значение вручную (позже мы сделаем 2-step finish: каждый отправляет только свои клики).
+          <div className="mt-2 text-sm">
+            {t('your_clicks', { defaultValue: 'Your clicks' })}: <span className="font-mono">{myClicks}</span>
           </div>
 
-          <div className="mt-3">
-            <div className="text-xs opacity-80 mb-1">opponent_clicks (debug):</div>
-            <input
-              value={opponentClicksInput}
-              onChange={(e) => setOpponentClicksInput(e.target.value)}
-              placeholder="0"
-              className="w-full rounded-xl bg-[#0b1320] border border-[#00f0ff30] px-3 py-2 text-white outline-none"
-              inputMode="numeric"
-            />
-          </div>
+          {/* Challenge result */}
+          {isChallenge ? (
+            <>
+              <div className="mt-2 text-xs opacity-80">
+                attempt_id: <span className="font-mono">{challengeAttemptId ?? '—'}</span> | opponent_best:{' '}
+                <span className="font-mono">{challengeOpponent?.best_result ?? 0}</span>
+              </div>
 
-          <button
-            disabled={!canUse || loading || !matchInfo?.match_token}
-            onClick={onFinishDebug}
-            className="mt-3 w-full rounded-xl bg-[#00f0ff] text-black font-bold py-2 active:scale-95 disabled:opacity-50"
-          >
-            {t('pvp_finish', { defaultValue: 'Send finish (debug)' })}
-          </button>
+              {!challengeFinishResp ? (
+                <button
+                  disabled={!canUse || loading || !challengeAttemptId}
+                  onClick={onChallengeFinish}
+                  className="mt-3 w-full rounded-xl bg-[#00f0ff] text-black font-bold py-2 active:scale-95 disabled:opacity-50"
+                >
+                  {t('send_result', { defaultValue: 'Send result' })}
+                </button>
+              ) : (
+                <div className="mt-3 rounded-xl bg-[#0b1320] border border-[#00f0ff20] p-3 text-sm">
+                  <div>
+                    is_win: <span className="font-mono">{String(challengeFinishResp.is_win)}</span>
+                  </div>
+                  <div>
+                    victories_delta: <span className="font-mono">{challengeFinishResp.victories_delta ?? '—'}</span>
+                  </div>
+                  <div>
+                    match_id: <span className="font-mono">{challengeFinishResp.match_id ?? '—'}</span>
+                  </div>
+                </div>
+              )}
+            </>
+          ) : (
+            <>
+              {/* Live debug UI */}
+              <div className="mt-3 rounded-xl bg-[#0b1320] border border-[#00f0ff20] p-3">
+                <div className="text-xs opacity-80 mb-2">
+                  Debug: set opponent_clicks manually then call /api/pvp/live/finish
+                </div>
 
-          {finishResponse && (
-            <div className="mt-3 text-xs whitespace-pre-wrap rounded-xl bg-[#0b1320] border border-[#00f0ff20] p-3">
-              {JSON.stringify(finishResponse, null, 2)}
-            </div>
+                <input
+                  value={opponentClicksInput}
+                  onChange={(e) => setOpponentClicksInput(e.target.value)}
+                  placeholder="opponent_clicks (debug)"
+                  className="w-full rounded-xl bg-[#0b1320] border border-[#00f0ff30] px-3 py-2 text-white outline-none"
+                />
+
+                <button
+                  disabled={!canUse || loading}
+                  onClick={onFinishDebug}
+                  className="mt-2 w-full rounded-xl bg-[#7af9ff] text-black font-bold py-2 active:scale-95 disabled:opacity-50"
+                >
+                  {t('finish_debug', { defaultValue: 'Finish (debug)' })}
+                </button>
+
+                {finishResponse ? (
+                  <div className="mt-3 text-xs whitespace-pre-wrap opacity-90">
+                    {JSON.stringify(finishResponse, null, 2)}
+                  </div>
+                ) : null}
+              </div>
+            </>
           )}
 
           <button
             onClick={resetToLobby}
-            className="mt-3 w-full rounded-xl border border-[#00f0ff40] py-2 text-xs hover:bg-[#00f0ff10]"
+            className="mt-4 w-full rounded-xl border border-[#00f0ff40] py-2 text-xs hover:bg-[#00f0ff10]"
           >
             {t('back', { defaultValue: 'Back' })}
           </button>
@@ -514,9 +656,7 @@ const Pvp: React.FC = () => {
             )}
 
             <div className="mt-4 border-t border-[#00f0ff20] pt-3">
-              <div className="text-sm opacity-80 mb-2">
-                {t('pvp_enter_code', { defaultValue: 'Enter invite code' })}
-              </div>
+              <div className="text-sm opacity-80 mb-2">{t('pvp_enter_code', { defaultValue: 'Enter invite code' })}</div>
 
               <input
                 value={inviteCode}
@@ -589,7 +729,7 @@ const Pvp: React.FC = () => {
 
                 <button
                   disabled={!canUse || loading}
-                  onClick={startDuel}
+                  onClick={() => startDuel('live')}
                   className="mt-3 w-full rounded-xl bg-[#00f0ff] text-black font-bold py-2 active:scale-95 disabled:opacity-50"
                 >
                   {t('pvp_start_duel', { defaultValue: 'Start duel' })}
@@ -600,6 +740,43 @@ const Pvp: React.FC = () => {
                 </div>
               </div>
             )}
+          </div>
+
+          {/* Challenge (iron) */}
+          <div className="mt-4 rounded-2xl bg-[#0e1a2b] border border-[#00f0ff40] p-4">
+            <div className="flex items-center justify-between">
+              <div className="font-bold">{t('challenge', { defaultValue: 'Challenge' })}</div>
+              <div className="text-xs opacity-80">
+                {t('daily_limit', { defaultValue: 'Daily limit' })}: {challengeStartResp?.attempts_today ?? '—'}/5
+              </div>
+            </div>
+
+            <div className="mt-1 text-xs opacity-70">
+              {t('challenge_hint', {
+                defaultValue: 'If you have no one to duel with — play offline. 5 tries per day.',
+              })}
+            </div>
+
+            {challengeStartResp?.attempts_left !== undefined && (
+              <div className="mt-2 text-xs opacity-80">
+                attempts_left: <span className="font-mono">{challengeStartResp.attempts_left}</span>
+              </div>
+            )}
+
+            <button
+              disabled={!canUse || loading}
+              onClick={onChallengeStart}
+              className="mt-3 w-full rounded-xl bg-[#7af9ff] text-black font-bold py-2 active:scale-95 disabled:opacity-50"
+            >
+              {t('challenge_start', { defaultValue: 'Start challenge' })}
+            </button>
+
+            {challengeOpponent?.user_id ? (
+              <div className="mt-3 text-xs opacity-80">
+                opponent_id: <span className="font-mono">{challengeOpponent.user_id}</span> | opponent_best:{' '}
+                <span className="font-mono">{challengeOpponent.best_result ?? 0}</span>
+              </div>
+            ) : null}
           </div>
 
           {/* Debug/info */}
@@ -614,4 +791,3 @@ const Pvp: React.FC = () => {
 };
 
 export default Pvp;
-
