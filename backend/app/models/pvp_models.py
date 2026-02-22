@@ -14,6 +14,7 @@ from sqlalchemy import (
     String,
     UniqueConstraint,
     func,
+    text,
 )
 from sqlalchemy.orm import relationship
 
@@ -233,3 +234,52 @@ class PvpChallengeAttempt(Base):
 
     challenger = relationship("User", foreign_keys=[challenger_id])
     opponent = relationship("User", foreign_keys=[opponent_id])
+
+
+class PvpWeeklySeason(Base):
+    __tablename__ = "pvp_weekly_seasons"
+
+    id = Column(Integer, primary_key=True)
+
+    season_no = Column(Integer, nullable=False, unique=True, index=True)
+
+    start_at = Column(DateTime(timezone=True), nullable=False, index=True)
+    end_at = Column(DateTime(timezone=True), nullable=False, index=True)
+
+    # active | finished
+    status = Column(String(16), nullable=False, server_default="active", index=True)
+
+    finalized_at = Column(DateTime(timezone=True), nullable=True)
+
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), index=True)
+
+    __table_args__ = (
+        CheckConstraint("status IN ('active','finished')", name="ck_pvp_weekly_seasons_status_allowed"),
+        CheckConstraint("end_at > start_at", name="ck_pvp_weekly_seasons_range"),
+    )
+
+
+class PvpWeeklyLeaderboardRow(Base):
+    __tablename__ = "pvp_weekly_leaderboard"
+
+    id = Column(Integer, primary_key=True)
+
+    season_id = Column(Integer, ForeignKey("pvp_weekly_seasons.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+
+    rank = Column(Integer, nullable=False)
+    victories = Column(Integer, nullable=False)
+    best_result = Column(Integer, nullable=False)
+
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), index=True)
+
+    season = relationship("PvpWeeklySeason", lazy="selectin")
+    user = relationship("User", lazy="selectin")
+
+    __table_args__ = (
+        CheckConstraint("rank >= 1", name="ck_pvp_weekly_lb_rank"),
+        CheckConstraint("victories >= 0", name="ck_pvp_weekly_lb_victories"),
+        CheckConstraint("best_result >= 0", name="ck_pvp_weekly_lb_best"),
+        UniqueConstraint("season_id", "rank", name="uq_pvp_weekly_lb_season_rank"),
+        UniqueConstraint("season_id", "user_id", name="uq_pvp_weekly_lb_season_user"),
+    )
