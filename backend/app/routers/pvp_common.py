@@ -15,12 +15,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_async_session
 from app.models.user import User
-from app.models.pvp_models import PvpInvite, PvpQueue, PvpSession
+from app.models.pvp_models import PvpInvite, PvpQueue, PvpSession, PvpWeeklySeason, PvpWeeklyLeaderboardRow
 from app.crud.crud_pvp import (
     get_pvp_leaderboard_top,
     get_pvp_rank_for_user,
     list_recent_pvp_matches,
     list_recent_challenge_matches,
+    rollover_weekly_season_if_needed,
+    get_current_weekly_season,
+    get_weekly_leaderboard_snapshot,
 )
 
 router = APIRouter(prefix="/api/pvp", tags=["pvp"])
@@ -310,3 +313,113 @@ async def admin_reset_weekly(
             User.__table__.update().values(pvp_victories=0)  # type: ignore
         )
         return {"ok": True, "message": "Weekly victories reset done"}
+
+
+@router.get("/weekly-season/current")
+async def weekly_season_current(session: AsyncSession = Depends(get_async_session)):
+    async with session.begin():
+        # auto-rollover if needed
+        info = await rollover_weekly_season_if_needed(session)
+        cur = await get_current_weekly_season(session)
+
+        if not cur:
+            return {"ok": True, "season": None, "rollover": info}
+
+        return {
+            "ok": True,
+            "rollover": info,
+            "season": {
+                "id": int(cur.id),
+                "season_no": int(cur.season_no),
+                "status": cur.status,
+                "start_at": cur.start_at.isoformat() if cur.start_at else None,
+                "end_at": cur.end_at.isoformat() if cur.end_at else None,
+                "finalized_at": cur.finalized_at.isoformat() if cur.finalized_at else None,
+            },
+        }
+
+
+@router.get("/weekly-season/leaderboard")
+async def weekly_season_leaderboard(
+    session: AsyncSession = Depends(get_async_session),
+    limit: int = 10,
+):
+    limit = max(1, min(int(limit), 50))
+
+    async with session.begin():
+        # auto-rollover if needed
+        await rollover_weekly_season_if_needed(session)
+        cur = await get_current_weekly_season(session)
+        if not cur:
+            return {"ok": True, "season": None, "items": []}
+
+        # If season is finished => read snapshot
+        if cur.status == "finished":
+            rows = await get_weekly_leaderboard_snapshot(session, season_id=int(cur.id), limit=limit)
+            items = []
+            for r in rows:
+                u = r.user
+                items.append({
+                    "rank": int(r.rank),
+                    "user_id": int(r.user_id),
+                    "telegram_id": getattr(u, "telegram_id", None),
+                    "username": getattr(u, "username", None),
+                    "first_name": getattr(u, "first_name", None),
+                    "victories": int(r.victories),
+                    "best_result": int(r.best_result),
+                })
+            return {
+                "ok": True,
+                "season": {
+                    "id": int(cur.id),
+                    "season_no": int(cur.season_no),
+                    "status": cur.status,
+                    "start_at": cur.start_at.isoformat() if cur.start_at else None,
+                    "end_at": cur.end_at.isoformat() if cur.end_at else None,
+                },
+                "items": items,
+                "source": "snapshot",
+            }
+
+        # Active season => live leaderboard from users table
+        top = await get_pvp_leaderboard_top(session, limit=limit)
+        items = []
+        rank = 1
+        for u in top:
+            items.append({
+                "rank": int(rank),
+                "user_id": int(u.id),
+                "telegram_id": u.telegram_id,
+                "username": getattr(u, "username", None),
+                "first_name": getattr(u, "first_name", None),
+                "victories": int(getattr(u, "pvp_victories", 0) or 0),
+                "best_result": int(getattr(u, "pvp_best_result", 0) or 0),
+            })
+            rank += 1
+
+        return {
+            "ok": True,
+            "season": {
+                "id": int(cur.id),
+                "season_no": int(cur.season_no),
+                "status": cur.status,
+                "start_at": cur.start_at.isoformat() if cur.start_at else None,
+                "end_at": cur.end_at.isoformat() if cur.end_at else None,
+            },
+            "items": items,
+            "source": "live",
+        }
+
+
+@router.post("/admin/weekly/rollover")
+async def admin_weekly_rollover(
+    secret_key: Optional[str] = Header(default=None),
+    session: AsyncSession = Depends(get_async_session),
+):
+    admin_key = os.getenv("PVP_ADMIN_KEY", "")
+    if not admin_key or secret_key != admin_key:
+        raise HTTPException(status_code=403, detail={"code": "FORBIDDEN", "message": "Invalid admin key"})
+
+    async with session.begin():
+        info = await rollover_weekly_season_if_needed(session)
+        return {"ok": True, "rollover": info}
