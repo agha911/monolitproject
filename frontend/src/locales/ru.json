@@ -193,6 +193,55 @@
     "tshirt_claim_failed": "Ошибка получения",
     "buy_failed": "Покупка не удалась",
     "claim_failed": "Не удалось забрать"
-  }
+  },
+  "pvp_subtitle": "Live дуэль и Challenge",
+  "pvp_weekly_leaderboard": "Недельный рейтинг",
+  "pvp_tg_init_missing": "Telegram initData не найден",
+
+  "pvp_stake": "ставка:",
+  "pvp_duration": "длительность:",
+  "pvp_season": "Сезон:",
+  "pvp_source": "источник: {{src}}",
+
+  "pvp_you": "ты: #{{id}} @{{username}}",
+  "pvp_stats": "победы: {{v}} | рекорд: {{b}}",
+
+  "pvp_live_duel": "Live дуэль",
+  "pvp_live_hint": "Создай приглашение и отправь сопернику.",
+  "pvp_create_invite": "Создать приглашение",
+  "pvp_cancel_invite": "Отменить приглашение",
+  "pvp_invite_code": "Код приглашения:",
+  "pvp_link": "Ссылка:",
+  "pvp_share_text": "Заходи в мой дуэль!",
+
+  "pvp_duel": "Дуэль",
+  "pvp_match_token": "match_token:",
+  "pvp_starting_in": "Старт через",
+  "pvp_time_left": "Осталось",
+  "pvp_your_clicks": "Твои клики",
+  "pvp_opponent": "Соперник",
+  "pvp_opponent_colon": "Соперник:",
+  "pvp_tap": "Тап",
+  "pvp_wait_start": "Ждём старт…",
+  "pvp_go": "Погнали!",
+  "pvp_get_ready": "Готовься",
+
+  "pvp_challenge_title": "Challenge",
+  "pvp_challenge_hint": "Играешь против best_result соперника. Победа даёт +1 победу.",
+  "pvp_start_challenge": "Начать Challenge",
+  "pvp_best_colon": "best:",
+
+  "pvp_invite_expired": "Приглашение истекло",
+  "pvp_invite_cancelled": "Приглашение отменено",
+  "pvp_session_expired": "Сессия истекла",
+
+  "pvp_error_match_token_missing": "match_token не найден",
+  "pvp_error_attempt_id_missing": "attempt_id не найден",
+  "pvp_error_submit_failed": "Ошибка отправки",
+  "pvp_error_invite_create_failed": "Не удалось создать приглашение",
+  "pvp_error_challenge_start_failed": "Не удалось запустить Challenge",
+  "pvp_error_challenge_finish_failed": "Не удалось завершить Challenge",
+
+  "pvp_back_to_lobby": "Вернуться в лобби"
 
 }
