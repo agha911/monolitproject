@@ -192,5 +192,54 @@
     "tshirt_claim_failed": "Claim error",
     "buy_failed": "Purchase failed",
     "claim_failed": "Claim failed"
-  }
+  },
+  "pvp_subtitle": "Live duel & Challenge",
+  "pvp_weekly_leaderboard": "Weekly leaderboard",
+  "pvp_tg_init_missing": "Telegram initData is missing",
+
+  "pvp_stake": "stake:",
+  "pvp_duration": "duration:",
+  "pvp_season": "Season:",
+  "pvp_source": "source: {{src}}",
+
+  "pvp_you": "you: #{{id}} @{{username}}",
+  "pvp_stats": "victories: {{v}} | best: {{b}}",
+
+  "pvp_live_duel": "Live Duel",
+  "pvp_live_hint": "Create an invite link and send to opponent.",
+  "pvp_create_invite": "Create invite",
+  "pvp_cancel_invite": "Cancel invite",
+  "pvp_invite_code": "Invite code:",
+  "pvp_link": "Link:",
+  "pvp_share_text": "Join my duel!",
+
+  "pvp_duel": "Duel",
+  "pvp_match_token": "match_token:",
+  "pvp_starting_in": "Starting in",
+  "pvp_time_left": "Time left",
+  "pvp_your_clicks": "Your clicks",
+  "pvp_opponent": "Opponent",
+  "pvp_opponent_colon": "Opponent:",
+  "pvp_tap": "Tap",
+  "pvp_wait_start": "Wait for start…",
+  "pvp_go": "Go!",
+  "pvp_get_ready": "Get ready",
+
+  "pvp_challenge_title": "Challenge",
+  "pvp_challenge_hint": "Play against opponent best_result. Win gives +1 victory.",
+  "pvp_start_challenge": "Start challenge",
+  "pvp_best_colon": "best:",
+
+  "pvp_invite_expired": "Invite expired",
+  "pvp_invite_cancelled": "Invite cancelled",
+  "pvp_session_expired": "Session expired",
+
+  "pvp_error_match_token_missing": "match_token missing",
+  "pvp_error_attempt_id_missing": "attempt_id missing",
+  "pvp_error_submit_failed": "Submit failed",
+  "pvp_error_invite_create_failed": "Invite create failed",
+  "pvp_error_challenge_start_failed": "Challenge start failed",
+  "pvp_error_challenge_finish_failed": "Challenge finish failed",
+
+  "pvp_back_to_lobby": "Back to lobby"
 }
