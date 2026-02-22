@@ -7,11 +7,11 @@ from dataclasses import dataclass
 from typing import Optional, List, Tuple
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import select, desc, func, or_
+from sqlalchemy import select, desc, func, or_, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.user import User
-from app.models.pvp_models import PvpMatch, ChallengeMatch, PvpChallengeAttempt
+from app.models.pvp_models import PvpMatch, ChallengeMatch, PvpChallengeAttempt, PvpWeeklySeason, PvpWeeklyLeaderboardRow
 
 
 
@@ -370,3 +370,163 @@ async def _update_best_result(session: AsyncSession, *, user_id: int, candidate:
         .values(pvp_best_result=func.greatest(func.coalesce(User.pvp_best_result, 0), int(candidate)))  # type: ignore
     )
 
+
+
+BAKU_TZ = "Asia/Baku"
+
+
+def _season_window_for_now(now_utc: datetime, tz_name: str = BAKU_TZ) -> tuple[datetime, datetime]:
+    """
+    Season: Monday 00:00 -> Saturday 23:59:59 (Asia/Baku)
+    Returns window as UTC datetimes.
+    """
+    tz = ZoneInfo(tz_name)
+    now_local = now_utc.astimezone(tz)
+
+    # Monday = 0 ... Sunday = 6
+    weekday = now_local.weekday()
+    # Start of current week (Monday 00:00)
+    start_local = (now_local.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=weekday))
+    # End = Saturday 23:59:59
+    end_local = (start_local + timedelta(days=5)).replace(hour=23, minute=59, second=59, microsecond=0)
+
+    return start_local.astimezone(timezone.utc), end_local.astimezone(timezone.utc)
+
+
+async def _try_advisory_lock(session: AsyncSession, lock_key: int = 91234567) -> bool:
+    """
+    Uses PG transaction-level advisory lock.
+    Prevents double rollover in multi-worker deployments.
+    """
+    res = await session.execute(text("SELECT pg_try_advisory_xact_lock(:k)"), {"k": int(lock_key)})
+    return bool(res.scalar() or False)
+
+
+async def get_current_weekly_season(session: AsyncSession) -> PvpWeeklySeason | None:
+    q = (
+        select(PvpWeeklySeason)
+        .where(PvpWeeklySeason.status == "active")
+        .order_by(PvpWeeklySeason.start_at.desc())
+        .limit(1)
+    )
+    return (await session.execute(q)).scalar_one_or_none()
+
+
+async def _next_season_no(session: AsyncSession) -> int:
+    q = select(func.coalesce(func.max(PvpWeeklySeason.season_no), 0))
+    mx = (await session.execute(q)).scalar_one() or 0
+    return int(mx) + 1
+
+
+async def _snapshot_top_for_season(
+    session: AsyncSession,
+    *,
+    season_id: int,
+    limit: int = 10,
+) -> int:
+    """
+    Saves TOP-N users into pvp_weekly_leaderboard for the season.
+    Ranking order = victories desc, best_result desc (same as current).
+    Returns number of inserted rows.
+    """
+    top = await get_pvp_leaderboard_top(session, limit=limit)  # already exists
+    inserted = 0
+    rank = 1
+    for u in top:
+        row = PvpWeeklyLeaderboardRow(
+            season_id=int(season_id),
+            user_id=int(u.id),
+            rank=int(rank),
+            victories=int(getattr(u, "pvp_victories", 0) or 0),
+            best_result=int(getattr(u, "pvp_best_result", 0) or 0),
+        )
+        session.add(row)
+        inserted += 1
+        rank += 1
+    await session.flush()
+    return inserted
+
+
+async def rollover_weekly_season_if_needed(session: AsyncSession) -> dict:
+    """
+    Ensures there is an active season for current time.
+    If the active season ended -> finalize + snapshot + reset victories + create next season.
+    Must be called inside a transaction (session.begin()).
+    """
+    now = datetime.now(timezone.utc)
+
+    # lock to avoid double rollover
+    locked = await _try_advisory_lock(session)
+    if not locked:
+        # Another worker is doing it, just return current season info later
+        cur = await get_current_weekly_season(session)
+        return {"ok": True, "status": "locked_elsewhere", "season_id": int(cur.id) if cur else None}
+
+    cur = await get_current_weekly_season(session)
+    start_at, end_at = _season_window_for_now(now, BAKU_TZ)
+
+    # If no season exists yet -> create season for current window
+    if not cur:
+        sn = await _next_season_no(session)
+        cur = PvpWeeklySeason(season_no=sn, start_at=start_at, end_at=end_at, status="active")
+        session.add(cur)
+        await session.flush()
+        return {"ok": True, "status": "created", "season_id": int(cur.id), "season_no": int(cur.season_no)}
+
+    # If current season doesn't match current window (edge cases) we still keep it,
+    # but rollover strictly when it ended.
+    if cur.end_at and cur.end_at < now:
+        # finalize
+        cur.status = "finished"
+        cur.finalized_at = now
+        await session.flush()
+
+        snap_count = await _snapshot_top_for_season(session, season_id=int(cur.id), limit=10)
+
+        # reset victories
+        await reset_weekly_pvp_victories_for_all(session)
+
+        # create next season for the "current" window (now belongs to next cycle after end)
+        # recompute window again (because now might still be after end within same week)
+        # easiest: compute from now_local; if still past end, move to next monday.
+        # We'll compute from now, but if now_local is Sunday, the window function still gives Monday-Sat of current week.
+        # So we shift by +1 day until within window.
+        probe = now
+        for _ in range(8):
+            s2, e2 = _season_window_for_now(probe, BAKU_TZ)
+            if probe <= e2:
+                start_at, end_at = s2, e2
+                break
+            probe = probe + timedelta(days=1)
+
+        sn = await _next_season_no(session)
+        new_season = PvpWeeklySeason(season_no=sn, start_at=start_at, end_at=end_at, status="active")
+        session.add(new_season)
+        await session.flush()
+
+        return {
+            "ok": True,
+            "status": "rolled",
+            "finished_season_id": int(cur.id),
+            "finished_season_no": int(cur.season_no),
+            "snapshot_rows": int(snap_count),
+            "new_season_id": int(new_season.id),
+            "new_season_no": int(new_season.season_no),
+        }
+
+    return {"ok": True, "status": "no_change", "season_id": int(cur.id), "season_no": int(cur.season_no)}
+
+
+async def get_weekly_leaderboard_snapshot(
+    session: AsyncSession,
+    *,
+    season_id: int,
+    limit: int = 10,
+) -> list[PvpWeeklyLeaderboardRow]:
+    q = (
+        select(PvpWeeklyLeaderboardRow)
+        .where(PvpWeeklyLeaderboardRow.season_id == int(season_id))
+        .order_by(PvpWeeklyLeaderboardRow.rank.asc())
+        .limit(limit)
+    )
+    return list((await session.execute(q)).scalars().all())
