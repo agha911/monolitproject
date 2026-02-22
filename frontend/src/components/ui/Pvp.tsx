@@ -9,54 +9,47 @@ function getTelegramId(): number | null {
 }
 
 async function apiRequest<T>(path: string, opts?: RequestInit): Promise<T> {
-  const res = await fetch(`${API_BASE_URL}${path}`, {
+  const url = `${API_BASE_URL}${path}`;
+  const res = await fetch(url, {
+    ...opts,
     headers: {
       'Content-Type': 'application/json',
       ...(opts?.headers || {}),
     },
-    ...opts,
   });
 
-  const text = await res.text();
-  let data: any = null;
-  try {
-    data = text ? JSON.parse(text) : null;
-  } catch {
-    data = text;
+  if (!res.ok) {
+    let detail: any = null;
+    try {
+      detail = await res.json();
+    } catch {
+      /* ignore */
+    }
+    const msg = detail?.detail?.message || detail?.detail?.code || detail?.message || `HTTP ${res.status}`;
+    throw new Error(msg);
   }
 
-  if (!res.ok) {
-    const msg = (data && (data.message || data.detail)) || `HTTP ${res.status}`;
-    throw new Error(typeof msg === 'string' ? msg : JSON.stringify(msg));
-  }
-  return data as T;
+  return (await res.json()) as T;
 }
 
 type Screen = 'lobby' | 'duel' | 'result';
 type DuelMode = 'live' | 'challenge';
 type DuelPhase = 'prep' | 'active';
 
-const BOT_USERNAME = 'monolit_42_bot';
+const PREP_SECONDS = 3;
 
-function buildInviteLink(code: string) {
-  return `https://t.me/${BOT_USERNAME}?startapp=pvp_${code}`;
-}
-
-function buildShareLink(url: string, text: string) {
-  return `https://t.me/share/url?url=${encodeURIComponent(url)}&text=${encodeURIComponent(text)}`;
+function intOrZero(v: any): number {
+  const n = Number(v);
+  return Number.isFinite(n) ? Math.floor(n) : 0;
 }
 
 function pickVictories(me: any): number {
-  const v = me?.pvp_victories ?? me?.victories ?? me?.pvp_weekly_victories ?? me?.weekly_victories ?? 0;
-  return Number.isFinite(Number(v)) ? Number(v) : 0;
+  return intOrZero(me?.victories ?? me?.pvp_victories);
 }
 
 function pickBest(me: any): number {
-  const b = me?.pvp_best_result ?? me?.best_result ?? me?.best ?? me?.pvp_best ?? 0;
-  return Number.isFinite(Number(b)) ? Number(b) : 0;
+  return intOrZero(me?.best_result ?? me?.pvp_best_result);
 }
-
-const PREP_SECONDS = 5;
 
 const Pvp: React.FC = () => {
   const { t } = useTranslation();
@@ -71,6 +64,8 @@ const Pvp: React.FC = () => {
 
   const [meUserId, setMeUserId] = useState<number | null>(null);
   const [meInfo, setMeInfo] = useState<any>(null);
+
+  const [leaderboard, setLeaderboard] = useState<any[]>([]);
 
   const [createdInvite, setCreatedInvite] = useState<any>(null);
   const invitePollRef = useRef<number | null>(null);
@@ -139,6 +134,16 @@ const Pvp: React.FC = () => {
     } catch {}
   };
 
+  const refreshLeaderboard = async () => {
+    try {
+      const res = await apiRequest<any>('/api/pvp/leaderboard');
+      const items = Array.isArray(res?.items) ? res.items : [];
+      setLeaderboard(items);
+    } catch {
+      // ignore
+    }
+  };
+
   useEffect(() => {
     (async () => {
       try {
@@ -158,6 +163,7 @@ const Pvp: React.FC = () => {
 
   useEffect(() => {
     refreshMe();
+    refreshLeaderboard();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [telegramId]);
 
@@ -218,167 +224,198 @@ const Pvp: React.FC = () => {
     setError('');
     setFinishResponse(null);
     setChallengeFinishResp(null);
-    setMyClicks(0);
-    setLiveSubmitState('idle');
-    stopLivePoll();
 
-    // HARD RESET TIMERS + PHASE (fix for sender)
     stopPrepTimer();
     stopDuelTimer();
-    setPhase('prep');
-    setPrepSecondsLeft(PREP_SECONDS);
+    stopLivePoll();
 
     setDuelMode(mode);
-    setDuelSecondsLeft(matchDurationSec);
     setScreen('duel');
+    setPhase('prep');
+    setMyClicks(0);
+    setPrepSecondsLeft(PREP_SECONDS);
+    setDuelSecondsLeft(matchDurationSec);
+    setLiveSubmitState('idle');
 
-    // start countdown (and then active timer)
     startPrepCountdown();
   };
 
-  // AUTO-ACCEPT (receiver) — when opened by link
-  useEffect(() => {
-    const sp = (WebApp.initDataUnsafe as any)?.start_param;
-    if (!telegramId) return;
-    if (!sp || typeof sp !== 'string') return;
-    if (!sp.startsWith('pvp_')) return;
+  const resetToLobby = () => {
+    setError('');
+    setFinishResponse(null);
+    setChallengeFinishResp(null);
 
-    const code = sp.replace('pvp_', '').trim();
-    if (!code) return;
-
-    (async () => {
-      setError('');
-      setLoading(true);
-      try {
-        const data = await apiRequest<any>('/api/pvp/invite/accept', {
-          method: 'POST',
-          body: JSON.stringify({ telegram_id: telegramId, invite_code: code }),
-        });
-        setMatchInfo(data);
-
-        // receiver starts duel automatically
-        if (data?.match_token) startDuel('live');
-      } catch (e: any) {
-        setError(e?.message || 'invite accept failed');
-      } finally {
-        setLoading(false);
-      }
-    })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [telegramId]);
-
-  // Poll invite status for sender and auto-start duel when accepted
-  const startInvitePolling = (code: string) => {
+    stopPrepTimer();
+    stopDuelTimer();
     stopInvitePoll();
-    invitePollRef.current = window.setInterval(async () => {
-      try {
-        const st = await apiRequest<any>(`/api/pvp/invite/status?invite_code=${encodeURIComponent(code)}`);
-
-        if (st?.status === 'accepted' && st?.match_token) {
-          const mi = {
-            ok: true,
-            match_token: st.match_token,
-            stake: st.stake ?? stakeDefault,
-            match_duration_sec: st.match_duration_sec ?? matchDurationSec,
-            mode: 'invite',
-            player1_id: st.player1_id,
-            player2_id: st.player2_id,
-          };
-          setMatchInfo(mi);
-          stopInvitePoll();
-
-          // ✅ ALWAYS start duel (no screen checks) → fixes sender countdown
-          startDuel('live');
-        }
-
-        if (st?.status === 'expired' || st?.status === 'cancelled') stopInvitePoll();
-      } catch {}
-    }, 800);
-  };
-
-  const copyText = async (txt: string) => {
-    try {
-      await navigator.clipboard.writeText(txt);
-      WebApp.showToast?.(t('copied', { defaultValue: 'Copied' }));
-    } catch {}
-  };
-
-  const shareInvite = (code: string) => {
-    const url = buildInviteLink(code);
-    const text = t('pvp_invite_share_text', { defaultValue: '⚔️ Join my duel in Gappick! Open this link:' });
-    const tgShare = buildShareLink(url, text);
-
-    try {
-      (WebApp as any).openTelegramLink?.(tgShare);
-    } catch {
-      window.open(tgShare, '_blank');
-    }
-  };
-
-  const addClicks = (delta: number) => {
-    if (screen !== 'duel') return;
-    if (phase !== 'active') return; // block clicks during countdown
-    if (duelSecondsLeft <= 0) return;
-    setMyClicks((prev) => prev + Math.max(0, delta));
-  };
-
-  const onTouchStart = (e: React.TouchEvent) => {
-    const delta = Math.min(e.changedTouches?.length || 1, 2);
-    addClicks(delta);
-  };
-
-  const onMouseDown = () => addClicks(1);
-
-  const pollLiveStatus = (matchToken: string) => {
     stopLivePoll();
-    livePollRef.current = window.setInterval(async () => {
-      if (!telegramId) return;
-      try {
-        const st = await apiRequest<any>(
-          `/api/pvp/live/status?telegram_id=${telegramId}&match_token=${encodeURIComponent(matchToken)}`
-        );
 
-        if (st?.status === 'finished' && (st?.result || st?.match_id)) {
-          setLiveSubmitState('finished');
-          setFinishResponse(st?.result || st);
-          stopLivePoll();
-          await refreshMe();
-        }
-
-        if (st?.status === 'expired') {
-          setError('Session expired');
-          stopLivePoll();
-        }
-      } catch {}
-    }, 900);
+    setScreen('lobby');
+    setPhase('prep');
+    setMyClicks(0);
+    setLiveSubmitState('idle');
+    setMatchInfo(null);
+    setChallengeStartResp(null);
+    setChallengeAttemptId(null);
+    setChallengeOpponent(null);
   };
 
-  const onLiveSubmit = async () => {
+  const onTap = () => {
+    if (screen !== 'duel') return;
+    if (phase !== 'active') return;
+    setMyClicks((v) => v + 1);
+  };
+
+  const createInvite = async () => {
     if (!telegramId) return;
-    if (!matchInfo?.match_token) {
-      setError('match_token missing');
-      return;
-    }
     setError('');
     setLoading(true);
     try {
-      const res = await apiRequest<any>('/api/pvp/live/submit', {
-        method: 'POST',
-        body: JSON.stringify({
-          telegram_id: telegramId,
-          match_token: matchInfo.match_token,
-          my_clicks: myClicks,
-        }),
-      });
+      const body = { telegram_id: telegramId, ttl_seconds: 600 };
+      const res = await apiRequest<any>('/api/pvp/invite/create', { method: 'POST', body: JSON.stringify(body) });
+      setCreatedInvite(res);
+      setMatchInfo(null);
 
-      if (res?.status === 'finished') {
-        setLiveSubmitState('finished');
+      stopInvitePoll();
+      invitePollRef.current = window.setInterval(async () => {
+        try {
+          const st = await apiRequest<any>(`/api/pvp/invite/status?invite_code=${encodeURIComponent(res.invite_code)}`);
+          if (st?.ok && st?.status === 'accepted' && st?.match_token) {
+            stopInvitePoll();
+            setMatchInfo(st);
+            startDuel('live');
+          }
+          if (st?.ok === false) {
+            // invite not found / expired
+          }
+        } catch {
+          // ignore poll errors
+        }
+      }, 1200);
+    } catch (e: any) {
+      setError(e?.message || 'invite create failed');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const cancelInvite = async () => {
+    if (!telegramId) return;
+    if (!createdInvite?.invite_code) return;
+    setError('');
+    setLoading(true);
+    try {
+      const body = { telegram_id: telegramId, invite_code: createdInvite.invite_code };
+      await apiRequest<any>('/api/pvp/invite/cancel', { method: 'POST', body: JSON.stringify(body) });
+      stopInvitePoll();
+      setCreatedInvite(null);
+    } catch (e: any) {
+      setError(e?.message || 'invite cancel failed');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const joinMatchmaking = async () => {
+    if (!telegramId) return;
+    setError('');
+    setLoading(true);
+    try {
+      const body = { telegram_id: telegramId };
+      const res = await apiRequest<any>('/api/pvp/matchmaking/join', { method: 'POST', body: JSON.stringify(body) });
+      setMatchInfo(res);
+
+      // poll status until matched
+      stopInvitePoll();
+      invitePollRef.current = window.setInterval(async () => {
+        try {
+          const st = await apiRequest<any>(`/api/pvp/matchmaking/status?telegram_id=${telegramId}`);
+          if (st?.ok && st?.status === 'matched' && st?.match_token) {
+            stopInvitePoll();
+            setMatchInfo(st);
+            startDuel('live');
+          }
+          if (st?.ok && (st?.status === 'left' || st?.status === 'expired')) {
+            stopInvitePoll();
+            setMatchInfo(st);
+          }
+        } catch {
+          // ignore
+        }
+      }, 1200);
+    } catch (e: any) {
+      setError(e?.message || 'matchmaking join failed');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const leaveMatchmaking = async () => {
+    if (!telegramId) return;
+    setError('');
+    setLoading(true);
+    try {
+      const body = { telegram_id: telegramId };
+      const res = await apiRequest<any>('/api/pvp/matchmaking/leave', { method: 'POST', body: JSON.stringify(body) });
+      stopInvitePoll();
+      setMatchInfo(res);
+    } catch (e: any) {
+      setError(e?.message || 'matchmaking leave failed');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const submitLive = async () => {
+    if (!telegramId) return;
+    if (!matchInfo?.match_token) return;
+
+    setError('');
+    setLoading(true);
+
+    try {
+      const body = { telegram_id: telegramId, match_token: matchInfo.match_token, my_clicks: myClicks };
+      const res = await apiRequest<any>('/api/pvp/live/submit', { method: 'POST', body: JSON.stringify(body) });
+
+      setLiveSubmitState('waiting');
+
+      // if immediate finish
+      if (res?.status === 'finished' && res?.result) {
         setFinishResponse(res);
+        setLiveSubmitState('finished');
+        setScreen('result');
         await refreshMe();
-      } else {
-        setLiveSubmitState('waiting');
-        pollLiveStatus(matchInfo.match_token);
+        await refreshLeaderboard();
+        return;
       }
+
+      // poll status
+      stopLivePoll();
+      livePollRef.current = window.setInterval(async () => {
+        try {
+          const st = await apiRequest<any>(
+            `/api/pvp/live/status?telegram_id=${telegramId}&match_token=${encodeURIComponent(matchInfo.match_token)}`
+          );
+          if (st?.ok && st?.status === 'finished' && st?.result) {
+            stopLivePoll();
+            setFinishResponse(st);
+            setLiveSubmitState('finished');
+            setScreen('result');
+            await refreshMe();
+            await refreshLeaderboard();
+          }
+          if (st?.ok && st?.status === 'expired') {
+            stopLivePoll();
+            setFinishResponse(st);
+            setLiveSubmitState('finished');
+            setScreen('result');
+            await refreshMe();
+            await refreshLeaderboard();
+          }
+        } catch {
+          // ignore
+        }
+      }, 1200);
     } catch (e: any) {
       setError(e?.message || 'submit failed');
     } finally {
@@ -386,19 +423,17 @@ const Pvp: React.FC = () => {
     }
   };
 
-  // Challenge
-  const onChallengeStart = async () => {
+  const startChallenge = async () => {
     if (!telegramId) return;
     setError('');
     setLoading(true);
+
     try {
-      const res = await apiRequest<any>('/api/pvp/challenge/start', {
-        method: 'POST',
-        body: JSON.stringify({ telegram_id: telegramId }),
-      });
+      const res = await apiRequest<any>(`/api/pvp/challenge/pick?telegram_id=${telegramId}`);
       setChallengeStartResp(res);
       setChallengeAttemptId(res?.attempt_id ?? null);
       setChallengeOpponent(res?.opponent ?? null);
+
       startDuel('challenge');
     } catch (e: any) {
       setError(e?.message || 'challenge start failed');
@@ -407,80 +442,22 @@ const Pvp: React.FC = () => {
     }
   };
 
-  const onChallengeFinish = async () => {
+  const finishChallenge = async () => {
     if (!telegramId) return;
-    if (!challengeAttemptId) {
-      setError('attempt_id missing');
-      return;
-    }
+    if (!challengeAttemptId) return;
+
     setError('');
     setLoading(true);
+
     try {
-      const res = await apiRequest<any>('/api/pvp/challenge/finish', {
-        method: 'POST',
-        body: JSON.stringify({ telegram_id: telegramId, attempt_id: challengeAttemptId, my_clicks: myClicks }),
-      });
+      const body = { telegram_id: telegramId, attempt_id: challengeAttemptId, my_clicks: myClicks };
+      const res = await apiRequest<any>('/api/pvp/challenge/finish', { method: 'POST', body: JSON.stringify(body) });
       setChallengeFinishResp(res);
+      setScreen('result');
       await refreshMe();
+      await refreshLeaderboard();
     } catch (e: any) {
       setError(e?.message || 'challenge finish failed');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const resetToLobby = () => {
-    stopPrepTimer();
-    stopDuelTimer();
-    stopLivePoll();
-
-    setScreen('lobby');
-    setMyClicks(0);
-    setFinishResponse(null);
-    setLiveSubmitState('idle');
-
-    setChallengeFinishResp(null);
-    setChallengeAttemptId(null);
-    setChallengeOpponent(null);
-
-    setPhase('prep');
-    setPrepSecondsLeft(0);
-  };
-
-  const onCreateInvite = async () => {
-    if (!telegramId) return;
-    setError('');
-    setLoading(true);
-    try {
-      const data = await apiRequest<any>('/api/pvp/invite/create', {
-        method: 'POST',
-        body: JSON.stringify({ telegram_id: telegramId, ttl_seconds: 3600 }),
-      });
-      setCreatedInvite(data);
-      if (data?.invite_code) startInvitePolling(data.invite_code);
-    } catch (e: any) {
-      setError(e?.message || 'invite create failed');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const onCancelInvite = async () => {
-    if (!telegramId) return;
-    const code = createdInvite?.invite_code;
-    if (!code) return;
-
-    setError('');
-    setLoading(true);
-    try {
-      await apiRequest<any>('/api/pvp/invite/cancel', {
-        method: 'POST',
-        body: JSON.stringify({ telegram_id: telegramId, invite_code: code }),
-      });
-      stopInvitePoll();
-      setCreatedInvite(null);
-    } catch (e: any) {
-      setError(e?.message || 'invite cancel failed');
     } finally {
       setLoading(false);
     }
@@ -491,7 +468,7 @@ const Pvp: React.FC = () => {
   const best = pickBest(meInfo);
 
   return (
-    <div className="px-4 pt-4 text-white">
+    <div className="min-h-screen bg-[#07111e] px-4 pt-4 pb-24 text-white">
       <div className="rounded-2xl bg-[#0e1a2b] border border-[#00f0ff40] p-4 shadow-[0_0_12px_#00f0ff20]">
         <div className="flex items-center justify-between">
           <div>
@@ -518,204 +495,279 @@ const Pvp: React.FC = () => {
         )}
       </div>
 
-      {screen === 'duel' && (
-        <div className="mt-4 rounded-2xl bg-[#0e1a2b] border border-[#00f0ff40] p-4">
-          <div className="flex items-start justify-between">
-            <div>
-              <div className="font-bold text-base">🔥 {isChallenge ? 'Challenge' : 'Duel'}</div>
-              {!isChallenge && (
-                <div className="text-xs opacity-80">
-                  match_token: <span className="font-mono">{matchInfo?.match_token ?? '—'}</span>
+      <div className="mt-4 rounded-2xl bg-[#0e1a2b] border border-[#00f0ff40] p-4 shadow-[0_0_12px_#00f0ff20]">
+        <div className="flex items-center justify-between">
+          <div className="text-sm font-semibold">🏆 {t('pvp_weekly_leaderboard', { defaultValue: 'Weekly leaderboard' })}</div>
+          <button
+            className="text-xs opacity-80 underline underline-offset-2"
+            onClick={refreshLeaderboard}
+            disabled={loading}
+          >
+            {t('refresh', { defaultValue: 'Refresh' })}
+          </button>
+        </div>
+
+        {leaderboard.length === 0 ? (
+          <div className="mt-3 text-xs opacity-70">{t('pvp_no_leaderboard', { defaultValue: 'No data yet.' })}</div>
+        ) : (
+          <div className="mt-3 overflow-hidden rounded-xl border border-white/10">
+            <table className="w-full text-left text-xs">
+              <thead className="bg-white/5">
+                <tr>
+                  <th className="px-3 py-2 w-10">#</th>
+                  <th className="px-3 py-2">{t('player', { defaultValue: 'Player' })}</th>
+                  <th className="px-3 py-2 w-24 text-right">{t('victories', { defaultValue: 'Victories' })}</th>
+                  <th className="px-3 py-2 w-24 text-right">{t('best', { defaultValue: 'Best' })}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {leaderboard.map((u: any, idx: number) => {
+                  const isMe = meInfo?.user_id && u?.user_id === meInfo.user_id;
+                  const name = u?.username
+                    ? `@${u.username}`
+                    : u?.first_name || u?.last_name
+                    ? `${u.first_name || ''} ${u.last_name || ''}`.trim()
+                    : `#${u?.user_id ?? '—'}`;
+
+                  return (
+                    <tr key={u?.user_id ?? idx} className={isMe ? 'bg-white/10' : 'bg-transparent'}>
+                      <td className="px-3 py-2">{idx + 1}</td>
+                      <td className="px-3 py-2">{name}</td>
+                      <td className="px-3 py-2 text-right">{intOrZero(u?.victories)}</td>
+                      <td className="px-3 py-2 text-right">{intOrZero(u?.best_result)}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {/* LOBBY */}
+      {screen === 'lobby' && (
+        <div className="mt-4 space-y-3">
+          <div className="rounded-2xl bg-[#0e1a2b] border border-white/10 p-4">
+            <div className="text-sm font-semibold">{t('pvp_live', { defaultValue: 'Live PvP' })}</div>
+            <div className="mt-2 flex gap-2">
+              <button
+                className="flex-1 rounded-xl bg-white/10 hover:bg-white/15 border border-white/10 px-4 py-3 text-sm"
+                onClick={createInvite}
+                disabled={!canUse || loading}
+              >
+                {t('pvp_create_invite', { defaultValue: 'Create invite link' })}
+              </button>
+              <button
+                className="flex-1 rounded-xl bg-white/10 hover:bg-white/15 border border-white/10 px-4 py-3 text-sm"
+                onClick={joinMatchmaking}
+                disabled={!canUse || loading}
+              >
+                {t('pvp_matchmaking', { defaultValue: 'Random matchmaking' })}
+              </button>
+            </div>
+
+            {createdInvite?.invite_code && (
+              <div className="mt-3 rounded-xl border border-white/10 bg-white/5 p-3 text-xs">
+                <div className="opacity-80">{t('pvp_invite_created', { defaultValue: 'Invite created' })}</div>
+                <div className="mt-1">
+                  code: <span className="font-mono">{createdInvite.invite_code}</span>
                 </div>
-              )}
-            </div>
-
-            <div className="text-right">
-              <div className="text-xs opacity-80">{phase === 'prep' ? 'Starting in' : 'Time left'}</div>
-              <div className="text-2xl font-extrabold">
-                {phase === 'prep' ? `${prepSecondsLeft}s` : `${duelSecondsLeft}s`}
+                <div className="mt-1">
+                  start_param: <span className="font-mono">{createdInvite.start_param}</span>
+                </div>
+                <div className="mt-2 flex gap-2">
+                  <button
+                    className="rounded-lg bg-white/10 hover:bg-white/15 border border-white/10 px-3 py-2"
+                    onClick={() => {
+                      try {
+                        const link = `https://t.me/${WebApp.initDataUnsafe?.user?.username || ''}?start=${createdInvite.start_param}`;
+                        WebApp.openTelegramLink(link);
+                      } catch {}
+                    }}
+                    disabled={loading}
+                  >
+                    {t('share', { defaultValue: 'Share' })}
+                  </button>
+                  <button
+                    className="rounded-lg bg-white/10 hover:bg-white/15 border border-white/10 px-3 py-2"
+                    onClick={cancelInvite}
+                    disabled={loading}
+                  >
+                    {t('cancel', { defaultValue: 'Cancel' })}
+                  </button>
+                </div>
               </div>
-            </div>
+            )}
+
+            {matchInfo?.status === 'waiting' && (
+              <div className="mt-3 text-xs opacity-80">
+                {t('pvp_waiting_opponent', { defaultValue: 'Waiting for opponent…' })}
+              </div>
+            )}
+
+            {matchInfo?.status === 'left' && (
+              <div className="mt-3 text-xs opacity-80">
+                {t('pvp_left_queue', { defaultValue: 'You left matchmaking queue.' })}
+              </div>
+            )}
+
+            {matchInfo?.status === 'expired' && (
+              <div className="mt-3 text-xs opacity-80">
+                {t('pvp_queue_expired', { defaultValue: 'Queue expired.' })}
+              </div>
+            )}
+
+            {matchInfo?.status === 'waiting' && (
+              <div className="mt-2">
+                <button
+                  className="w-full rounded-xl bg-white/10 hover:bg-white/15 border border-white/10 px-4 py-3 text-sm"
+                  onClick={leaveMatchmaking}
+                  disabled={!canUse || loading}
+                >
+                  {t('pvp_leave_queue', { defaultValue: 'Leave queue' })}
+                </button>
+              </div>
+            )}
           </div>
 
-          <div className="mt-3 grid grid-cols-2 gap-3">
-            <div className="rounded-xl bg-[#0b1320] border border-[#00f0ff20] p-3">
-              <div className="text-xs opacity-70">Your clicks</div>
-              <div className="text-2xl font-extrabold">{myClicks}</div>
+          <div className="rounded-2xl bg-[#0e1a2b] border border-white/10 p-4">
+            <div className="text-sm font-semibold">{t('pvp_challenge', { defaultValue: 'Challenge (no stake)' })}</div>
+            <div className="mt-2">
+              <button
+                className="w-full rounded-xl bg-white/10 hover:bg-white/15 border border-white/10 px-4 py-3 text-sm"
+                onClick={startChallenge}
+                disabled={!canUse || loading}
+              >
+                {t('pvp_start_challenge', { defaultValue: 'Start challenge' })}
+              </button>
             </div>
 
-            <div className="rounded-xl bg-[#0b1320] border border-[#00f0ff20] p-3">
-              <div className="text-xs opacity-70">Opponent</div>
-              <div className="text-sm opacity-90">
-                id:{' '}
-                <span className="font-mono">
-                  {isChallenge ? challengeOpponent?.user_id ?? '—' : computeOpponentUserId() ?? '—'}
-                </span>
-              </div>
-            </div>
-          </div>
-
-          <div className="mt-4 relative">
-            <div
-              onTouchStart={onTouchStart}
-              onMouseDown={onMouseDown}
-              className={`select-none w-full h-40 rounded-2xl border border-[#00f0ff50] bg-[#0b1320] flex items-center justify-center shadow-[0_0_18px_#00f0ff20] ${
-                phase === 'prep' ? 'opacity-70' : 'active:scale-[0.99]'
-              }`}
-            >
-              <div className="text-center">
-                <div className="text-2xl font-extrabold">TAP</div>
-                <div className="text-xs opacity-70">multitouch up to 2 fingers</div>
-              </div>
-            </div>
-
-            {phase === 'prep' && (
-              <div className="absolute inset-0 flex items-center justify-center">
-                <div className="rounded-2xl bg-black/60 border border-white/20 px-6 py-4 text-center">
-                  <div className="text-sm opacity-90">Get ready</div>
-                  <div className="text-4xl font-extrabold">{prepSecondsLeft}</div>
+            {challengeStartResp?.ok && challengeOpponent && (
+              <div className="mt-3 rounded-xl border border-white/10 bg-white/5 p-3 text-xs">
+                <div className="opacity-80">{t('pvp_opponent', { defaultValue: 'Opponent' })}</div>
+                <div className="mt-1">
+                  #{challengeOpponent.user_id} @{challengeOpponent.username || '—'}
+                </div>
+                <div className="mt-1">
+                  best: <span className="font-mono">{intOrZero(challengeOpponent.best_result)}</span>
                 </div>
               </div>
             )}
           </div>
 
-          <div className="mt-4 flex gap-2">
-            <button
-              onClick={resetToLobby}
-              className="flex-1 rounded-xl bg-[#0b1320] border border-[#00f0ff30] py-2 text-sm"
-            >
-              Back
-            </button>
+          <div className="rounded-2xl bg-[#0e1a2b] border border-white/10 p-4">
+            <div className="text-xs opacity-80">
+              {t('pvp_tip', {
+                defaultValue:
+                  'Tip: Live win = +2 victories, Challenge win = +1. Weekly victories reset automatically by season.',
+              })}
+            </div>
           </div>
         </div>
       )}
 
-      {screen === 'result' && (
-        <div className="mt-4 rounded-2xl bg-[#0e1a2b] border border-[#00f0ff40] p-4">
-          <div className="font-bold text-base">🏁 Result</div>
-
-          {duelMode === 'challenge' ? (
-            <div className="mt-3">
-              <button
-                disabled={loading}
-                onClick={onChallengeFinish}
-                className="w-full rounded-xl bg-[#00f0ff] text-black font-bold py-2 disabled:opacity-60"
-              >
-                {loading ? 'Loading...' : 'Finish'}
-              </button>
-
-              {challengeFinishResp && (
-                <div className="mt-3 text-xs whitespace-pre-wrap opacity-90">
-                  {JSON.stringify(challengeFinishResp, null, 2)}
-                </div>
+      {/* DUEL */}
+      {screen === 'duel' && (
+        <div className="mt-4 rounded-2xl bg-[#0e1a2b] border border-[#00f0ff40] p-4 shadow-[0_0_12px_#00f0ff20]">
+          <div className="flex items-center justify-between">
+            <div className="text-sm font-semibold">
+              {isChallenge ? '🧪 Challenge' : '⚔️ Live'}
+              <span className="ml-2 text-xs opacity-70">{phase === 'prep' ? 'prep' : 'active'}</span>
+            </div>
+            <div className="text-xs opacity-80">
+              {phase === 'prep' ? (
+                <span>
+                  {t('starts_in', { defaultValue: 'starts in' })}: {prepSecondsLeft}s
+                </span>
+              ) : (
+                <span>
+                  {t('time_left', { defaultValue: 'time left' })}: {duelSecondsLeft}s
+                </span>
               )}
             </div>
-          ) : (
-            <div className="mt-3">
-              <button
-                disabled={loading || liveSubmitState === 'finished'}
-                onClick={onLiveSubmit}
-                className="w-full rounded-xl bg-[#00f0ff] text-black font-bold py-2 disabled:opacity-60"
-              >
-                {loading
-                  ? 'Loading...'
-                  : liveSubmitState === 'waiting'
-                  ? 'Waiting opponent...'
-                  : liveSubmitState === 'finished'
-                  ? 'Finished'
-                  : 'Submit result'}
-              </button>
+          </div>
 
-              {finishResponse && (
-                <div className="mt-3 text-xs whitespace-pre-wrap opacity-90">
-                  {JSON.stringify(finishResponse, null, 2)}
+          <div className="mt-4 flex flex-col items-center justify-center">
+            <div
+              onPointerDown={onTap}
+              className="select-none rounded-2xl bg-white/10 border border-white/15 w-full py-10 text-center active:scale-[0.99] transition"
+              style={{ touchAction: 'manipulation' }}
+            >
+              <div className="text-4xl font-bold">{myClicks}</div>
+              <div className="mt-2 text-xs opacity-70">{t('tap_to_click', { defaultValue: 'Tap to click' })}</div>
+            </div>
+
+            {phase === 'prep' && (
+              <div className="mt-4 flex items-center justify-center">
+                <div className="rounded-2xl bg-black/60 border border-white/20 px-6 py-4 text-center">
+                  <div className="text-sm opacity-90">Get ready</div>
+                  <div className="text-3xl font-bold">{prepSecondsLeft}</div>
                 </div>
+              </div>
+            )}
+
+            <div className="mt-4 w-full flex gap-2">
+              {!isChallenge ? (
+                <button
+                  className="flex-1 rounded-xl bg-white/10 hover:bg-white/15 border border-white/10 px-4 py-3 text-sm"
+                  onClick={submitLive}
+                  disabled={loading || liveSubmitState !== 'idle'}
+                >
+                  {liveSubmitState === 'idle'
+                    ? t('submit', { defaultValue: 'Submit' })
+                    : t('waiting', { defaultValue: 'Waiting…' })}
+                </button>
+              ) : (
+                <button
+                  className="flex-1 rounded-xl bg-white/10 hover:bg-white/15 border border-white/10 px-4 py-3 text-sm"
+                  onClick={finishChallenge}
+                  disabled={loading}
+                >
+                  {t('finish', { defaultValue: 'Finish' })}
+                </button>
               )}
+
+              <button
+                className="rounded-xl bg-white/10 hover:bg-white/15 border border-white/10 px-4 py-3 text-sm"
+                onClick={resetToLobby}
+                disabled={loading}
+              >
+                {t('back', { defaultValue: 'Back' })}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* RESULT */}
+      {screen === 'result' && (
+        <div className="mt-4 rounded-2xl bg-[#0e1a2b] border border-white/10 p-4">
+          <div className="text-sm font-semibold">{t('result', { defaultValue: 'Result' })}</div>
+
+          {!isChallenge ? (
+            <div className="mt-2 text-xs opacity-80 whitespace-pre-wrap">
+              {finishResponse ? JSON.stringify(finishResponse, null, 2) : t('no_data', { defaultValue: 'No data' })}
+            </div>
+          ) : (
+            <div className="mt-2 text-xs opacity-80 whitespace-pre-wrap">
+              {challengeFinishResp
+                ? JSON.stringify(challengeFinishResp, null, 2)
+                : t('no_data', { defaultValue: 'No data' })}
             </div>
           )}
 
           <div className="mt-4 flex gap-2">
             <button
-              onClick={resetToLobby}
-              className="flex-1 rounded-xl bg-[#0b1320] border border-[#00f0ff30] py-2 text-sm"
-            >
-              Back to lobby
-            </button>
-          </div>
-        </div>
-      )}
-
-      {screen === 'lobby' && (
-        <div className="mt-4 space-y-4">
-          <div className="rounded-2xl bg-[#0e1a2b] border border-[#00f0ff40] p-4">
-            <div className="flex items-center justify-between">
-              <div className="font-bold">🔗 Live duel link</div>
-              <div className="text-xs opacity-70">bot: @{BOT_USERNAME}</div>
-            </div>
-
-            <div className="mt-3 grid grid-cols-2 gap-2">
-              <button
-                disabled={loading}
-                onClick={onCreateInvite}
-                className="rounded-xl bg-[#00f0ff] text-black font-bold py-2 disabled:opacity-60"
-              >
-                Create link
-              </button>
-
-              <button
-                disabled={loading || !createdInvite?.invite_code}
-                onClick={onCancelInvite}
-                className="rounded-xl bg-[#0b1320] border border-[#00f0ff30] py-2 text-sm disabled:opacity-60"
-              >
-                Cancel
-              </button>
-            </div>
-
-            {createdInvite?.invite_code && (
-              <div className="mt-3 rounded-xl bg-[#0b1320] border border-[#00f0ff20] p-3 text-xs">
-                <div className="opacity-80">link:</div>
-                <div className="font-mono break-all">{buildInviteLink(createdInvite.invite_code)}</div>
-
-                <div className="mt-2 grid grid-cols-2 gap-2">
-                  <button
-                    onClick={() => copyText(buildInviteLink(createdInvite.invite_code))}
-                    className="rounded-xl bg-[#0b1320] border border-[#00f0ff30] py-2 text-sm"
-                  >
-                    Copy
-                  </button>
-
-                  <button
-                    onClick={() => shareInvite(createdInvite.invite_code)}
-                    className="rounded-xl bg-[#00f0ff] text-black font-bold py-2"
-                  >
-                    Share
-                  </button>
-                </div>
-
-                <div className="mt-2 text-[11px] opacity-60">
-                  Friend opens link → duel starts automatically for both. (5s countdown)
-                </div>
-              </div>
-            )}
-          </div>
-
-          <div className="rounded-2xl bg-[#0e1a2b] border border-[#00f0ff40] p-4">
-            <div className="font-bold">🧱 Challenge</div>
-            <div className="mt-1 text-xs opacity-70">Play vs someone’s best result (no stake). Limit: 5/day.</div>
-
-            <button
+              className="flex-1 rounded-xl bg-white/10 hover:bg-white/15 border border-white/10 px-4 py-3 text-sm"
+              onClick={() => {
+                resetToLobby();
+                refreshMe();
+                refreshLeaderboard();
+              }}
               disabled={loading}
-              onClick={onChallengeStart}
-              className="mt-3 w-full rounded-xl bg-[#00f0ff] text-black font-bold py-2 disabled:opacity-60"
             >
-              {loading ? 'Loading...' : 'Start challenge'}
+              {t('to_lobby', { defaultValue: 'Back to lobby' })}
             </button>
-
-            {challengeStartResp && (
-              <div className="mt-3 text-xs opacity-80 whitespace-pre-wrap">
-                {JSON.stringify(challengeStartResp, null, 2)}
-              </div>
-            )}
           </div>
         </div>
       )}
