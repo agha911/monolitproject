@@ -34,6 +34,7 @@ from app.routers import dao as dao_router
 from app.routers.t_shirt_routers import router as tshirt_router
 from app.models.pvp_models import PvpInvite
 from app.routers import pvp
+from app.crud.crud_pvp import rollover_weekly_season_if_needed
 
 # ---------------- logging setup ----------------
 
@@ -632,16 +633,27 @@ async def reset_loop():
             print(f"[RESET ERROR] {e}")
         await asyncio.sleep(24 * 60 * 60)
 
+async def _weekly_season_daemon():
+    while True:
+        try:
+            async with async_session_maker() as session:  # подставь свой maker
+                async with session.begin():
+                    await rollover_weekly_season_if_needed(session)
+        except Exception:
+            pass
+        await asyncio.sleep(60)
+
 
 @app.on_event("startup")
 async def start_background_tasks():
     asyncio.create_task(notify_loop())
-    #asyncio.create_task(reset_loop())
+    asyncio.create_task(reset_loop())
     register_winners_handlers(bot)
     register_delivery_handlers(bot)
     asyncio.create_task(run_bot_polling())
     #asyncio.create_task(tournament_reset_loop())# ← добавили
     register_oneoff_finalize_task()
+    asyncio.create_task(_weekly_season_daemon())
 
 async def notify_loop():
     while True:
