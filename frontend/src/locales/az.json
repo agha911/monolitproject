@@ -194,7 +194,56 @@
     "tshirt_claim_failed": "Yığım zamanı xəta baş verdi",
     "buy_failed": "Alış alınmadı",
     "claim_failed": "Yığım alınmadı"
-  }
+  },
+  "pvp_subtitle": "Canlı duel və Challenge",
+  "pvp_weekly_leaderboard": "Həftəlik reytinq",
+  "pvp_tg_init_missing": "Telegram initData tapılmadı",
+
+  "pvp_stake": "stake:",
+  "pvp_duration": "müddət:",
+  "pvp_season": "Sezon:",
+  "pvp_source": "mənbə: {{src}}",
+
+  "pvp_you": "you: #{{id}} @{{username}}",
+  "pvp_stats": "victories: {{v}} | best: {{b}}",
+
+  "pvp_live_duel": "Canlı duel",
+  "pvp_live_hint": "Dəvət linki yarat və rəqibinə göndər.",
+  "pvp_create_invite": "Dəvət yarat",
+  "pvp_cancel_invite": "Dəvəti ləğv et",
+  "pvp_invite_code": "Dəvət kodu:",
+  "pvp_link": "Link:",
+  "pvp_share_text": "Mənim duel’uma qoşul!",
+
+  "pvp_duel": "Duel",
+  "pvp_match_token": "match_token:",
+  "pvp_starting_in": "Başlanır",
+  "pvp_time_left": "Vaxt qalıb",
+  "pvp_your_clicks": "Sənin kliklərin",
+  "pvp_opponent": "Rəqib",
+  "pvp_opponent_colon": "Rəqib:",
+  "pvp_tap": "Toxun",
+  "pvp_wait_start": "Başlanğıcı gözlə…",
+  "pvp_go": "Başla!",
+  "pvp_get_ready": "Hazır ol",
+
+  "pvp_challenge_title": "Challenge",
+  "pvp_challenge_hint": "Rəqibin best_result nəticəsinə qarşı oyna. Qələbə +1 victory verir.",
+  "pvp_start_challenge": "Challenge başlat",
+  "pvp_best_colon": "best:",
+
+  "pvp_invite_expired": "Dəvət linkinin vaxtı bitdi",
+  "pvp_invite_cancelled": "Dəvət ləğv edildi",
+  "pvp_session_expired": "Sessiyanın vaxtı bitdi",
+
+  "pvp_error_match_token_missing": "match_token tapılmadı",
+  "pvp_error_attempt_id_missing": "attempt_id tapılmadı",
+  "pvp_error_submit_failed": "Göndərmə xətası",
+  "pvp_error_invite_create_failed": "Dəvət yaratmaq alınmadı",
+  "pvp_error_challenge_start_failed": "Challenge başlatmaq alınmadı",
+  "pvp_error_challenge_finish_failed": "Challenge bitirmək alınmadı",
+
+  "pvp_back_to_lobby": "Lobbiyə qayıt"
   
 
 }
