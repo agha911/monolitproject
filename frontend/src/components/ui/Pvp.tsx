@@ -96,7 +96,6 @@ function normalizeOutcome(mode: DuelMode, raw: any, meUserId?: number | null): O
   if (meUserId && typeof winnerId === 'number') return winnerId === meUserId ? 'win' : 'lose';
   if (meUserId && typeof loserId === 'number') return loserId === meUserId ? 'lose' : 'win';
 
-  // Challenge sometimes returns boolean "won" or "is_winner"
   const won = raw?.won ?? raw?.is_winner ?? raw?.isWinner;
   if (typeof won === 'boolean') return won ? 'win' : 'lose';
 
@@ -116,13 +115,13 @@ function extractNumber(raw: any, keys: string[]): number | null {
 const PREP_SECONDS = 5;
 
 // glow tuning
-const GLOW_WINDOW_MS = 700; // look-back window for click speed
-const GLOW_MAX_CPS = 12; // 12 clicks per second = max glow
-const GLOW_DECAY_PER_TICK = 0.05; // decay speed
+const GLOW_WINDOW_MS = 700;
+const GLOW_MAX_CPS = 12;
+const GLOW_DECAY_PER_TICK = 0.05;
 const GLOW_TICK_MS = 45;
 
 // glow rise smoothing (slower ramp)
-const GLOW_RISE_LERP = 0.12; // smaller = slower rise
+const GLOW_RISE_LERP = 0.12;
 
 const Pvp: React.FC = () => {
   const { t } = useTranslation();
@@ -305,7 +304,6 @@ const Pvp: React.FC = () => {
   };
 
   const fetchPublicUser = async (userId: number) => {
-    // We try a couple of likely endpoints. If your backend uses only one, others will just fail silently.
     const candidates = [
       `/api/pvp/user/public?user_id=${userId}`,
       `/api/pvp/user?user_id=${userId}`,
@@ -316,19 +314,16 @@ const Pvp: React.FC = () => {
     for (const path of candidates) {
       try {
         const u = await apiRequest<any>(path);
-        // some endpoints may wrap {user: {...}}
         return u?.user ?? u;
       } catch {}
     }
     return null;
   };
 
-  // Keep liveOpponent in sync with current match
   useEffect(() => {
     (async () => {
       if (duelMode !== 'live') return;
 
-      // if backend already provides opponent object, use it
       const embedded =
         matchInfo?.opponent ??
         matchInfo?.opponent_user ??
@@ -386,7 +381,6 @@ const Pvp: React.FC = () => {
       return;
     }
 
-    // avoid double submit
     if (liveSubmitStateRef.current !== 'idle') return;
 
     setError('');
@@ -450,10 +444,8 @@ const Pvp: React.FC = () => {
     if (autoEndTriggeredRef.current) return;
     autoEndTriggeredRef.current = true;
 
-    // Always show result screen when time ends
     setScreen('result');
 
-    // Fire-and-forget (user still has manual button as fallback)
     if (duelModeRef.current === 'challenge') {
       void onChallengeFinish();
       return;
@@ -506,10 +498,8 @@ const Pvp: React.FC = () => {
     setLiveSubmitState('idle');
     stopLivePoll();
 
-    // reset auto-end guard
     autoEndTriggeredRef.current = false;
 
-    // HARD RESET TIMERS + PHASE
     stopPrepTimer();
     stopDuelTimer();
     setPhase('prep');
@@ -522,7 +512,6 @@ const Pvp: React.FC = () => {
     startPrepCountdown();
   };
 
-  // ---- AUTO-ACCEPT (receiver) — when opened by link (start_param = "pvp_<code>") ----
   const autoAcceptRef = useRef<string | null>(null);
 
   useEffect(() => {
@@ -559,7 +548,7 @@ const Pvp: React.FC = () => {
   }, [telegramId]);
 
   // -----------------------------
-  // CLICK GLOW (speed -> brightness)
+  // CLICK GLOW
   // -----------------------------
   const [glow, setGlow] = useState<number>(0);
   const recentClicksRef = useRef<Array<{ ts: number; delta: number }>>([]);
@@ -574,7 +563,6 @@ const Pvp: React.FC = () => {
     const cps = (sum / GLOW_WINDOW_MS) * 1000;
     const intensity = Math.max(0, Math.min(1, cps / GLOW_MAX_CPS));
 
-    // slower rise: smoothly approach intensity only when it is higher than current glow
     setGlow((prev) => {
       if (intensity <= prev) return prev;
       return prev + (intensity - prev) * GLOW_RISE_LERP;
@@ -582,7 +570,6 @@ const Pvp: React.FC = () => {
   };
 
   useEffect(() => {
-    // decay loop
     if (glowTickRef.current) window.clearInterval(glowTickRef.current);
     glowTickRef.current = window.setInterval(() => {
       setGlow((prev) => {
@@ -599,7 +586,6 @@ const Pvp: React.FC = () => {
     };
   }, []);
 
-  // ---- click handling (multitouch limited to 2) ----
   const addClicks = (delta: number) => {
     if (screen !== 'duel') return;
     if (phase !== 'active') return;
@@ -619,7 +605,6 @@ const Pvp: React.FC = () => {
 
   const onMouseDown = () => addClicks(1);
 
-  // Poll invite status for sender and auto-start duel when accepted
   const startInvitePolling = (code: string) => {
     stopInvitePoll();
     invitePollRef.current = window.setInterval(async () => {
@@ -771,9 +756,6 @@ const Pvp: React.FC = () => {
       `0 0 ${10 + 34 * glow}px rgba(255,215,0,${0.06 + 0.18 * glow})`,
   };
 
-  // -----------------------------
-  // RESULT VIEW MODEL (for UI)
-  // -----------------------------
   const rawResult = duelMode === 'challenge' ? challengeFinishResp : finishResponse;
   const outcome: Outcome = normalizeOutcome(duelMode, rawResult, meUserId);
 
@@ -786,7 +768,6 @@ const Pvp: React.FC = () => {
     extractNumber(rawResult?.result, ['my_clicks', 'your_clicks', 'clicks', 'myClicks', 'yourClicks']) ??
     myClicks;
 
-  // reward/delta fields (best effort)
   const deltaCoins =
     extractNumber(rawResult, ['delta_coins', 'deltaCoins', 'reward_delta', 'rewardDelta', 'coins_delta']) ??
     extractNumber(rawResult?.result, ['delta_coins', 'deltaCoins', 'reward_delta', 'rewardDelta', 'coins_delta']);
@@ -806,12 +787,12 @@ const Pvp: React.FC = () => {
 
   const outcomeTitle =
     outcome === 'win'
-      ? t('pvp_outcome_win', { defaultValue: 'You WIN 🎉' })
+      ? t('pvp_outcome_win', { defaultValue: 'Qələbə 🎉' })
       : outcome === 'lose'
-      ? t('pvp_outcome_lose', { defaultValue: 'You LOSE' })
+      ? t('pvp_outcome_lose', { defaultValue: 'Məğlubiyyət' })
       : outcome === 'draw'
-      ? t('pvp_outcome_draw', { defaultValue: 'Draw' })
-      : t('pvp_outcome_unknown', { defaultValue: 'Result' });
+      ? t('pvp_outcome_draw', { defaultValue: 'Heç-heçə' })
+      : t('pvp_outcome_unknown', { defaultValue: 'Nəticə' });
 
   const outcomeBadge =
     outcome === 'win'
@@ -825,33 +806,28 @@ const Pvp: React.FC = () => {
   const rewardLine = (() => {
     if (deltaCoins != null) {
       const sign = deltaCoins > 0 ? '+' : '';
-      return `${sign}${Math.round(deltaCoins)} ${t('coins', { defaultValue: 'coins' })}`;
+      return `${sign}${Math.round(deltaCoins)} ${t('coins', { defaultValue: 'coin' })}`;
     }
     if (rewardCoins != null) {
       const sign = rewardCoins > 0 ? '+' : '';
-      return `${sign}${Math.round(rewardCoins)} ${t('coins', { defaultValue: 'coins' })}`;
+      return `${sign}${Math.round(rewardCoins)} ${t('coins', { defaultValue: 'coin' })}`;
     }
 
-    // fallback based on mode/outcome if server didn't return reward
     if (duelMode === 'challenge') {
       if (outcome === 'win') return `+1 ${t('victories', { defaultValue: 'victory' })}`;
       if (outcome === 'lose') return `+0 ${t('victories', { defaultValue: 'victory' })}`;
       return '—';
     }
 
-    // live fallback: stake-based only if no explicit reward
     if (outcome === 'win') {
-      if (potValue != null) return `+${Math.round(potValue / 2)} ${t('coins', { defaultValue: 'coins' })}`;
-      return t('pvp_reward_unknown', { defaultValue: 'Reward calculated by server' });
+      if (potValue != null) return `+${Math.round(potValue / 2)} ${t('coins', { defaultValue: 'coin' })}`;
+      return t('pvp_reward_unknown', { defaultValue: 'Mükafat server tərəfindən hesablanır' });
     }
-    if (outcome === 'lose') return `-${Math.round(stakeValue)} ${t('coins', { defaultValue: 'coins' })}`;
-    if (outcome === 'draw') return `0 ${t('coins', { defaultValue: 'coins' })}`;
+    if (outcome === 'lose') return `-${Math.round(stakeValue)} ${t('coins', { defaultValue: 'coin' })}`;
+    if (outcome === 'draw') return `0 ${t('coins', { defaultValue: 'coin' })}`;
     return '—';
   })();
 
-  // -----------------------------
-  // RENDER: isolate lobby vs duel/result
-  // -----------------------------
   const renderLobbyHeader = () => (
     <>
       <div className="rounded-2xl bg-[#0e1a2b] border border-[#00f0ff40] p-4 shadow-[0_0_12px_#00f0ff20]">
@@ -887,12 +863,11 @@ const Pvp: React.FC = () => {
                 defaultValue: 'you: #{{id}} @{{username}}',
               })}
             </div>
-            <div>{t('pvp_stats', { v: victories, b: best, defaultValue: 'victories: {{v}} | best: {{b}}' })}</div>
+            <div>{t('pvp_stats', { v: victories, b: best, defaultValue: 'qələbə: {{v}} | best: {{b}}' })}</div>
           </div>
         )}
       </div>
 
-      {/* Weekly leaderboard */}
       <div className="mt-4 rounded-2xl bg-[#0e1a2b] border border-[#00f0ff40] p-4 shadow-[0_0_12px_#00f0ff20]">
         <div className="flex items-center justify-between">
           <div className="text-sm font-semibold">🏆 {t('pvp_weekly_leaderboard', { defaultValue: 'Weekly leaderboard' })}</div>
@@ -979,7 +954,11 @@ const Pvp: React.FC = () => {
             {t('pvp_vs', { defaultValue: 'vs' })}{' '}
             <span className="font-semibold">{duelOpponentLabel}</span>
             {isChallenge && opponentBest != null ? (
-              <span className="opacity-80"> • best: <span className="font-mono">{opponentBest}</span></span>
+              <span className="opacity-80">
+                {' '}
+                • {t('pvp_best_label', { defaultValue: 'best' })}:{' '}
+                <span className="font-mono">{opponentBest}</span>
+              </span>
             ) : null}
           </div>
           <div className="text-[11px] opacity-75">
@@ -1003,7 +982,6 @@ const Pvp: React.FC = () => {
         <div className="mt-4">
           {renderDuelHeader()}
 
-          {/* clicker-like status row */}
           <div className="mt-4 grid grid-cols-3 gap-3">
             <div className="rounded-2xl bg-[#0e1a2b] border border-[#00f0ff20] p-3 text-center">
               <div className="text-[11px] opacity-70">{t('pvp_your_clicks', { defaultValue: 'Klik' })}</div>
@@ -1021,7 +999,6 @@ const Pvp: React.FC = () => {
             </div>
           </div>
 
-          {/* Bubble click button */}
           <div className="mt-6 flex items-center justify-center">
             <div className="relative">
               <button
@@ -1035,10 +1012,8 @@ const Pvp: React.FC = () => {
                   boxShadow: '0 0 14px rgba(0,240,255,0.12)',
                 }}
               >
-                {/* glow layer */}
                 <div className="absolute inset-0 rounded-full" style={bubbleGlowStyle} />
 
-                {/* soft glass highlight */}
                 <div
                   className="absolute inset-0 rounded-full"
                   style={{
@@ -1071,7 +1046,6 @@ const Pvp: React.FC = () => {
             </div>
           </div>
 
-          {/* bottom actions (optional manual fallback) */}
           <div className="mt-6 space-y-2">
             {!isChallenge ? (
               <button
@@ -1079,7 +1053,9 @@ const Pvp: React.FC = () => {
                 onClick={onLiveSubmit}
                 disabled={loading || liveSubmitState !== 'idle'}
               >
-                {liveSubmitState === 'idle' ? 'Submit (manual)' : 'Waiting...'}
+                {liveSubmitState === 'idle'
+                  ? t('pvp_submit_manual', { defaultValue: 'Təsdiqlə (əl ilə)' })
+                  : t('pvp_waiting', { defaultValue: 'Gözlənilir…' })}
               </button>
             ) : (
               <button
@@ -1087,12 +1063,12 @@ const Pvp: React.FC = () => {
                 onClick={onChallengeFinish}
                 disabled={loading}
               >
-                Finish (manual)
+                {t('pvp_finish_manual', { defaultValue: 'Bitir (əl ilə)' })}
               </button>
             )}
 
             <button className="w-full rounded-2xl bg-white/10 border border-white/10 py-3" onClick={resetToLobby}>
-              Back
+              {t('back', { defaultValue: 'Geri' })}
             </button>
           </div>
         </div>
@@ -1106,7 +1082,7 @@ const Pvp: React.FC = () => {
 
           <div className="mt-4 rounded-2xl bg-[#0e1a2b] border border-[#00f0ff20] p-4">
             <div className="flex items-center justify-between">
-              <div className="text-base font-bold">🏁 {t('pvp_result', { defaultValue: 'Result' })}</div>
+              <div className="text-base font-bold">🏁 {t('pvp_result', { defaultValue: 'Nəticə' })}</div>
               <div className={`px-3 py-1 rounded-xl border text-xs ${outcomeBadge}`}>{outcomeTitle}</div>
             </div>
 
@@ -1116,22 +1092,22 @@ const Pvp: React.FC = () => {
 
             <div className="mt-4 grid grid-cols-2 gap-3">
               <div className="rounded-2xl bg-[#0b1320] border border-[#00f0ff20] p-3">
-                <div className="text-[11px] opacity-70">{t('pvp_you_label', { defaultValue: 'You' })}</div>
+                <div className="text-[11px] opacity-70">{t('pvp_you_label', { defaultValue: 'Sən' })}</div>
                 <div className="mt-1 text-sm font-semibold">{formatUserLabel(meInfo, meUserId)}</div>
-                <div className="mt-2 text-[11px] opacity-70">{t('pvp_clicks', { defaultValue: 'Clicks' })}</div>
+                <div className="mt-2 text-[11px] opacity-70">{t('pvp_clicks', { defaultValue: 'Kliklər' })}</div>
                 <div className="text-2xl font-extrabold">{myClicksFromResult}</div>
               </div>
 
               <div className="rounded-2xl bg-[#0b1320] border border-[#00f0ff20] p-3">
-                <div className="text-[11px] opacity-70">{t('pvp_opponent', { defaultValue: 'Opponent' })}</div>
+                <div className="text-[11px] opacity-70">{t('pvp_opponent', { defaultValue: 'Rəqib' })}</div>
                 <div className="mt-1 text-sm font-semibold truncate">{duelOpponentLabel}</div>
-                <div className="mt-2 text-[11px] opacity-70">{t('pvp_clicks', { defaultValue: 'Clicks' })}</div>
+                <div className="mt-2 text-[11px] opacity-70">{t('pvp_clicks', { defaultValue: 'Kliklər' })}</div>
                 <div className="text-2xl font-extrabold">{oppClicksFromResult ?? '—'}</div>
               </div>
             </div>
 
             <div className="mt-4 rounded-2xl bg-[#0b1320] border border-white/10 p-3">
-              <div className="text-[11px] opacity-70">{t('pvp_reward', { defaultValue: 'Reward / change' })}</div>
+              <div className="text-[11px] opacity-70">{t('pvp_reward', { defaultValue: 'Mükafat / dəyişiklik' })}</div>
               <div className="mt-1 text-lg font-bold">{rewardLine}</div>
 
               {!isChallenge ? (
@@ -1146,55 +1122,47 @@ const Pvp: React.FC = () => {
                 </div>
               ) : (
                 <div className="mt-1 text-[11px] opacity-70">
-                  {t('pvp_challenge_rules_hint', { defaultValue: 'Challenge: win +1 victory, lose +0. No stake.' })}
+                  {t('pvp_challenge_rules_hint', { defaultValue: 'Challenge: qələbə +1 victory, məğlubiyyət +0. Stake yoxdur.' })}
                 </div>
               )}
             </div>
 
             <div className="mt-4 space-y-2">
               {duelMode === 'challenge' ? (
-                <>
-                  <button
-                    disabled={loading}
-                    onClick={onChallengeFinish}
-                    className="w-full rounded-2xl bg-[#00f0ff] text-black font-bold py-3 disabled:opacity-60"
-                  >
-                    {loading ? 'Loading...' : 'Finish (fallback)'}
-                  </button>
-                </>
+                <button
+                  disabled={loading}
+                  onClick={onChallengeFinish}
+                  className="w-full rounded-2xl bg-[#00f0ff] text-black font-bold py-3 disabled:opacity-60"
+                >
+                  {loading
+                    ? t('loading', { defaultValue: 'Yüklənir…' })
+                    : t('pvp_finish_fallback', { defaultValue: 'Bitir (fallback)' })}
+                </button>
               ) : (
-                <>
-                  <button
-                    disabled={loading || liveSubmitState === 'finished'}
-                    onClick={onLiveSubmit}
-                    className="w-full rounded-2xl bg-[#00f0ff] text-black font-bold py-3 disabled:opacity-60"
-                  >
-                    {loading
-                      ? 'Loading...'
-                      : liveSubmitState === 'waiting'
-                      ? 'Waiting opponent...'
-                      : liveSubmitState === 'finished'
-                      ? 'Finished'
-                      : 'Submit (fallback)'}
-                  </button>
-                </>
+                <button
+                  disabled={loading || liveSubmitState === 'finished'}
+                  onClick={onLiveSubmit}
+                  className="w-full rounded-2xl bg-[#00f0ff] text-black font-bold py-3 disabled:opacity-60"
+                >
+                  {loading
+                    ? t('loading', { defaultValue: 'Yüklənir…' })
+                    : liveSubmitState === 'waiting'
+                    ? t('pvp_waiting_opponent', { defaultValue: 'Rəqib gözlənilir…' })
+                    : liveSubmitState === 'finished'
+                    ? t('pvp_finished', { defaultValue: 'Bitdi' })
+                    : t('pvp_submit_fallback', { defaultValue: 'Təsdiqlə (fallback)' })}
+                </button>
               )}
 
               <button className="w-full rounded-2xl bg-white/10 border border-white/10 py-3" onClick={resetToLobby}>
-                Back to lobby
+                {t('pvp_back_to_lobby', { defaultValue: 'Lobbiyə qayıt' })}
               </button>
             </div>
-
-            {/* optional debug (kept hidden by default) */}
-            {false && rawResult ? (
-              <div className="mt-3 text-xs whitespace-pre-wrap opacity-60">{JSON.stringify(rawResult, null, 2)}</div>
-            ) : null}
           </div>
         </div>
       );
     }
 
-    // lobby
     return (
       <>
         {renderLobbyHeader()}
@@ -1220,10 +1188,10 @@ const Pvp: React.FC = () => {
 
                   <div className="mt-3 grid grid-cols-2 gap-2">
                     <button className="rounded-2xl bg-white/10 border border-white/10 py-2" onClick={() => copyText(inviteUrl)}>
-                      Copy
+                      {t('pvp_copy', { defaultValue: 'Kopyala' })}
                     </button>
                     <button className="rounded-2xl bg-white/10 border border-white/10 py-2" onClick={() => shareInvite(createdInvite.invite_code)}>
-                      Share
+                      {t('pvp_share', { defaultValue: 'Paylaş' })}
                     </button>
                   </div>
 
@@ -1236,7 +1204,7 @@ const Pvp: React.FC = () => {
                   </button>
 
                   <div className="mt-2 text-[11px] opacity-70">
-                    {t('pvp_waiting_opponent', { defaultValue: 'Waiting for opponent to open the link…' })}
+                    {t('pvp_waiting_opponent', { defaultValue: 'Rəqib gözlənilir…' })}
                   </div>
                 </div>
               )}
@@ -1254,15 +1222,16 @@ const Pvp: React.FC = () => {
               onClick={onChallengeStart}
               disabled={!canUse || loading}
             >
-              Start challenge
+              {t('pvp_start_challenge', { defaultValue: 'Challenge başlat' })}
             </button>
 
             {challengeOpponent && (
               <div className="mt-3 rounded-2xl bg-[#0b1320] border border-[#00f0ff20] p-3 text-xs">
-                <div className="opacity-80">{t('pvp_opponent', { defaultValue: 'Opponent' })}:</div>
+                <div className="opacity-80">{t('pvp_opponent_label', { defaultValue: 'Rəqib' })}:</div>
                 <div className="mt-1 font-semibold">{formatUserLabel(challengeOpponent, challengeOpponent?.user_id ?? null)}</div>
                 <div className="mt-1 opacity-80">
-                  best: <span className="font-mono">{intOrZero(challengeOpponent.best_result)}</span>
+                  {t('pvp_best_label', { defaultValue: 'best' })}:{' '}
+                  <span className="font-mono">{intOrZero(challengeOpponent.best_result)}</span>
                 </div>
               </div>
             )}
