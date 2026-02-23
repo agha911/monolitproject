@@ -222,7 +222,7 @@
   "pvp_source": "mənbə: {{src}}",
 
   "pvp_live_duel": "Canlı duel",
-  "pvp_live_hint": "Dəvət linki yarat və rəqibinə göndər.",
+  "pvp_live_hint": "Dəvət linki yarat və rəqibinə göndər. Qələbə +2 xal verir.",
   "pvp_create_invite": "Dəvət yarat",
   "pvp_link": "Link:",
   "pvp_cancel_invite": "Dəvəti ləğv et",
@@ -233,7 +233,7 @@
   "pvp_invite_share_text": "⚔️ Gappick-də duelə qoşul! Bu linki aç:",
 
   "pvp_challenge_title": "Challenge",
-  "pvp_challenge_hint": "Rəqibin best_result nəticəsinə qarşı oyna. Qələbə +1 victory verir.",
+  "pvp_challenge_hint": "Rəqibin rekord nəticəsinə qarşı oyna. Qələbə +1 xal verir.",
   "pvp_challenge_rules_hint": "Challenge: qələbə +1 victory, məğlubiyyət +0. Stake yoxdur.",
   "pvp_challenge_attempts": "Cəhdlər: {{left}}/{{max}}",
   "pvp_start_challenge": "Challenge başlat",
