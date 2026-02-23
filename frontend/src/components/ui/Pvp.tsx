@@ -63,6 +63,12 @@ function intOrZero(v: any): number {
 
 const PREP_SECONDS = 5;
 
+// glow tuning
+const GLOW_WINDOW_MS = 700; // look-back window for click speed
+const GLOW_MAX_CPS = 12; // 12 clicks per second = max glow
+const GLOW_DECAY_PER_TICK = 0.05; // decay speed
+const GLOW_TICK_MS = 45;
+
 const Pvp: React.FC = () => {
   const { t } = useTranslation();
 
@@ -120,7 +126,6 @@ const Pvp: React.FC = () => {
   const duelModeRef = useRef<DuelMode>('live');
   const liveSubmitStateRef = useRef<'idle' | 'waiting' | 'finished'>('idle');
   const challengeAttemptIdRef = useRef<number | null>(null);
-  const matchTokenRef = useRef<string | null>(null);
   const myClicksRef = useRef<number>(0);
 
   useEffect(() => {
@@ -134,10 +139,6 @@ const Pvp: React.FC = () => {
   useEffect(() => {
     challengeAttemptIdRef.current = challengeAttemptId;
   }, [challengeAttemptId]);
-
-  useEffect(() => {
-    matchTokenRef.current = matchInfo?.match_token ?? null;
-  }, [matchInfo]);
 
   useEffect(() => {
     myClicksRef.current = myClicks;
@@ -351,7 +352,6 @@ const Pvp: React.FC = () => {
       return;
     }
 
-    // live
     void onLiveSubmit();
   };
 
@@ -390,12 +390,6 @@ const Pvp: React.FC = () => {
     }, 150);
   };
 
-  /**
-   * IMPORTANT: hard restart duel every time it is called:
-   * - stops timers
-   * - resets phase to prep
-   * - starts countdown
-   */
   const startDuel = (mode: DuelMode) => {
     setError('');
     setFinishResponse(null);
@@ -418,7 +412,6 @@ const Pvp: React.FC = () => {
     setDuelSecondsLeft(matchDurationSec);
     setScreen('duel');
 
-    // start countdown (and then active timer)
     startPrepCountdown();
   };
 
@@ -458,12 +451,54 @@ const Pvp: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [telegramId]);
 
+  // -----------------------------
+  // CLICK GLOW (speed -> brightness)
+  // -----------------------------
+  const [glow, setGlow] = useState<number>(0);
+  const recentClicksRef = useRef<Array<{ ts: number; delta: number }>>([]);
+  const glowTickRef = useRef<number | null>(null);
+
+  const computeGlow = () => {
+    const now = Date.now();
+    const arr = recentClicksRef.current.filter((x) => now - x.ts <= GLOW_WINDOW_MS);
+    recentClicksRef.current = arr;
+
+    const sum = arr.reduce((acc, x) => acc + x.delta, 0);
+    const cps = (sum / GLOW_WINDOW_MS) * 1000;
+    const intensity = Math.max(0, Math.min(1, cps / GLOW_MAX_CPS));
+
+    setGlow((prev) => Math.max(prev, intensity));
+  };
+
+  useEffect(() => {
+    // decay loop
+    if (glowTickRef.current) window.clearInterval(glowTickRef.current);
+    glowTickRef.current = window.setInterval(() => {
+      setGlow((prev) => {
+        const next = Math.max(0, prev - GLOW_DECAY_PER_TICK);
+        return next;
+      });
+    }, GLOW_TICK_MS);
+
+    return () => {
+      if (glowTickRef.current) {
+        window.clearInterval(glowTickRef.current);
+        glowTickRef.current = null;
+      }
+    };
+  }, []);
+
   // ---- click handling (multitouch limited to 2) ----
   const addClicks = (delta: number) => {
     if (screen !== 'duel') return;
     if (phase !== 'active') return;
     if (duelSecondsLeft <= 0) return;
-    setMyClicks((prev) => prev + Math.max(0, delta));
+
+    const d = Math.max(0, delta);
+    setMyClicks((prev) => prev + d);
+
+    recentClicksRef.current.push({ ts: Date.now(), delta: d });
+    computeGlow();
   };
 
   const onTouchStart = (e: React.TouchEvent) => {
@@ -539,6 +574,8 @@ const Pvp: React.FC = () => {
     setDuelSecondsLeft(0);
 
     autoEndTriggeredRef.current = false;
+    setGlow(0);
+    recentClicksRef.current = [];
   };
 
   const onCreateInvite = async () => {
@@ -606,8 +643,22 @@ const Pvp: React.FC = () => {
   const opponentUserId = computeOpponentUserId();
   const inviteUrl = createdInvite?.invite_code ? buildInviteLink(createdInvite.invite_code) : '';
 
-  return (
-    <div className="min-h-screen bg-[#07111e] px-4 pt-4 pb-24 text-white">
+  const bubbleGlowStyle: React.CSSProperties = {
+    background:
+      `radial-gradient(circle at 50% 45%, ` +
+      `rgba(0,240,255,${0.14 + 0.35 * glow}) 0%, ` +
+      `rgba(0,240,255,${0.06 + 0.22 * glow}) 35%, ` +
+      `rgba(0,240,255,0) 72%)`,
+    boxShadow:
+      `0 0 ${18 + 55 * glow}px rgba(0,240,255,${0.18 + 0.55 * glow}), ` +
+      `0 0 ${10 + 34 * glow}px rgba(255,215,0,${0.06 + 0.18 * glow})`,
+  };
+
+  // -----------------------------
+  // RENDER: isolate lobby vs duel/result
+  // -----------------------------
+  const renderLobbyHeader = () => (
+    <>
       <div className="rounded-2xl bg-[#0e1a2b] border border-[#00f0ff40] p-4 shadow-[0_0_12px_#00f0ff20]">
         <div className="flex items-center justify-between">
           <div>
@@ -715,141 +766,212 @@ const Pvp: React.FC = () => {
           </div>
         ) : null}
       </div>
+    </>
+  );
 
-      {screen === 'duel' && (
-        <div className="mt-4 rounded-2xl bg-[#0e1a2b] border border-[#00f0ff40] p-4">
-          <div className="flex items-start justify-between">
-            <div>
-              <div className="font-bold text-base">
-                🔥 {isChallenge ? t('pvp_challenge_title', { defaultValue: 'Challenge' }) : t('pvp_duel', { defaultValue: 'Duel' })}
-              </div>
-              {!isChallenge && (
-                <div className="text-xs opacity-80">
-                  match_token: <span className="font-mono">{matchInfo?.match_token ?? '—'}</span>
-                </div>
-              )}
-            </div>
+  const renderDuelHeader = () => (
+    <div className="rounded-2xl bg-[#0e1a2b] border border-[#00f0ff40] p-4 shadow-[0_0_12px_#00f0ff20]">
+      <div className="flex items-center justify-between">
+        <button
+          className="rounded-xl bg-white/10 border border-white/10 px-3 py-2 text-sm"
+          onClick={resetToLobby}
+        >
+          ← {t('back', { defaultValue: 'Geri' })}
+        </button>
 
-            <div className="text-right">
-              <div className="text-xs opacity-80">{phase === 'prep' ? 'Starting in' : 'Time left'}</div>
-              <div className="text-2xl font-extrabold">{phase === 'prep' ? `${prepSecondsLeft}s` : `${duelSecondsLeft}s`}</div>
-            </div>
+        <div className="text-center">
+          <div className="text-sm font-semibold">
+            {isChallenge ? t('pvp_challenge_title', { defaultValue: 'Challenge' }) : t('pvp_duel', { defaultValue: 'Duel' })}
           </div>
+          <div className="text-[11px] opacity-75">
+            {phase === 'prep' ? t('pvp_get_ready', { defaultValue: 'Hazır ol' }) : t('pvp_go', { defaultValue: 'Başla!' })}
+          </div>
+        </div>
 
-          <div className="mt-3 grid grid-cols-2 gap-3">
-            <div className="rounded-xl bg-[#0b1320] border border-[#00f0ff20] p-3">
-              <div className="text-xs opacity-70">{t('pvp_your_clicks', { defaultValue: 'Sənin kliklərin' })}</div>
+        <div className="text-right">
+          <div className="text-[11px] opacity-75">{t('time', { defaultValue: 'time' })}</div>
+          <div className="text-xl font-extrabold">{phase === 'prep' ? `${prepSecondsLeft}` : `${duelSecondsLeft}`}</div>
+        </div>
+      </div>
+
+      {error && <div className="mt-3 text-xs text-[#ffadad] whitespace-pre-wrap">{error}</div>}
+    </div>
+  );
+
+  const renderContent = () => {
+    if (screen === 'duel') {
+      return (
+        <div className="mt-4">
+          {renderDuelHeader()}
+
+          {/* clicker-like status row */}
+          <div className="mt-4 grid grid-cols-3 gap-3">
+            <div className="rounded-2xl bg-[#0e1a2b] border border-[#00f0ff20] p-3 text-center">
+              <div className="text-[11px] opacity-70">{t('pvp_your_clicks', { defaultValue: 'Klik' })}</div>
               <div className="text-2xl font-extrabold">{myClicks}</div>
             </div>
-
-            <div className="rounded-xl bg-[#0b1320] border border-[#00f0ff20] p-3">
-              <div className="text-xs opacity-70">{t('pvp_opponent', { defaultValue: 'Rəqib' })}</div>
+            <div className="rounded-2xl bg-[#0e1a2b] border border-[#00f0ff20] p-3 text-center">
+              <div className="text-[11px] opacity-70">{t('pvp_opponent', { defaultValue: 'Rəqib' })}</div>
               <div className="text-2xl font-extrabold">{opponentUserId ?? '—'}</div>
             </div>
-          </div>
-
-          <div
-            className="mt-3 rounded-2xl bg-[#0b1320] border border-[#00f0ff20] p-5 text-center select-none"
-            onTouchStart={onTouchStart}
-            onMouseDown={onMouseDown}
-            style={{ touchAction: 'manipulation' }}
-          >
-            <div className="text-xs opacity-70">{t('pvp_tap', { defaultValue: 'Toxun' })}</div>
-            <div className="text-3xl font-extrabold">+1</div>
-            {phase === 'prep' ? (
-              <div className="mt-3 text-xs opacity-70">{t('pvp_wait_start', { defaultValue: 'Başlanğıcı gözlə…' })}</div>
-            ) : (
-              <div className="mt-3 text-xs opacity-70">{t('pvp_go', { defaultValue: 'Başla!' })}</div>
-            )}
-          </div>
-
-          {phase === 'prep' && (
-            <div className="mt-4 flex items-center justify-center">
-              <div className="rounded-2xl bg-black/60 border border-white/20 px-6 py-4 text-center">
-                <div className="text-sm opacity-90">{t('pvp_get_ready', { defaultValue: 'Hazır ol' })}</div>
-                <div className="text-3xl font-bold">{prepSecondsLeft}</div>
-              </div>
+            <div className="rounded-2xl bg-[#0e1a2b] border border-[#00f0ff20] p-3 text-center">
+              <div className="text-[11px] opacity-70">{t('pvp_power', { defaultValue: 'Glow' })}</div>
+              <div className="text-2xl font-extrabold">{Math.round(glow * 100)}%</div>
             </div>
-          )}
+          </div>
 
-          <div className="mt-4 space-y-2">
+          {/* Bubble click button */}
+          <div className="mt-6 flex items-center justify-center">
+            <div className="relative">
+              <button
+                className="relative rounded-full border border-[#00f0ff50] bg-[#0b1320] active:scale-[0.99] transition-transform"
+                onTouchStart={onTouchStart}
+                onMouseDown={onMouseDown}
+                style={{
+                  width: 260,
+                  height: 260,
+                  touchAction: 'manipulation',
+                  boxShadow: '0 0 14px rgba(0,240,255,0.12)',
+                }}
+              >
+                {/* glow layer */}
+                <div className="absolute inset-0 rounded-full" style={bubbleGlowStyle} />
+
+                {/* soft glass highlight */}
+                <div
+                  className="absolute inset-0 rounded-full"
+                  style={{
+                    background:
+                      'radial-gradient(circle at 35% 30%, rgba(255,255,255,0.10) 0%, rgba(255,255,255,0.03) 35%, rgba(255,255,255,0) 70%)',
+                  }}
+                />
+
+                <div className="relative z-10 flex h-full w-full flex-col items-center justify-center">
+                  <div className="text-[12px] opacity-75">
+                    {phase === 'prep'
+                      ? t('pvp_wait_start', { defaultValue: 'Hazırlaş…' })
+                      : t('pvp_tap', { defaultValue: 'Toxun' })}
+                  </div>
+
+                  <div className="mt-1 text-4xl font-extrabold">+1</div>
+
+                  {phase === 'prep' ? (
+                    <div className="mt-3 rounded-xl bg-black/40 border border-white/10 px-4 py-2">
+                      <div className="text-[11px] opacity-80">{t('pvp_starts_in', { defaultValue: 'Start:' })}</div>
+                      <div className="text-2xl font-bold">{prepSecondsLeft}</div>
+                    </div>
+                  ) : (
+                    <div className="mt-3 text-[11px] opacity-70">
+                      {t('pvp_speed_hint', { defaultValue: 'Sürət artdıqca glow güclənir' })}
+                    </div>
+                  )}
+                </div>
+              </button>
+            </div>
+          </div>
+
+          {/* bottom actions (optional manual fallback) */}
+          <div className="mt-6 space-y-2">
             {!isChallenge ? (
               <button
-                className="w-full rounded-xl bg-[#00f0ff] text-black font-bold py-2 disabled:opacity-60"
+                className="w-full rounded-2xl bg-[#00f0ff] text-black font-bold py-3 disabled:opacity-60"
                 onClick={onLiveSubmit}
                 disabled={loading || liveSubmitState !== 'idle'}
               >
-                {liveSubmitState === 'idle' ? 'Submit result' : 'Waiting opponent...'}
+                {liveSubmitState === 'idle' ? 'Submit (manual)' : 'Waiting...'}
               </button>
             ) : (
               <button
-                className="w-full rounded-xl bg-[#00f0ff] text-black font-bold py-2 disabled:opacity-60"
+                className="w-full rounded-2xl bg-[#00f0ff] text-black font-bold py-3 disabled:opacity-60"
                 onClick={onChallengeFinish}
                 disabled={loading}
               >
-                Finish
+                Finish (manual)
               </button>
             )}
 
-            <button className="w-full rounded-xl bg-white/10 border border-white/10 py-2" onClick={resetToLobby}>
+            <button className="w-full rounded-2xl bg-white/10 border border-white/10 py-3" onClick={resetToLobby}>
               Back
             </button>
           </div>
         </div>
-      )}
+      );
+    }
 
-      {/* RESULT: keep buttons as fallback, but auto submit/finish already triggers at t=0 */}
-      {screen === 'result' && (
-        <div className="mt-4 rounded-2xl bg-[#0e1a2b] border border-[#00f0ff40] p-4">
-          <div className="font-bold text-base">🏁 Result</div>
+    if (screen === 'result') {
+      return (
+        <div className="mt-4">
+          {renderDuelHeader()}
 
-          {duelMode === 'challenge' ? (
-            <div className="mt-3">
-              <button
-                disabled={loading}
-                onClick={onChallengeFinish}
-                className="w-full rounded-xl bg-[#00f0ff] text-black font-bold py-2 disabled:opacity-60"
-              >
-                {loading ? 'Loading...' : 'Finish'}
-              </button>
-
-              {challengeFinishResp && (
-                <div className="mt-3 text-xs whitespace-pre-wrap opacity-90">
-                  {JSON.stringify(challengeFinishResp, null, 2)}
-                </div>
-              )}
+          <div className="mt-4 rounded-2xl bg-[#0e1a2b] border border-[#00f0ff20] p-4">
+            <div className="text-base font-bold">🏁 Result</div>
+            <div className="mt-2 text-xs opacity-80">
+              {t('pvp_result_hint', { defaultValue: 'Auto submit/finish triggered at 0s. Buttons below are fallback.' })}
             </div>
-          ) : (
-            <div className="mt-3">
-              <button
-                disabled={loading || liveSubmitState === 'finished'}
-                onClick={onLiveSubmit}
-                className="w-full rounded-xl bg-[#00f0ff] text-black font-bold py-2 disabled:opacity-60"
-              >
-                {loading
-                  ? 'Loading...'
-                  : liveSubmitState === 'waiting'
-                  ? 'Waiting opponent...'
-                  : liveSubmitState === 'finished'
-                  ? 'Finished'
-                  : 'Submit result'}
-              </button>
 
-              {finishResponse && (
-                <div className="mt-3 text-xs whitespace-pre-wrap opacity-90">{JSON.stringify(finishResponse, null, 2)}</div>
-              )}
+            <div className="mt-4 grid grid-cols-2 gap-3">
+              <div className="rounded-2xl bg-[#0b1320] border border-[#00f0ff20] p-3">
+                <div className="text-[11px] opacity-70">{t('pvp_your_clicks', { defaultValue: 'Klik' })}</div>
+                <div className="text-2xl font-extrabold">{myClicks}</div>
+              </div>
+              <div className="rounded-2xl bg-[#0b1320] border border-[#00f0ff20] p-3">
+                <div className="text-[11px] opacity-70">{t('pvp_opponent', { defaultValue: 'Rəqib' })}</div>
+                <div className="text-2xl font-extrabold">{opponentUserId ?? '—'}</div>
+              </div>
             </div>
-          )}
 
-          <div className="mt-4">
-            <button className="w-full rounded-xl bg-white/10 border border-white/10 py-2" onClick={resetToLobby}>
-              Back to lobby
-            </button>
+            <div className="mt-4 space-y-2">
+              {duelMode === 'challenge' ? (
+                <>
+                  <button
+                    disabled={loading}
+                    onClick={onChallengeFinish}
+                    className="w-full rounded-2xl bg-[#00f0ff] text-black font-bold py-3 disabled:opacity-60"
+                  >
+                    {loading ? 'Loading...' : 'Finish (fallback)'}
+                  </button>
+                  {challengeFinishResp && (
+                    <div className="mt-3 text-xs whitespace-pre-wrap opacity-90">
+                      {JSON.stringify(challengeFinishResp, null, 2)}
+                    </div>
+                  )}
+                </>
+              ) : (
+                <>
+                  <button
+                    disabled={loading || liveSubmitState === 'finished'}
+                    onClick={onLiveSubmit}
+                    className="w-full rounded-2xl bg-[#00f0ff] text-black font-bold py-3 disabled:opacity-60"
+                  >
+                    {loading
+                      ? 'Loading...'
+                      : liveSubmitState === 'waiting'
+                      ? 'Waiting opponent...'
+                      : liveSubmitState === 'finished'
+                      ? 'Finished'
+                      : 'Submit (fallback)'}
+                  </button>
+
+                  {finishResponse && (
+                    <div className="mt-3 text-xs whitespace-pre-wrap opacity-90">{JSON.stringify(finishResponse, null, 2)}</div>
+                  )}
+                </>
+              )}
+
+              <button className="w-full rounded-2xl bg-white/10 border border-white/10 py-3" onClick={resetToLobby}>
+                Back to lobby
+              </button>
+            </div>
           </div>
         </div>
-      )}
+      );
+    }
 
-      {screen === 'lobby' && (
+    // lobby
+    return (
+      <>
+        {renderLobbyHeader()}
+
         <div className="mt-4 space-y-3">
           <div className="rounded-2xl bg-[#0e1a2b] border border-[#00f0ff40] p-4">
             <div className="font-bold">{t('pvp_live_duel', { defaultValue: 'Canlı duel' })}</div>
@@ -857,7 +979,7 @@ const Pvp: React.FC = () => {
 
             <div className="mt-3 space-y-2">
               <button
-                className="rounded-xl bg-[#00f0ff] text-black font-bold py-2 w-full disabled:opacity-60"
+                className="rounded-2xl bg-[#00f0ff] text-black font-bold py-3 w-full disabled:opacity-60"
                 onClick={onCreateInvite}
                 disabled={!canUse || loading}
               >
@@ -865,16 +987,16 @@ const Pvp: React.FC = () => {
               </button>
 
               {createdInvite?.invite_code && (
-                <div className="rounded-xl bg-[#0b1320] border border-[#00f0ff20] p-3 text-xs">
+                <div className="rounded-2xl bg-[#0b1320] border border-[#00f0ff20] p-3 text-xs">
                   <div className="opacity-80">{t('pvp_link', { defaultValue: 'Link:' })}</div>
                   <div className="font-mono break-all">{inviteUrl}</div>
 
                   <div className="mt-3 grid grid-cols-2 gap-2">
-                    <button className="rounded-xl bg-white/10 border border-white/10 py-2" onClick={() => copyText(inviteUrl)}>
+                    <button className="rounded-2xl bg-white/10 border border-white/10 py-2" onClick={() => copyText(inviteUrl)}>
                       Copy
                     </button>
                     <button
-                      className="rounded-xl bg-white/10 border border-white/10 py-2"
+                      className="rounded-2xl bg-white/10 border border-white/10 py-2"
                       onClick={() => shareInvite(createdInvite.invite_code)}
                     >
                       Share
@@ -882,7 +1004,7 @@ const Pvp: React.FC = () => {
                   </div>
 
                   <button
-                    className="mt-2 w-full rounded-xl bg-white/10 border border-white/10 py-2"
+                    className="mt-2 w-full rounded-2xl bg-white/10 border border-white/10 py-2"
                     onClick={onCancelInvite}
                     disabled={loading}
                   >
@@ -900,7 +1022,7 @@ const Pvp: React.FC = () => {
             </div>
 
             <button
-              className="mt-3 rounded-xl bg-[#00f0ff] text-black font-bold py-2 w-full disabled:opacity-60"
+              className="mt-3 rounded-2xl bg-[#00f0ff] text-black font-bold py-3 w-full disabled:opacity-60"
               onClick={onChallengeStart}
               disabled={!canUse || loading}
             >
@@ -908,7 +1030,7 @@ const Pvp: React.FC = () => {
             </button>
 
             {challengeOpponent && (
-              <div className="mt-3 rounded-xl bg-[#0b1320] border border-[#00f0ff20] p-3 text-xs">
+              <div className="mt-3 rounded-2xl bg-[#0b1320] border border-[#00f0ff20] p-3 text-xs">
                 <div className="opacity-80">Opponent:</div>
                 <div className="mt-1">
                   #{challengeOpponent.user_id} @{challengeOpponent.username || '—'}
@@ -924,9 +1046,11 @@ const Pvp: React.FC = () => {
             )}
           </div>
         </div>
-      )}
-    </div>
-  );
+      </>
+    );
+  };
+
+  return <div className="min-h-screen bg-[#07111e] px-4 pt-4 pb-24 text-white">{renderContent()}</div>;
 };
 
 export default Pvp;
