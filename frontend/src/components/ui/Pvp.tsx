@@ -153,7 +153,6 @@ const Pvp: React.FC = () => {
   const refreshWeekly = async () => {
     setWeeklyLoading(true);
     try {
-      // 1) ensure season exists / rollover if needed
       let season: any = null;
       try {
         const cur = await apiRequest<any>('/api/pvp/weekly-season/current');
@@ -162,7 +161,6 @@ const Pvp: React.FC = () => {
         season = null;
       }
 
-      // 2) load leaderboard (preferred endpoint)
       try {
         const lb = await apiRequest<any>('/api/pvp/weekly-season/leaderboard?limit=10');
         setWeeklySeason(lb?.season ?? season);
@@ -170,7 +168,7 @@ const Pvp: React.FC = () => {
         setWeeklySource(lb?.source || '');
         return;
       } catch {
-        // fallback to legacy endpoint if weekly endpoints are not present
+        // fallback legacy
       }
 
       const legacy = await apiRequest<any>('/api/pvp/leaderboard');
@@ -264,7 +262,7 @@ const Pvp: React.FC = () => {
     stopLivePoll();
 
     setDuelMode(mode);
-    setScreen('duel');
+    setScreen('duel'); // ✅ теперь duel — отдельный экран
     setPhase('prep');
     setMyClicks(0);
     setPrepSecondsLeft(PREP_SECONDS);
@@ -289,7 +287,7 @@ const Pvp: React.FC = () => {
         if (st?.status === 'accepted' && st?.match_token) {
           setMatchInfo(st);
           stopInvitePoll();
-          startDuel('live');
+          startDuel('live'); // ✅ уводит на отдельный duel экран
         }
         if (st?.status === 'expired') {
           setError(t('pvp_invite_expired', { defaultValue: 'Dəvət linkinin vaxtı bitdi' }));
@@ -318,11 +316,13 @@ const Pvp: React.FC = () => {
           stopLivePoll();
           await refreshMe();
           await refreshWeekly();
+          setScreen('result'); // ✅ отдельный экран результата
         }
 
         if (st?.status === 'expired') {
           setError(t('pvp_session_expired', { defaultValue: 'Sessiyanın vaxtı bitdi' }));
           stopLivePoll();
+          setScreen('result');
         }
       } catch {}
     }, 900);
@@ -351,6 +351,7 @@ const Pvp: React.FC = () => {
         setFinishResponse(res);
         await refreshMe();
         await refreshWeekly();
+        setScreen('result');
       } else {
         setLiveSubmitState('waiting');
         pollLiveStatus(matchInfo.match_token);
@@ -362,7 +363,6 @@ const Pvp: React.FC = () => {
     }
   };
 
-  // Challenge
   const onChallengeStart = async () => {
     if (!telegramId) return;
     setError('');
@@ -375,7 +375,7 @@ const Pvp: React.FC = () => {
       setChallengeStartResp(res);
       setChallengeAttemptId(res?.attempt_id ?? null);
       setChallengeOpponent(res?.opponent ?? null);
-      startDuel('challenge');
+      startDuel('challenge'); // ✅ отдельный экран
     } catch (e: any) {
       setError(e?.message || t('pvp_error_challenge_start_failed', { defaultValue: 'Challenge başlatmaq alınmadı' }));
     } finally {
@@ -399,6 +399,7 @@ const Pvp: React.FC = () => {
       setChallengeFinishResp(res);
       await refreshMe();
       await refreshWeekly();
+      setScreen('result'); // ✅ отдельный экран результата
     } catch (e: any) {
       setError(e?.message || t('pvp_error_challenge_finish_failed', { defaultValue: 'Challenge bitirmək alınmadı' }));
     } finally {
@@ -411,7 +412,7 @@ const Pvp: React.FC = () => {
     stopDuelTimer();
     stopLivePoll();
 
-    setScreen('lobby');
+    setScreen('lobby'); // ✅ возвращаем на lobby
     setMyClicks(0);
     setFinishResponse(null);
     setLiveSubmitState('idle');
@@ -470,122 +471,19 @@ const Pvp: React.FC = () => {
   const opponentUserId = computeOpponentUserId();
   const inviteUrl = createdInvite?.invite_code ? buildInviteLink(createdInvite.invite_code) : '';
 
+  // ✅ ВАЖНО: теперь рендер идёт “по экранам”, чтобы ничего не смешивалось.
   return (
     <div className="min-h-screen bg-[#07111e] px-4 pt-4 pb-24 text-white">
-      <div className="rounded-2xl bg-[#0e1a2b] border border-[#00f0ff40] p-4 shadow-[0_0_12px_#00f0ff20]">
-        <div className="flex items-center justify-between">
-          <div>
-            <div className="text-lg font-bold">⚔️ PvP</div>
-            <div className="text-xs opacity-80">{t('pvp_subtitle', { defaultValue: 'Live duel & Challenge' })}</div>
-          </div>
-          <div className="text-right text-xs opacity-80">
-            <div>
-              {t('pvp_stake', { defaultValue: 'stake:' })} {stakeDefault}
-            </div>
-            <div>
-              {t('pvp_duration', { defaultValue: 'müddət:' })} {matchDurationSec}s
-            </div>
-          </div>
-        </div>
-
-        {!canUse && (
-          <div className="mt-3 text-xs text-[#ffadad]">
-            {t('pvp_tg_init_missing', { defaultValue: 'Telegram initData tapılmadı' })}
-          </div>
-        )}
-
-        {error && <div className="mt-3 text-xs text-[#ffadad] whitespace-pre-wrap">{error}</div>}
-
-        {meInfo && (
-          <div className="mt-3 text-xs opacity-80">
-            <div>
-              {t('pvp_you', {
-                id: meInfo.user_id,
-                username: meInfo.username || '—',
-                defaultValue: 'you: #{{id}} @{{username}}',
-              })}
-            </div>
-            <div>{t('pvp_stats', { v: victories, b: best, defaultValue: 'victories: {{v}} | best: {{b}}' })}</div>
-          </div>
-        )}
-      </div>
-
-      {/* Weekly leaderboard */}
-      <div className="mt-4 rounded-2xl bg-[#0e1a2b] border border-[#00f0ff40] p-4 shadow-[0_0_12px_#00f0ff20]">
-        <div className="flex items-center justify-between">
-          <div className="text-sm font-semibold">🏆 {t('pvp_weekly_leaderboard', { defaultValue: 'Weekly leaderboard' })}</div>
-          <button
-            className="text-xs opacity-80 underline underline-offset-2 disabled:opacity-50"
-            onClick={refreshWeekly}
-            disabled={weeklyLoading}
-          >
-            {weeklyLoading ? t('loading', { defaultValue: 'Yüklənir…' }) : t('refresh', { defaultValue: 'Yenilə' })}
-          </button>
-        </div>
-
-        {weeklySeason?.season_no != null && (
-          <div className="mt-2 text-xs opacity-75">
-            {t('pvp_season', { defaultValue: 'Sezon:' })}{' '}
-            <span className="font-mono">{weeklySeason.season_no}</span>
-            {weeklySeason?.end_at ? (
-              <>
-                {' '}
-                • {t('pvp_time_left', { defaultValue: 'Bitmə vaxtı' })}:{' '}
-                <span className="font-mono">{new Date(weeklySeason.end_at).toLocaleString()}</span>
-              </>
-            ) : null}
-          </div>
-        )}
-
-        {weeklyItems.length === 0 ? (
-          <div className="mt-3 text-xs opacity-70">{t('pvp_no_leaderboard', { defaultValue: 'Hələlik məlumat yoxdur.' })}</div>
-        ) : (
-          <div className="mt-3 overflow-hidden rounded-xl border border-white/10">
-            <table className="w-full text-left text-xs">
-              <thead className="bg-white/5">
-                <tr>
-                  <th className="px-3 py-2 w-10">#</th>
-                  <th className="px-3 py-2">{t('player', { defaultValue: 'Oyunçu' })}</th>
-                  <th className="px-3 py-2 w-24 text-right">{t('victories', { defaultValue: 'Qələbə' })}</th>
-                  <th className="px-3 py-2 w-24 text-right">{t('best', { defaultValue: 'Rekord' })}</th>
-                </tr>
-              </thead>
-              <tbody>
-                {weeklyItems.map((u: any, idx: number) => {
-                  const isMe = meInfo?.user_id && u?.user_id === meInfo.user_id;
-                  const name = u?.username
-                    ? `@${u.username}`
-                    : u?.first_name || u?.last_name
-                    ? `${u.first_name || ''} ${u.last_name || ''}`.trim()
-                    : `#${u?.user_id ?? '—'}`;
-
-                  return (
-                    <tr key={u?.user_id ?? idx} className={isMe ? 'bg-white/10' : 'bg-transparent'}>
-                      <td className="px-3 py-2">{u?.rank ?? idx + 1}</td>
-                      <td className="px-3 py-2">{name}</td>
-                      <td className="px-3 py-2 text-right">{intOrZero(u?.victories)}</td>
-                      <td className="px-3 py-2 text-right">{intOrZero(u?.best_result)}</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
-
-        {weeklySource ? (
-          <div className="mt-2 text-[10px] opacity-50">
-            {t('pvp_source', { src: weeklySource, defaultValue: 'mənbə: {{src}}' })}
-          </div>
-        ) : null}
-      </div>
-
+      {/* ==== DUEL SCREEN (отдельно) ==== */}
       {screen === 'duel' && (
-        <div className="mt-4 rounded-2xl bg-[#0e1a2b] border border-[#00f0ff40] p-4">
+        <div className="rounded-2xl bg-[#0e1a2b] border border-[#00f0ff40] p-4 shadow-[0_0_12px_#00f0ff20]">
           <div className="flex items-start justify-between">
             <div>
               <div className="font-bold text-base">
-                🔥 {isChallenge ? t('pvp_challenge_title', { defaultValue: 'Challenge' }) : t('pvp_duel', { defaultValue: 'Duel' })}
+                🔥{' '}
+                {isChallenge
+                  ? t('pvp_challenge_title', { defaultValue: 'Challenge' })
+                  : t('pvp_duel', { defaultValue: 'Duel' })}
               </div>
               {!isChallenge && (
                 <div className="text-xs opacity-80">
@@ -593,6 +491,7 @@ const Pvp: React.FC = () => {
                   <span className="font-mono">{matchInfo?.match_token ?? '—'}</span>
                 </div>
               )}
+              {error && <div className="mt-2 text-xs text-[#ffadad] whitespace-pre-wrap">{error}</div>}
             </div>
 
             <div className="text-right">
@@ -601,7 +500,9 @@ const Pvp: React.FC = () => {
                   ? t('pvp_starting_in', { defaultValue: 'Başlanır' })
                   : t('pvp_time_left', { defaultValue: 'Vaxt qalıb' })}
               </div>
-              <div className="text-2xl font-extrabold">{phase === 'prep' ? `${prepSecondsLeft}s` : `${duelSecondsLeft}s`}</div>
+              <div className="text-2xl font-extrabold">
+                {phase === 'prep' ? `${prepSecondsLeft}s` : `${duelSecondsLeft}s`}
+              </div>
             </div>
           </div>
 
@@ -668,9 +569,11 @@ const Pvp: React.FC = () => {
         </div>
       )}
 
+      {/* ==== RESULT SCREEN (отдельно) ==== */}
       {screen === 'result' && (
-        <div className="mt-4 rounded-2xl bg-[#0e1a2b] border border-[#00f0ff40] p-4">
+        <div className="rounded-2xl bg-[#0e1a2b] border border-[#00f0ff40] p-4 shadow-[0_0_12px_#00f0ff20]">
           <div className="font-bold text-base">{t('result', { defaultValue: 'Nəticə' })}</div>
+          {error && <div className="mt-2 text-xs text-[#ffadad] whitespace-pre-wrap">{error}</div>}
 
           <div className="mt-2 text-xs opacity-80 whitespace-pre-wrap">
             {!isChallenge ? JSON.stringify(finishResponse, null, 2) : JSON.stringify(challengeFinishResp, null, 2)}
@@ -682,93 +585,217 @@ const Pvp: React.FC = () => {
         </div>
       )}
 
+      {/* ==== LOBBY SCREEN (таблица + кнопки) ==== */}
       {screen === 'lobby' && (
-        <div className="mt-4 space-y-3">
-          <div className="rounded-2xl bg-[#0e1a2b] border border-[#00f0ff40] p-4">
-            <div className="font-bold">{t('pvp_live_duel', { defaultValue: 'Canlı duel' })}</div>
-            <div className="mt-2 text-xs opacity-80">{t('pvp_live_hint', { defaultValue: 'Dəvət linki yarat və rəqibinə göndər.' })}</div>
+        <>
+          {/* Header */}
+          <div className="rounded-2xl bg-[#0e1a2b] border border-[#00f0ff40] p-4 shadow-[0_0_12px_#00f0ff20]">
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="text-lg font-bold">⚔️ PvP</div>
+                <div className="text-xs opacity-80">{t('pvp_subtitle', { defaultValue: 'Live duel & Challenge' })}</div>
+              </div>
+              <div className="text-right text-xs opacity-80">
+                <div>
+                  {t('pvp_stake', { defaultValue: 'stake:' })} {stakeDefault}
+                </div>
+                <div>
+                  {t('pvp_duration', { defaultValue: 'müddət:' })} {matchDurationSec}s
+                </div>
+              </div>
+            </div>
 
-            <div className="mt-3 space-y-2">
+            {!canUse && (
+              <div className="mt-3 text-xs text-[#ffadad]">
+                {t('pvp_tg_init_missing', { defaultValue: 'Telegram initData tapılmadı' })}
+              </div>
+            )}
+
+            {error && <div className="mt-3 text-xs text-[#ffadad] whitespace-pre-wrap">{error}</div>}
+
+            {meInfo && (
+              <div className="mt-3 text-xs opacity-80">
+                <div>
+                  {t('pvp_you', {
+                    id: meInfo.user_id,
+                    username: meInfo.username || '—',
+                    defaultValue: 'you: #{{id}} @{{username}}',
+                  })}
+                </div>
+                <div>{t('pvp_stats', { v: victories, b: best, defaultValue: 'victories: {{v}} | best: {{b}}' })}</div>
+              </div>
+            )}
+          </div>
+
+          {/* Weekly leaderboard (только в lobby) */}
+          <div className="mt-4 rounded-2xl bg-[#0e1a2b] border border-[#00f0ff40] p-4 shadow-[0_0_12px_#00f0ff20]">
+            <div className="flex items-center justify-between">
+              <div className="text-sm font-semibold">
+                🏆 {t('pvp_weekly_leaderboard', { defaultValue: 'Weekly leaderboard' })}
+              </div>
               <button
-                className="rounded-xl bg-[#00f0ff] text-black font-bold py-2 w-full disabled:opacity-60"
-                onClick={onCreateInvite}
-                disabled={!canUse || loading}
+                className="text-xs opacity-80 underline underline-offset-2 disabled:opacity-50"
+                onClick={refreshWeekly}
+                disabled={weeklyLoading}
               >
-                {t('pvp_create_invite', { defaultValue: 'Dəvət yarat' })}
+                {weeklyLoading ? t('loading', { defaultValue: 'Yüklənir…' }) : t('refresh', { defaultValue: 'Yenilə' })}
               </button>
+            </div>
 
-              {createdInvite?.invite_code && (
-                <div className="rounded-xl bg-[#0b1320] border border-[#00f0ff20] p-3 text-xs">
-                  <div className="opacity-80">{t('pvp_invite_code', { defaultValue: 'Dəvət kodu:' })}</div>
-                  <div className="font-mono break-all">{createdInvite.invite_code}</div>
+            {weeklySeason?.season_no != null && (
+              <div className="mt-2 text-xs opacity-75">
+                {t('pvp_season', { defaultValue: 'Sezon:' })}{' '}
+                <span className="font-mono">{weeklySeason.season_no}</span>
+                {weeklySeason?.end_at ? (
+                  <>
+                    {' '}
+                    • {t('pvp_time_left', { defaultValue: 'Vaxt qalıb' })}:{' '}
+                    <span className="font-mono">{new Date(weeklySeason.end_at).toLocaleString()}</span>
+                  </>
+                ) : null}
+              </div>
+            )}
 
-                  <div className="mt-2 opacity-80">{t('pvp_link', { defaultValue: 'Link:' })}</div>
-                  <div className="font-mono break-all">{inviteUrl}</div>
+            {weeklyItems.length === 0 ? (
+              <div className="mt-3 text-xs opacity-70">
+                {t('pvp_no_leaderboard', { defaultValue: 'Hələlik məlumat yoxdur.' })}
+              </div>
+            ) : (
+              <div className="mt-3 overflow-hidden rounded-xl border border-white/10">
+                <table className="w-full text-left text-xs">
+                  <thead className="bg-white/5">
+                    <tr>
+                      <th className="px-3 py-2 w-10">#</th>
+                      <th className="px-3 py-2">{t('player', { defaultValue: 'Oyunçu' })}</th>
+                      <th className="px-3 py-2 w-24 text-right">{t('victories', { defaultValue: 'Qələbə' })}</th>
+                      <th className="px-3 py-2 w-24 text-right">{t('best', { defaultValue: 'Rekord' })}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {weeklyItems.map((u: any, idx: number) => {
+                      const isMe = meInfo?.user_id && u?.user_id === meInfo.user_id;
+                      const name = u?.username
+                        ? `@${u.username}`
+                        : u?.first_name || u?.last_name
+                          ? `${u.first_name || ''} ${u.last_name || ''}`.trim()
+                          : `#${u?.user_id ?? '—'}`;
 
-                  <div className="mt-3 grid grid-cols-2 gap-2">
+                      return (
+                        <tr key={u?.user_id ?? idx} className={isMe ? 'bg-white/10' : 'bg-transparent'}>
+                          <td className="px-3 py-2">{u?.rank ?? idx + 1}</td>
+                          <td className="px-3 py-2">{name}</td>
+                          <td className="px-3 py-2 text-right">{intOrZero(u?.victories)}</td>
+                          <td className="px-3 py-2 text-right">{intOrZero(u?.best_result)}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            {weeklySource ? (
+              <div className="mt-2 text-[10px] opacity-50">
+                {t('pvp_source', { src: weeklySource, defaultValue: 'mənbə: {{src}}' })}
+              </div>
+            ) : null}
+          </div>
+
+          {/* Lobby actions */}
+          <div className="mt-4 space-y-3">
+            <div className="rounded-2xl bg-[#0e1a2b] border border-[#00f0ff40] p-4">
+              <div className="font-bold">{t('pvp_live_duel', { defaultValue: 'Canlı duel' })}</div>
+              <div className="mt-2 text-xs opacity-80">
+                {t('pvp_live_hint', { defaultValue: 'Dəvət linki yarat və rəqibinə göndər.' })}
+              </div>
+
+              <div className="mt-3 space-y-2">
+                <button
+                  className="rounded-xl bg-[#00f0ff] text-black font-bold py-2 w-full disabled:opacity-60"
+                  onClick={onCreateInvite}
+                  disabled={!canUse || loading}
+                >
+                  {t('pvp_create_invite', { defaultValue: 'Dəvət yarat' })}
+                </button>
+
+                {createdInvite?.invite_code && (
+                  <div className="rounded-xl bg-[#0b1320] border border-[#00f0ff20] p-3 text-xs">
+                    <div className="opacity-80">{t('pvp_invite_code', { defaultValue: 'Dəvət kodu:' })}</div>
+                    <div className="font-mono break-all">{createdInvite.invite_code}</div>
+
+                    <div className="mt-2 opacity-80">{t('pvp_link', { defaultValue: 'Link:' })}</div>
+                    <div className="font-mono break-all">{inviteUrl}</div>
+
+                    <div className="mt-3 grid grid-cols-2 gap-2">
+                      <button
+                        className="rounded-xl bg-white/10 border border-white/10 py-2"
+                        onClick={() => {
+                          try {
+                            WebApp.openTelegramLink(inviteUrl);
+                          } catch {}
+                        }}
+                      >
+                        {t('open', { defaultValue: 'Aç' })}
+                      </button>
+                      <button
+                        className="rounded-xl bg-white/10 border border-white/10 py-2"
+                        onClick={() => {
+                          const share = buildShareLink(
+                            inviteUrl,
+                            t('pvp_share_text', { defaultValue: 'Mənim duel’uma qoşul!' })
+                          );
+                          try {
+                            WebApp.openTelegramLink(share);
+                          } catch {}
+                        }}
+                      >
+                        {t('share', { defaultValue: 'Paylaş' })}
+                      </button>
+                    </div>
+
                     <button
-                      className="rounded-xl bg-white/10 border border-white/10 py-2"
-                      onClick={() => {
-                        try {
-                          WebApp.openTelegramLink(inviteUrl);
-                        } catch {}
-                      }}
+                      className="mt-2 w-full rounded-xl bg-white/10 border border-white/10 py-2"
+                      onClick={onCancelInvite}
+                      disabled={loading}
                     >
-                      {t('open', { defaultValue: 'Aç' })}
-                    </button>
-                    <button
-                      className="rounded-xl bg-white/10 border border-white/10 py-2"
-                      onClick={() => {
-                        const share = buildShareLink(inviteUrl, t('pvp_share_text', { defaultValue: 'Mənim duel’uma qoşul!' }));
-                        try {
-                          WebApp.openTelegramLink(share);
-                        } catch {}
-                      }}
-                    >
-                      {t('share', { defaultValue: 'Paylaş' })}
+                      {t('pvp_cancel_invite', { defaultValue: 'Dəvəti ləğv et' })}
                     </button>
                   </div>
+                )}
+              </div>
+            </div>
 
-                  <button
-                    className="mt-2 w-full rounded-xl bg-white/10 border border-white/10 py-2"
-                    onClick={onCancelInvite}
-                    disabled={loading}
-                  >
-                    {t('pvp_cancel_invite', { defaultValue: 'Dəvəti ləğv et' })}
-                  </button>
+            <div className="rounded-2xl bg-[#0e1a2b] border border-[#00f0ff40] p-4">
+              <div className="font-bold">{t('pvp_challenge_title', { defaultValue: 'Challenge' })}</div>
+              <div className="mt-2 text-xs opacity-80">
+                {t('pvp_challenge_hint', {
+                  defaultValue: 'Rəqibin best_result nəticəsinə qarşı oyna. Qələbə +1 victory verir.',
+                })}
+              </div>
+
+              <button
+                className="mt-3 rounded-xl bg-[#00f0ff] text-black font-bold py-2 w-full disabled:opacity-60"
+                onClick={onChallengeStart}
+                disabled={!canUse || loading}
+              >
+                {t('pvp_start_challenge', { defaultValue: 'Challenge başlat' })}
+              </button>
+
+              {challengeStartResp?.ok && challengeOpponent && (
+                <div className="mt-3 rounded-xl bg-[#0b1320] border border-[#00f0ff20] p-3 text-xs">
+                  <div className="opacity-80">{t('pvp_opponent_colon', { defaultValue: 'Rəqib:' })}</div>
+                  <div className="mt-1">
+                    #{challengeOpponent.user_id} @{challengeOpponent.username || '—'}
+                  </div>
+                  <div className="mt-1">
+                    {t('pvp_best_colon', { defaultValue: 'best:' })}{' '}
+                    <span className="font-mono">{intOrZero(challengeOpponent.best_result)}</span>
+                  </div>
                 </div>
               )}
             </div>
           </div>
-
-          <div className="rounded-2xl bg-[#0e1a2b] border border-[#00f0ff40] p-4">
-            <div className="font-bold">{t('pvp_challenge_title', { defaultValue: 'Challenge' })}</div>
-            <div className="mt-2 text-xs opacity-80">
-              {t('pvp_challenge_hint', { defaultValue: 'Rəqibin best_result nəticəsinə qarşı oyna. Qələbə +1 victory verir.' })}
-            </div>
-
-            <button
-              className="mt-3 rounded-xl bg-[#00f0ff] text-black font-bold py-2 w-full disabled:opacity-60"
-              onClick={onChallengeStart}
-              disabled={!canUse || loading}
-            >
-              {t('pvp_start_challenge', { defaultValue: 'Challenge başlat' })}
-            </button>
-
-            {challengeStartResp?.ok && challengeOpponent && (
-              <div className="mt-3 rounded-xl bg-[#0b1320] border border-[#00f0ff20] p-3 text-xs">
-                <div className="opacity-80">{t('pvp_opponent_colon', { defaultValue: 'Rəqib:' })}</div>
-                <div className="mt-1">
-                  #{challengeOpponent.user_id} @{challengeOpponent.username || '—'}
-                </div>
-                <div className="mt-1">
-                  {t('pvp_best_colon', { defaultValue: 'best:' })}{' '}
-                  <span className="font-mono">{intOrZero(challengeOpponent.best_result)}</span>
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
+        </>
       )}
     </div>
   );
