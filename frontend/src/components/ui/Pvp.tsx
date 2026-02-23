@@ -27,7 +27,9 @@ async function apiRequest<T>(path: string, opts?: RequestInit): Promise<T> {
 
   if (!res.ok) {
     const msg = (data && (data.message || data.detail)) || `HTTP ${res.status}`;
-    throw new Error(typeof msg === 'string' ? msg : JSON.stringify(msg));
+    const err: any = new Error(typeof msg === 'string' ? msg : JSON.stringify(msg));
+    err.payload = data;
+    throw err;
   }
   return data as T;
 }
@@ -35,8 +37,17 @@ async function apiRequest<T>(path: string, opts?: RequestInit): Promise<T> {
 type Screen = 'lobby' | 'duel' | 'result';
 type DuelMode = 'live' | 'challenge';
 type DuelPhase = 'prep' | 'active';
+type Outcome = 'win' | 'lose' | 'draw' | 'unknown';
 
 const BOT_USERNAME = 'monolit_42_bot';
+const PREP_SECONDS = 5;
+
+// glow tuning
+const GLOW_WINDOW_MS = 700;
+const GLOW_MAX_CPS = 12;
+const GLOW_DECAY_PER_TICK = 0.05;
+const GLOW_TICK_MS = 45;
+const GLOW_RISE_LERP = 0.12;
 
 function buildInviteLink(code: string) {
   return `https://t.me/${BOT_USERNAME}?startapp=pvp_${code}`;
@@ -44,6 +55,11 @@ function buildInviteLink(code: string) {
 
 function buildShareLink(url: string, text: string) {
   return `https://t.me/share/url?url=${encodeURIComponent(url)}&text=${encodeURIComponent(text)}`;
+}
+
+function intOrZero(v: any): number {
+  const n = Number(v);
+  return Number.isFinite(n) ? Math.floor(n) : 0;
 }
 
 function pickVictories(me: any): number {
@@ -57,7 +73,6 @@ function pickBest(me: any): number {
 }
 
 function pickChallengeAttemptsLeft(obj: any): number | null {
-  // Best-effort extraction from different backend shapes
   const keys = [
     'challenge_attempts_left',
     'challenge_attempts_remaining',
@@ -77,16 +92,10 @@ function pickChallengeAttemptsLeft(obj: any): number | null {
     }
   }
 
-  // Sometimes nested
   const nested = obj?.limits ?? obj?.challenge ?? obj?.pvp ?? null;
   if (nested && nested !== obj) return pickChallengeAttemptsLeft(nested);
 
   return null;
-}
-
-function intOrZero(v: any): number {
-  const n = Number(v);
-  return Number.isFinite(n) ? Math.floor(n) : 0;
 }
 
 function formatUserLabel(u: any, fallbackId?: number | null) {
@@ -107,9 +116,7 @@ function formatUserLabel(u: any, fallbackId?: number | null) {
   return '—';
 }
 
-type Outcome = 'win' | 'lose' | 'draw' | 'unknown';
-
-function normalizeOutcome(mode: DuelMode, raw: any, meUserId?: number | null): Outcome {
+function normalizeOutcome(raw: any, meUserId?: number | null): Outcome {
   const s = String(raw?.status ?? raw?.outcome ?? raw?.result ?? raw?.state ?? '').toLowerCase();
 
   if (s.includes('win')) return 'win';
@@ -140,16 +147,20 @@ function extractNumber(raw: any, keys: string[]): number | null {
   return null;
 }
 
-const PREP_SECONDS = 5;
-
-// glow tuning
-const GLOW_WINDOW_MS = 700;
-const GLOW_MAX_CPS = 12;
-const GLOW_DECAY_PER_TICK = 0.05;
-const GLOW_TICK_MS = 45;
-
-// glow rise smoothing (slower ramp)
-const GLOW_RISE_LERP = 0.12;
+function parseServerError(e: any): { code?: string; message?: string } {
+  const payload = e?.payload;
+  if (payload && typeof payload === 'object') {
+    return { code: payload.code, message: payload.message || payload.detail || payload.error };
+  }
+  const msg = e?.message;
+  if (typeof msg === 'string') {
+    try {
+      const j = JSON.parse(msg);
+      if (j && typeof j === 'object') return { code: j.code, message: j.message || j.detail };
+    } catch {}
+  }
+  return { message: typeof msg === 'string' ? msg : undefined };
+}
 
 const Pvp: React.FC = () => {
   const { t } = useTranslation();
@@ -158,6 +169,8 @@ const Pvp: React.FC = () => {
   const canUse = !!telegramId && !!WebApp.initData;
 
   const [loading, setLoading] = useState(false);
+
+  // user-friendly error only (no debug payloads)
   const [error, setError] = useState<string>('');
 
   const [config, setConfig] = useState<any>(null);
@@ -168,7 +181,6 @@ const Pvp: React.FC = () => {
   // Weekly season leaderboard
   const [weeklySeason, setWeeklySeason] = useState<any>(null);
   const [weeklyItems, setWeeklyItems] = useState<any[]>([]);
-  const [weeklySource, setWeeklySource] = useState<string>('');
   const [weeklyLoading, setWeeklyLoading] = useState<boolean>(false);
 
   const [createdInvite, setCreatedInvite] = useState<any>(null);
@@ -179,7 +191,6 @@ const Pvp: React.FC = () => {
   const [screen, setScreen] = useState<Screen>('lobby');
   const [duelMode, setDuelMode] = useState<DuelMode>('live');
 
-  // countdown
   const [phase, setPhase] = useState<DuelPhase>('prep');
   const [prepSecondsLeft, setPrepSecondsLeft] = useState<number>(0);
 
@@ -189,15 +200,20 @@ const Pvp: React.FC = () => {
 
   const [myClicks, setMyClicks] = useState<number>(0);
 
+  // live submit / finish
   const [liveSubmitState, setLiveSubmitState] = useState<'idle' | 'waiting' | 'finished'>('idle');
   const livePollRef = useRef<number | null>(null);
   const [finishResponse, setFinishResponse] = useState<any>(null);
 
-  const [challengeStartResp, setChallengeStartResp] = useState<any>(null);
+  // challenge
   const [challengeAttemptId, setChallengeAttemptId] = useState<number | null>(null);
   const [challengeOpponent, setChallengeOpponent] = useState<any>(null);
   const [challengeFinishResp, setChallengeFinishResp] = useState<any>(null);
   const [challengeAttemptsLeft, setChallengeAttemptsLeft] = useState<number | null>(null);
+
+  // guard against double-finish (challenge)
+  const challengeFinishInFlightRef = useRef(false);
+  const challengeFinishedRef = useRef(false);
 
   // opponent info for live
   const [liveOpponent, setLiveOpponent] = useState<any>(null);
@@ -211,7 +227,7 @@ const Pvp: React.FC = () => {
     5;
 
   // -----------------------------
-  // AUTO SUBMIT / AUTO FINISH
+  // Refs for auto-submit / auto-finish
   // -----------------------------
   const autoEndTriggeredRef = useRef(false);
   const duelModeRef = useRef<DuelMode>('live');
@@ -263,6 +279,19 @@ const Pvp: React.FC = () => {
     }
   };
 
+  const setUserFriendlyError = (e: any) => {
+    const parsed = parseServerError(e);
+
+    // silently ignore "already finished" for challenge
+    if (parsed?.code === 'ATTEMPT_NOT_ACTIVE' && String(parsed?.message || '').toLowerCase().includes('finished')) {
+      setError('');
+      return;
+    }
+
+    // for user: no debug, only simple message
+    setError(t('pvp_error_generic', { defaultValue: 'Bir xəta baş verdi. Zəhmət olmasa yenidən cəhd edin.' }));
+  };
+
   const refreshMe = async () => {
     if (!telegramId) return;
     try {
@@ -270,10 +299,11 @@ const Pvp: React.FC = () => {
       if (me?.user_id) setMeUserId(me.user_id);
       setMeInfo(me);
 
-      // Challenge attempts (best-effort)
       const left = pickChallengeAttemptsLeft(me);
       if (left != null) setChallengeAttemptsLeft(left);
-    } catch {}
+    } catch {
+      // silently ignore
+    }
   };
 
   const refreshWeekly = async () => {
@@ -291,14 +321,12 @@ const Pvp: React.FC = () => {
         const lb = await apiRequest<any>('/api/pvp/weekly-season/leaderboard?limit=10');
         setWeeklySeason(lb?.season ?? season);
         setWeeklyItems(Array.isArray(lb?.items) ? lb.items : []);
-        setWeeklySource(lb?.source || '');
         return;
       } catch {}
 
       const legacy = await apiRequest<any>('/api/pvp/leaderboard');
       setWeeklySeason(season);
       setWeeklyItems(Array.isArray(legacy?.items) ? legacy.items : []);
-      setWeeklySource('legacy');
     } catch {
       setWeeklyItems([]);
     } finally {
@@ -402,12 +430,9 @@ const Pvp: React.FC = () => {
           await refreshMe();
           await refreshWeekly();
         }
-
-        if (st?.status === 'expired') {
-          setError('Session expired');
-          stopLivePoll();
-        }
-      } catch {}
+      } catch {
+        // ignore
+      }
     }, 900);
   };
 
@@ -415,7 +440,7 @@ const Pvp: React.FC = () => {
     if (!telegramId) return;
     const token = matchInfo?.match_token;
     if (!token) {
-      setError('match_token missing');
+      setUserFriendlyError(new Error('match_token missing'));
       return;
     }
 
@@ -443,7 +468,7 @@ const Pvp: React.FC = () => {
         pollLiveStatus(token);
       }
     } catch (e: any) {
-      setError(e?.message || 'submit failed');
+      setUserFriendlyError(e);
     } finally {
       setLoading(false);
     }
@@ -451,14 +476,21 @@ const Pvp: React.FC = () => {
 
   const onChallengeFinish = async () => {
     if (!telegramId) return;
+
+    // prevent double finish
+    if (challengeFinishedRef.current) return;
+    if (challengeFinishInFlightRef.current) return;
+
     const attemptId = challengeAttemptIdRef.current;
     if (!attemptId) {
-      setError('attempt_id missing');
+      setUserFriendlyError(new Error('attempt_id missing'));
       return;
     }
 
+    challengeFinishInFlightRef.current = true;
     setError('');
     setLoading(true);
+
     try {
       const res = await apiRequest<any>('/api/pvp/challenge/finish', {
         method: 'POST',
@@ -468,6 +500,8 @@ const Pvp: React.FC = () => {
           my_clicks: myClicksRef.current,
         }),
       });
+
+      challengeFinishedRef.current = true;
       setChallengeFinishResp(res);
 
       const left = pickChallengeAttemptsLeft(res);
@@ -476,8 +510,18 @@ const Pvp: React.FC = () => {
       await refreshMe();
       await refreshWeekly();
     } catch (e: any) {
-      setError(e?.message || 'challenge finish failed');
+      const parsed = parseServerError(e);
+      if (parsed?.code === 'ATTEMPT_NOT_ACTIVE' && String(parsed?.message || '').toLowerCase().includes('finished')) {
+        // treat as success
+        challengeFinishedRef.current = true;
+        setError('');
+        await refreshMe();
+        await refreshWeekly();
+      } else {
+        setUserFriendlyError(e);
+      }
     } finally {
+      challengeFinishInFlightRef.current = false;
       setLoading(false);
     }
   };
@@ -492,7 +536,6 @@ const Pvp: React.FC = () => {
       void onChallengeFinish();
       return;
     }
-
     void onLiveSubmit();
   };
 
@@ -536,6 +579,10 @@ const Pvp: React.FC = () => {
     setFinishResponse(null);
     setChallengeFinishResp(null);
 
+    // reset challenge guards
+    challengeFinishInFlightRef.current = false;
+    challengeFinishedRef.current = false;
+
     setMyClicks(0);
     setLiveSubmitState('idle');
     stopLivePoll();
@@ -554,8 +601,8 @@ const Pvp: React.FC = () => {
     startPrepCountdown();
   };
 
+  // auto accept from start_param
   const autoAcceptRef = useRef<string | null>(null);
-
   useEffect(() => {
     const sp = (WebApp.initDataUnsafe as any)?.start_param;
     if (!telegramId) return;
@@ -581,7 +628,7 @@ const Pvp: React.FC = () => {
 
         if (data?.match_token) startDuel('live');
       } catch (e: any) {
-        setError(e?.message || 'invite accept failed');
+        setUserFriendlyError(e);
       } finally {
         setLoading(false);
       }
@@ -614,10 +661,7 @@ const Pvp: React.FC = () => {
   useEffect(() => {
     if (glowTickRef.current) window.clearInterval(glowTickRef.current);
     glowTickRef.current = window.setInterval(() => {
-      setGlow((prev) => {
-        const next = Math.max(0, prev - GLOW_DECAY_PER_TICK);
-        return next;
-      });
+      setGlow((prev) => Math.max(0, prev - GLOW_DECAY_PER_TICK));
     }, GLOW_TICK_MS);
 
     return () => {
@@ -647,6 +691,9 @@ const Pvp: React.FC = () => {
 
   const onMouseDown = () => addClicks(1);
 
+  // -----------------------------
+  // Lobby actions
+  // -----------------------------
   const startInvitePolling = (code: string) => {
     stopInvitePoll();
     invitePollRef.current = window.setInterval(async () => {
@@ -669,8 +716,68 @@ const Pvp: React.FC = () => {
         }
 
         if (st?.status === 'expired' || st?.status === 'cancelled') stopInvitePoll();
-      } catch {}
+      } catch {
+        // ignore
+      }
     }, 800);
+  };
+
+  const onCreateInvite = async () => {
+    if (!telegramId) return;
+    setError('');
+    setLoading(true);
+    try {
+      const data = await apiRequest<any>('/api/pvp/invite/create', {
+        method: 'POST',
+        body: JSON.stringify({ telegram_id: telegramId, ttl_seconds: 3600 }),
+      });
+      setCreatedInvite(data);
+      if (data?.invite_code) startInvitePolling(data.invite_code);
+    } catch (e: any) {
+      setUserFriendlyError(e);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const onCancelInvite = async () => {
+    if (!telegramId) return;
+    const code = createdInvite?.invite_code;
+    if (!code) return;
+
+    setError('');
+    setLoading(true);
+    try {
+      await apiRequest<any>('/api/pvp/invite/cancel', {
+        method: 'POST',
+        body: JSON.stringify({ telegram_id: telegramId, invite_code: code }),
+      });
+      stopInvitePoll();
+      setCreatedInvite(null);
+    } catch (e: any) {
+      setUserFriendlyError(e);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const copyText = async (txt: string) => {
+    try {
+      await navigator.clipboard.writeText(txt);
+      WebApp.showToast?.(t('copied', { defaultValue: 'Kopyalandı' }));
+    } catch {}
+  };
+
+  const shareInvite = (code: string) => {
+    const url = buildInviteLink(code);
+    const text = t('pvp_invite_share_text', { defaultValue: '⚔️ Gappick-də duelə qoşul! Bu linki aç:' });
+    const tgShare = buildShareLink(url, text);
+
+    try {
+      (WebApp as any).openTelegramLink?.(tgShare);
+    } catch {
+      window.open(tgShare, '_blank');
+    }
   };
 
   const onChallengeStart = async () => {
@@ -682,17 +789,16 @@ const Pvp: React.FC = () => {
         method: 'POST',
         body: JSON.stringify({ telegram_id: telegramId }),
       });
-      setChallengeStartResp(res);
+
       setChallengeAttemptId(res?.attempt_id ?? null);
       setChallengeOpponent(res?.opponent ?? null);
 
-      // Update attempts left if backend returns it
       const left = pickChallengeAttemptsLeft(res);
       if (left != null) setChallengeAttemptsLeft(left);
 
       startDuel('challenge');
     } catch (e: any) {
-      setError(e?.message || 'challenge start failed');
+      setUserFriendlyError(e);
     } finally {
       setLoading(false);
     }
@@ -719,75 +825,25 @@ const Pvp: React.FC = () => {
     autoEndTriggeredRef.current = false;
     setGlow(0);
     recentClicksRef.current = [];
-  };
 
-  const onCreateInvite = async () => {
-    if (!telegramId) return;
-    setError('');
-    setLoading(true);
-    try {
-      const data = await apiRequest<any>('/api/pvp/invite/create', {
-        method: 'POST',
-        body: JSON.stringify({ telegram_id: telegramId, ttl_seconds: 3600 }),
-      });
-      setCreatedInvite(data);
-      if (data?.invite_code) startInvitePolling(data.invite_code);
-    } catch (e: any) {
-      setError(e?.message || 'invite create failed');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const onCancelInvite = async () => {
-    if (!telegramId) return;
-    const code = createdInvite?.invite_code;
-    if (!code) return;
+    // reset challenge guards
+    challengeFinishInFlightRef.current = false;
+    challengeFinishedRef.current = false;
 
     setError('');
-    setLoading(true);
-    try {
-      await apiRequest<any>('/api/pvp/invite/cancel', {
-        method: 'POST',
-        body: JSON.stringify({ telegram_id: telegramId, invite_code: code }),
-      });
-      stopInvitePoll();
-      setCreatedInvite(null);
-    } catch (e: any) {
-      setError(e?.message || 'invite cancel failed');
-    } finally {
-      setLoading(false);
-    }
+    // refresh counters / attempts in lobby
+    void refreshMe();
+    void refreshWeekly();
   };
 
-  const copyText = async (txt: string) => {
-    try {
-      await navigator.clipboard.writeText(txt);
-      WebApp.showToast?.(t('copied', { defaultValue: 'Copied' }));
-    } catch {}
-  };
-
-  const shareInvite = (code: string) => {
-    const url = buildInviteLink(code);
-    const text = t('pvp_invite_share_text', { defaultValue: '⚔️ Join my duel in Gappick! Open this link:' });
-    const tgShare = buildShareLink(url, text);
-
-    try {
-      (WebApp as any).openTelegramLink?.(tgShare);
-    } catch {
-      window.open(tgShare, '_blank');
-    }
-  };
-
+  // -----------------------------
+  // Derived UI values
+  // -----------------------------
   const isChallenge = duelMode === 'challenge';
   const victories = pickVictories(meInfo);
   const best = pickBest(meInfo);
 
-  const challengeLeft =
-    challengeAttemptsLeft ??
-    pickChallengeAttemptsLeft(meInfo) ??
-    pickChallengeAttemptsLeft(challengeStartResp) ??
-    pickChallengeAttemptsLeft(challengeFinishResp);
+  const challengeLeft = challengeAttemptsLeft ?? pickChallengeAttemptsLeft(meInfo) ?? pickChallengeAttemptsLeft(challengeFinishResp);
 
   const opponentUserId = computeOpponentUserId();
   const inviteUrl = createdInvite?.invite_code ? buildInviteLink(createdInvite.invite_code) : '';
@@ -810,7 +866,7 @@ const Pvp: React.FC = () => {
   };
 
   const rawResult = duelMode === 'challenge' ? challengeFinishResp : finishResponse;
-  const outcome: Outcome = normalizeOutcome(duelMode, rawResult, meUserId);
+  const outcome: Outcome = normalizeOutcome(rawResult, meUserId);
 
   const oppClicksFromResult =
     extractNumber(rawResult, ['opponent_clicks', 'enemy_clicks', 'their_clicks', 'opponentClicks', 'enemyClicks']) ??
@@ -867,8 +923,8 @@ const Pvp: React.FC = () => {
     }
 
     if (duelMode === 'challenge') {
-      if (outcome === 'win') return `+1 ${t('victories', { defaultValue: 'victory' })}`;
-      if (outcome === 'lose') return `+0 ${t('victories', { defaultValue: 'victory' })}`;
+      if (outcome === 'win') return `+1 ${t('victories', { defaultValue: 'Qələbə' })}`;
+      if (outcome === 'lose') return `+0 ${t('victories', { defaultValue: 'Qələbə' })}`;
       return '—';
     }
 
@@ -880,6 +936,15 @@ const Pvp: React.FC = () => {
     if (outcome === 'draw') return `0 ${t('coins', { defaultValue: 'coin' })}`;
     return '—';
   })();
+
+  const renderErrorBanner = () => {
+    if (!error) return null;
+    return (
+      <div className="mt-3 rounded-2xl bg-rose-500/10 border border-rose-400/20 p-3 text-xs text-rose-200">
+        {error}
+      </div>
+    );
+  };
 
   const renderLobbyHeader = () => (
     <>
@@ -905,7 +970,7 @@ const Pvp: React.FC = () => {
           </div>
         )}
 
-        {error && <div className="mt-3 text-xs text-[#ffadad] whitespace-pre-wrap">{error}</div>}
+        {renderErrorBanner()}
 
         {meInfo && (
           <div className="mt-3 text-xs opacity-80">
@@ -982,12 +1047,6 @@ const Pvp: React.FC = () => {
             </table>
           </div>
         )}
-
-        {weeklySource ? (
-          <div className="mt-2 text-[10px] opacity-50">
-            {t('pvp_source', { src: weeklySource, defaultValue: 'mənbə: {{src}}' })}
-          </div>
-        ) : null}
       </div>
     </>
   );
@@ -1020,12 +1079,12 @@ const Pvp: React.FC = () => {
         </div>
 
         <div className="text-right">
-          <div className="text-[11px] opacity-75">{t('time', { defaultValue: 'time' })}</div>
+          <div className="text-[11px] opacity-75">{t('time', { defaultValue: 'vaxt' })}</div>
           <div className="text-xl font-extrabold">{phase === 'prep' ? `${prepSecondsLeft}` : `${duelSecondsLeft}`}</div>
         </div>
       </div>
 
-      {error && <div className="mt-3 text-xs text-[#ffadad] whitespace-pre-wrap">{error}</div>}
+      {renderErrorBanner()}
     </div>
   );
 
@@ -1096,39 +1155,24 @@ const Pvp: React.FC = () => {
                   )}
                 </div>
               </button>
+
+              {phase === 'active' && duelSecondsLeft <= 0 ? (
+                <div className="mt-4 text-center text-xs opacity-80">
+                  {t('pvp_finishing', { defaultValue: 'Nəticə hesablanır…' })}
+                </div>
+              ) : null}
             </div>
-          </div>
-
-          <div className="mt-6 space-y-2">
-            {!isChallenge ? (
-              <button
-                className="w-full rounded-2xl bg-[#00f0ff] text-black font-bold py-3 disabled:opacity-60"
-                onClick={onLiveSubmit}
-                disabled={loading || liveSubmitState !== 'idle'}
-              >
-                {liveSubmitState === 'idle'
-                  ? t('pvp_submit_manual', { defaultValue: 'Təsdiqlə (əl ilə)' })
-                  : t('pvp_waiting', { defaultValue: 'Gözlənilir…' })}
-              </button>
-            ) : (
-              <button
-                className="w-full rounded-2xl bg-[#00f0ff] text-black font-bold py-3 disabled:opacity-60"
-                onClick={onChallengeFinish}
-                disabled={loading}
-              >
-                {t('pvp_finish_manual', { defaultValue: 'Bitir (əl ilə)' })}
-              </button>
-            )}
-
-            <button className="w-full rounded-2xl bg-white/10 border border-white/10 py-3" onClick={resetToLobby}>
-              {t('back', { defaultValue: 'Geri' })}
-            </button>
           </div>
         </div>
       );
     }
 
     if (screen === 'result') {
+      const waitingServer =
+        duelMode === 'challenge'
+          ? !challengeFinishResp && !challengeFinishedRef.current && !error
+          : liveSubmitState !== 'finished' && !finishResponse && !error;
+
       return (
         <div className="mt-4">
           {renderDuelHeader()}
@@ -1139,75 +1183,58 @@ const Pvp: React.FC = () => {
               <div className={`px-3 py-1 rounded-xl border text-xs ${outcomeBadge}`}>{outcomeTitle}</div>
             </div>
 
-            <div className="mt-3 text-xs opacity-80">
-              {t('pvp_result_hint', { defaultValue: 'Auto submit/finish at 0s. If server is slow, buttons below are fallback.' })}
-            </div>
-
-            <div className="mt-4 grid grid-cols-2 gap-3">
-              <div className="rounded-2xl bg-[#0b1320] border border-[#00f0ff20] p-3">
-                <div className="text-[11px] opacity-70">{t('pvp_you_label', { defaultValue: 'Sən' })}</div>
-                <div className="mt-1 text-sm font-semibold">{formatUserLabel(meInfo, meUserId)}</div>
-                <div className="mt-2 text-[11px] opacity-70">{t('pvp_clicks', { defaultValue: 'Kliklər' })}</div>
-                <div className="text-2xl font-extrabold">{myClicksFromResult}</div>
+            {waitingServer ? (
+              <div className="mt-4 rounded-2xl bg-[#0b1320] border border-white/10 p-4 text-center">
+                <div className="text-sm font-semibold">{t('loading', { defaultValue: 'Yüklənir…' })}</div>
+                <div className="mt-1 text-xs opacity-75">{t('pvp_finishing', { defaultValue: 'Nəticə hesablanır…' })}</div>
               </div>
+            ) : (
+              <>
+                <div className="mt-4 grid grid-cols-2 gap-3">
+                  <div className="rounded-2xl bg-[#0b1320] border border-[#00f0ff20] p-3">
+                    <div className="text-[11px] opacity-70">{t('pvp_you_label', { defaultValue: 'Sən' })}</div>
+                    <div className="mt-1 text-sm font-semibold">{formatUserLabel(meInfo, meUserId)}</div>
+                    <div className="mt-2 text-[11px] opacity-70">{t('pvp_clicks', { defaultValue: 'Kliklər' })}</div>
+                    <div className="text-2xl font-extrabold">{myClicksFromResult}</div>
+                  </div>
 
-              <div className="rounded-2xl bg-[#0b1320] border border-[#00f0ff20] p-3">
-                <div className="text-[11px] opacity-70">{t('pvp_opponent', { defaultValue: 'Rəqib' })}</div>
-                <div className="mt-1 text-sm font-semibold truncate">{duelOpponentLabel}</div>
-                <div className="mt-2 text-[11px] opacity-70">{t('pvp_clicks', { defaultValue: 'Kliklər' })}</div>
-                <div className="text-2xl font-extrabold">{oppClicksFromResult ?? '—'}</div>
-              </div>
-            </div>
-
-            <div className="mt-4 rounded-2xl bg-[#0b1320] border border-white/10 p-3">
-              <div className="text-[11px] opacity-70">{t('pvp_reward', { defaultValue: 'Mükafat / dəyişiklik' })}</div>
-              <div className="mt-1 text-lg font-bold">{rewardLine}</div>
-
-              {!isChallenge ? (
-                <div className="mt-1 text-[11px] opacity-70">
-                  {t('pvp_stake', { defaultValue: 'stake:' })} <span className="font-mono">{stakeValue}</span>
-                  {potValue != null ? (
-                    <>
-                      {' '}
-                      • {t('pvp_pot', { defaultValue: 'pot:' })} <span className="font-mono">{potValue}</span>
-                    </>
-                  ) : null}
+                  <div className="rounded-2xl bg-[#0b1320] border border-[#00f0ff20] p-3">
+                    <div className="text-[11px] opacity-70">{t('pvp_opponent', { defaultValue: 'Rəqib' })}</div>
+                    <div className="mt-1 text-sm font-semibold truncate">{duelOpponentLabel}</div>
+                    <div className="mt-2 text-[11px] opacity-70">{t('pvp_clicks', { defaultValue: 'Kliklər' })}</div>
+                    <div className="text-2xl font-extrabold">{oppClicksFromResult ?? '—'}</div>
+                  </div>
                 </div>
-              ) : (
-                <div className="mt-1 text-[11px] opacity-70">
-                  {t('pvp_challenge_rules_hint', { defaultValue: 'Challenge: qələbə +1 victory, məğlubiyyət +0. Stake yoxdur.' })}
+
+                <div className="mt-4 rounded-2xl bg-[#0b1320] border border-white/10 p-3">
+                  <div className="text-[11px] opacity-70">{t('pvp_reward', { defaultValue: 'Mükafat / dəyişiklik' })}</div>
+                  <div className="mt-1 text-lg font-bold">{rewardLine}</div>
+
+                  {!isChallenge ? (
+                    <div className="mt-1 text-[11px] opacity-70">
+                      {t('pvp_stake', { defaultValue: 'stake:' })} <span className="font-mono">{stakeValue}</span>
+                      {potValue != null ? (
+                        <>
+                          {' '}
+                          • {t('pvp_pot', { defaultValue: 'pot:' })} <span className="font-mono">{potValue}</span>
+                        </>
+                      ) : null}
+                    </div>
+                  ) : (
+                    <div className="mt-1 text-[11px] opacity-70">
+                      {t('pvp_challenge_rules_hint', { defaultValue: 'Challenge: qələbə +1 victory, məğlubiyyət +0. Stake yoxdur.' })}
+                    </div>
+                  )}
                 </div>
-              )}
-            </div>
+              </>
+            )}
 
-            <div className="mt-4 space-y-2">
-              {duelMode === 'challenge' ? (
-                <button
-                  disabled={loading}
-                  onClick={onChallengeFinish}
-                  className="w-full rounded-2xl bg-[#00f0ff] text-black font-bold py-3 disabled:opacity-60"
-                >
-                  {loading
-                    ? t('loading', { defaultValue: 'Yüklənir…' })
-                    : t('pvp_finish_fallback', { defaultValue: 'Bitir (fallback)' })}
-                </button>
-              ) : (
-                <button
-                  disabled={loading || liveSubmitState === 'finished'}
-                  onClick={onLiveSubmit}
-                  className="w-full rounded-2xl bg-[#00f0ff] text-black font-bold py-3 disabled:opacity-60"
-                >
-                  {loading
-                    ? t('loading', { defaultValue: 'Yüklənir…' })
-                    : liveSubmitState === 'waiting'
-                    ? t('pvp_waiting_opponent', { defaultValue: 'Rəqib gözlənilir…' })
-                    : liveSubmitState === 'finished'
-                    ? t('pvp_finished', { defaultValue: 'Bitdi' })
-                    : t('pvp_submit_fallback', { defaultValue: 'Təsdiqlə (fallback)' })}
-                </button>
-              )}
-
-              <button className="w-full rounded-2xl bg-white/10 border border-white/10 py-3" onClick={resetToLobby}>
+            <div className="mt-4">
+              <button
+                className="w-full rounded-2xl bg-[#00f0ff] text-black font-bold py-3 disabled:opacity-60"
+                onClick={resetToLobby}
+                disabled={loading}
+              >
                 {t('pvp_back_to_lobby', { defaultValue: 'Lobbiyə qayıt' })}
               </button>
             </div>
@@ -1216,6 +1243,7 @@ const Pvp: React.FC = () => {
       );
     }
 
+    // lobby
     return (
       <>
         {renderLobbyHeader()}
@@ -1223,7 +1251,9 @@ const Pvp: React.FC = () => {
         <div className="mt-4 space-y-3">
           <div className="rounded-2xl bg-[#0e1a2b] border border-[#00f0ff40] p-4">
             <div className="font-bold">{t('pvp_live_duel', { defaultValue: 'Canlı duel' })}</div>
-            <div className="mt-2 text-xs opacity-80">{t('pvp_live_hint', { defaultValue: 'Dəvət linki yarat və rəqibinə göndər.' })}</div>
+            <div className="mt-2 text-xs opacity-80">
+              {t('pvp_live_hint', { defaultValue: 'Dəvət linki yarat və rəqibinə göndər.' })}
+            </div>
 
             <div className="mt-3 space-y-2">
               <button
@@ -1240,10 +1270,16 @@ const Pvp: React.FC = () => {
                   <div className="font-mono break-all">{inviteUrl}</div>
 
                   <div className="mt-3 grid grid-cols-2 gap-2">
-                    <button className="rounded-2xl bg-white/10 border border-white/10 py-2" onClick={() => copyText(inviteUrl)}>
+                    <button
+                      className="rounded-2xl bg-white/10 border border-white/10 py-2"
+                      onClick={() => copyText(inviteUrl)}
+                    >
                       {t('pvp_copy', { defaultValue: 'Kopyala' })}
                     </button>
-                    <button className="rounded-2xl bg-white/10 border border-white/10 py-2" onClick={() => shareInvite(createdInvite.invite_code)}>
+                    <button
+                      className="rounded-2xl bg-white/10 border border-white/10 py-2"
+                      onClick={() => shareInvite(createdInvite.invite_code)}
+                    >
                       {t('pvp_share', { defaultValue: 'Paylaş' })}
                     </button>
                   </div>
@@ -1274,7 +1310,7 @@ const Pvp: React.FC = () => {
               {t('pvp_challenge_attempts', {
                 left: challengeLeft == null ? '—' : challengeLeft,
                 max: challengeDailyLimit,
-                defaultValue: 'Attempts: {{left}}/{{max}}',
+                defaultValue: 'Cəhdlər: {{left}}/{{max}}',
               })}
             </div>
 
@@ -1289,16 +1325,14 @@ const Pvp: React.FC = () => {
             {challengeOpponent && (
               <div className="mt-3 rounded-2xl bg-[#0b1320] border border-[#00f0ff20] p-3 text-xs">
                 <div className="opacity-80">{t('pvp_opponent_label', { defaultValue: 'Rəqib' })}:</div>
-                <div className="mt-1 font-semibold">{formatUserLabel(challengeOpponent, challengeOpponent?.user_id ?? null)}</div>
+                <div className="mt-1 font-semibold">
+                  {formatUserLabel(challengeOpponent, challengeOpponent?.user_id ?? null)}
+                </div>
                 <div className="mt-1 opacity-80">
                   {t('pvp_best_label', { defaultValue: 'best' })}:{' '}
                   <span className="font-mono">{intOrZero(challengeOpponent.best_result)}</span>
                 </div>
               </div>
-            )}
-
-            {challengeStartResp && (
-              <div className="mt-3 text-xs opacity-60 whitespace-pre-wrap">{JSON.stringify(challengeStartResp, null, 2)}</div>
             )}
           </div>
         </div>
