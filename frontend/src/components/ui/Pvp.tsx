@@ -56,6 +56,34 @@ function pickBest(me: any): number {
   return Number.isFinite(Number(b)) ? Number(b) : 0;
 }
 
+function pickChallengeAttemptsLeft(obj: any): number | null {
+  // Best-effort extraction from different backend shapes
+  const keys = [
+    'challenge_attempts_left',
+    'challenge_attempts_remaining',
+    'challenge_left',
+    'pvp_challenge_attempts_left',
+    'pvp_challenge_left',
+    'attempts_left',
+    'attempts_remaining',
+    'remaining_attempts',
+    'remaining_today',
+  ];
+
+  for (const k of keys) {
+    if (obj && obj[k] != null) {
+      const n = Number(obj[k]);
+      if (Number.isFinite(n)) return Math.max(0, Math.floor(n));
+    }
+  }
+
+  // Sometimes nested
+  const nested = obj?.limits ?? obj?.challenge ?? obj?.pvp ?? null;
+  if (nested && nested !== obj) return pickChallengeAttemptsLeft(nested);
+
+  return null;
+}
+
 function intOrZero(v: any): number {
   const n = Number(v);
   return Number.isFinite(n) ? Math.floor(n) : 0;
@@ -169,12 +197,18 @@ const Pvp: React.FC = () => {
   const [challengeAttemptId, setChallengeAttemptId] = useState<number | null>(null);
   const [challengeOpponent, setChallengeOpponent] = useState<any>(null);
   const [challengeFinishResp, setChallengeFinishResp] = useState<any>(null);
+  const [challengeAttemptsLeft, setChallengeAttemptsLeft] = useState<number | null>(null);
 
   // opponent info for live
   const [liveOpponent, setLiveOpponent] = useState<any>(null);
 
   const matchDurationSec = config?.match_duration_sec ?? 30;
   const stakeDefault = config?.stake ?? config?.stake_default ?? 50000;
+  const challengeDailyLimit =
+    config?.challenge_daily_limit ??
+    config?.challenge_limit_per_day ??
+    config?.challenge_attempts_per_day ??
+    5;
 
   // -----------------------------
   // AUTO SUBMIT / AUTO FINISH
@@ -235,6 +269,10 @@ const Pvp: React.FC = () => {
       const me = await apiRequest<any>(`/api/pvp/me?telegram_id=${telegramId}`);
       if (me?.user_id) setMeUserId(me.user_id);
       setMeInfo(me);
+
+      // Challenge attempts (best-effort)
+      const left = pickChallengeAttemptsLeft(me);
+      if (left != null) setChallengeAttemptsLeft(left);
     } catch {}
   };
 
@@ -431,6 +469,10 @@ const Pvp: React.FC = () => {
         }),
       });
       setChallengeFinishResp(res);
+
+      const left = pickChallengeAttemptsLeft(res);
+      if (left != null) setChallengeAttemptsLeft(left);
+
       await refreshMe();
       await refreshWeekly();
     } catch (e: any) {
@@ -643,6 +685,11 @@ const Pvp: React.FC = () => {
       setChallengeStartResp(res);
       setChallengeAttemptId(res?.attempt_id ?? null);
       setChallengeOpponent(res?.opponent ?? null);
+
+      // Update attempts left if backend returns it
+      const left = pickChallengeAttemptsLeft(res);
+      if (left != null) setChallengeAttemptsLeft(left);
+
       startDuel('challenge');
     } catch (e: any) {
       setError(e?.message || 'challenge start failed');
@@ -735,6 +782,12 @@ const Pvp: React.FC = () => {
   const isChallenge = duelMode === 'challenge';
   const victories = pickVictories(meInfo);
   const best = pickBest(meInfo);
+
+  const challengeLeft =
+    challengeAttemptsLeft ??
+    pickChallengeAttemptsLeft(meInfo) ??
+    pickChallengeAttemptsLeft(challengeStartResp) ??
+    pickChallengeAttemptsLeft(challengeFinishResp);
 
   const opponentUserId = computeOpponentUserId();
   const inviteUrl = createdInvite?.invite_code ? buildInviteLink(createdInvite.invite_code) : '';
@@ -1217,10 +1270,18 @@ const Pvp: React.FC = () => {
               {t('pvp_challenge_hint', { defaultValue: 'Rəqibin best_result nəticəsinə qarşı oyna. Qələbə +1 victory verir.' })}
             </div>
 
+            <div className="mt-2 text-xs opacity-85">
+              {t('pvp_challenge_attempts', {
+                left: challengeLeft == null ? '—' : challengeLeft,
+                max: challengeDailyLimit,
+                defaultValue: 'Attempts: {{left}}/{{max}}',
+              })}
+            </div>
+
             <button
               className="mt-3 rounded-2xl bg-[#00f0ff] text-black font-bold py-3 w-full disabled:opacity-60"
               onClick={onChallengeStart}
-              disabled={!canUse || loading}
+              disabled={!canUse || loading || challengeLeft === 0}
             >
               {t('pvp_start_challenge', { defaultValue: 'Challenge başlat' })}
             </button>
