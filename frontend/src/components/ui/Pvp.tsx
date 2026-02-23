@@ -430,6 +430,12 @@ const Pvp: React.FC = () => {
           await refreshMe();
           await refreshWeekly();
         }
+
+        if (st?.status === 'expired') {
+          // Do not keep user stuck on result screen forever
+          setError(t('pvp_error_generic', { defaultValue: 'Bir xəta baş verdi. Zəhmət olmasa yenidən cəhd edin.' }));
+          stopLivePoll();
+        }
       } catch {
         // ignore
       }
@@ -468,11 +474,56 @@ const Pvp: React.FC = () => {
         pollLiveStatus(token);
       }
     } catch (e: any) {
-      setUserFriendlyError(e);
+      // If submit failed for a transient reason or because server already has our submit,
+      // fall back to status polling so the result is still counted and displayed.
+      const parsed = parseServerError(e);
+      const msg = String(parsed?.message || '').toLowerCase();
+      const code = String(parsed?.code || '').toUpperCase();
+
+      const shouldPoll =
+        msg.includes('already') ||
+        msg.includes('submitted') ||
+        msg.includes('finished') ||
+        msg.includes('not active') ||
+        code.includes('ALREADY') ||
+        code.includes('FINISHED') ||
+        code.includes('NOT_ACTIVE');
+
+      if (shouldPoll) {
+        setError('');
+        setLiveSubmitState('waiting');
+        pollLiveStatus(token);
+      } else {
+        // Best-effort: still try to poll once, but show a generic message if nothing comes back.
+        setLiveSubmitState('waiting');
+        pollLiveStatus(token);
+        setUserFriendlyError(e);
+      }
     } finally {
       setLoading(false);
     }
   };
+
+  // If we got to the result screen but the finish call didn't happen (or failed),
+  // ensure we still submit/poll once. This prevents "result not counted" situations.
+  useEffect(() => {
+    if (screen !== 'result') return;
+
+    if (duelModeRef.current === 'challenge') {
+      if (!challengeFinishedRef.current && !challengeFinishInFlightRef.current && challengeAttemptIdRef.current) {
+        void onChallengeFinish();
+      }
+      return;
+    }
+
+    // live
+    if (liveSubmitStateRef.current === 'idle' && matchInfo?.match_token) {
+      void onLiveSubmit();
+    } else if (liveSubmitStateRef.current === 'waiting' && matchInfo?.match_token) {
+      pollLiveStatus(matchInfo.match_token);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [screen]);
 
   const onChallengeFinish = async () => {
     if (!telegramId) return;
@@ -901,7 +952,7 @@ const Pvp: React.FC = () => {
       ? t('pvp_outcome_lose', { defaultValue: 'Məğlubiyyət' })
       : outcome === 'draw'
       ? t('pvp_outcome_draw', { defaultValue: 'Heç-heçə' })
-      : t('pvp_outcome_unknown', { defaultValue: 'Nəticə' });
+      : t('pvp_outcome_unknown', { defaultValue: '—' });
 
   const outcomeBadge =
     outcome === 'win'
@@ -909,38 +960,22 @@ const Pvp: React.FC = () => {
       : outcome === 'lose'
       ? 'bg-rose-500/15 border-rose-400/30 text-rose-200'
       : outcome === 'draw'
-      ? 'bg-white/10 border-white/10 text-white'
-      : 'bg-white/10 border-white/10 text-white';
+      ? 'bg-amber-500/15 border-amber-400/30 text-amber-200'
+      : 'bg-white/5 border-white/10 text-white/80';
 
   const rewardLine = (() => {
-    if (deltaCoins != null) {
-      const sign = deltaCoins > 0 ? '+' : '';
-      return `${sign}${Math.round(deltaCoins)} ${t('coins', { defaultValue: 'coin' })}`;
-    }
-    if (rewardCoins != null) {
-      const sign = rewardCoins > 0 ? '+' : '';
-      return `${sign}${Math.round(rewardCoins)} ${t('coins', { defaultValue: 'coin' })}`;
-    }
-
-    if (duelMode === 'challenge') {
-      if (outcome === 'win') return `+1 ${t('victories', { defaultValue: 'Qələbə' })}`;
-      if (outcome === 'lose') return `+0 ${t('victories', { defaultValue: 'Qələbə' })}`;
-      return '—';
-    }
-
-    if (outcome === 'win') {
-      if (potValue != null) return `+${Math.round(potValue / 2)} ${t('coins', { defaultValue: 'coin' })}`;
-      return t('pvp_reward_unknown', { defaultValue: 'Mükafat server tərəfindən hesablanır' });
-    }
-    if (outcome === 'lose') return `-${Math.round(stakeValue)} ${t('coins', { defaultValue: 'coin' })}`;
-    if (outcome === 'draw') return `0 ${t('coins', { defaultValue: 'coin' })}`;
-    return '—';
+    if (rewardCoins != null) return `+${intOrZero(rewardCoins)} $GAP`;
+    if (deltaCoins != null) return `${deltaCoins >= 0 ? '+' : ''}${intOrZero(deltaCoins)} $GAP`;
+    // if backend returns balance change in another key - show something neutral
+    const maybe = extractNumber(rawResult, ['delta', 'change', 'balance_change']) ?? extractNumber(rawResult?.result, ['delta', 'change', 'balance_change']);
+    if (maybe != null) return `${maybe >= 0 ? '+' : ''}${intOrZero(maybe)} $GAP`;
+    return t('pvp_reward_unknown', { defaultValue: '—' });
   })();
 
   const renderErrorBanner = () => {
     if (!error) return null;
     return (
-      <div className="mt-3 rounded-2xl bg-rose-500/10 border border-rose-400/20 p-3 text-xs text-rose-200">
+      <div className="mt-3 rounded-2xl bg-rose-500/10 border border-rose-400/20 p-3 text-xs text-rose-100">
         {error}
       </div>
     );
@@ -951,39 +986,39 @@ const Pvp: React.FC = () => {
       <div className="rounded-2xl bg-[#0e1a2b] border border-[#00f0ff40] p-4 shadow-[0_0_12px_#00f0ff20]">
         <div className="flex items-center justify-between">
           <div>
-            <div className="text-lg font-bold">⚔️ PvP</div>
+            <div className="text-base font-bold">⚔️ PvP</div>
             <div className="text-xs opacity-80">{t('pvp_subtitle', { defaultValue: 'Live duel & Challenge' })}</div>
           </div>
-          <div className="text-right text-xs opacity-80">
-            <div>
-              {t('pvp_stake', { defaultValue: 'stake:' })} {stakeDefault}
-            </div>
-            <div>
-              {t('pvp_duration', { defaultValue: 'müddət:' })} {matchDurationSec}s
-            </div>
-          </div>
+
+          <button
+            className="rounded-xl bg-white/10 border border-white/10 px-3 py-2 text-xs"
+            onClick={() => {
+              setError('');
+              void refreshMe();
+              void refreshWeekly();
+            }}
+            disabled={loading}
+          >
+            {t('refresh', { defaultValue: 'Yenilə' })}
+          </button>
         </div>
 
-        {!canUse && (
-          <div className="mt-3 text-xs text-[#ffadad]">
-            {t('pvp_tg_init_missing', { defaultValue: 'Telegram initData tapılmadı' })}
-          </div>
-        )}
-
-        {renderErrorBanner()}
-
-        {meInfo && (
-          <div className="mt-3 text-xs opacity-80">
-            <div>
+        {meInfo ? (
+          <div className="mt-3 text-xs opacity-90">
+            <div className="opacity-80">
               {t('pvp_you', {
-                id: meInfo.user_id,
+                id: meInfo.user_id || meUserId || '—',
                 username: meInfo.username || '—',
                 defaultValue: 'you: #{{id}} @{{username}}',
               })}
             </div>
             <div>{t('pvp_stats', { v: victories, b: best, defaultValue: 'qələbə: {{v}} | best: {{b}}' })}</div>
           </div>
+        ) : (
+          <div className="mt-3 text-xs opacity-70">{t('loading', { defaultValue: 'Yüklənir…' })}</div>
         )}
+
+        {renderErrorBanner()}
       </div>
 
       <div className="mt-4 rounded-2xl bg-[#0e1a2b] border border-[#00f0ff40] p-4 shadow-[0_0_12px_#00f0ff20]">
@@ -1106,7 +1141,7 @@ const Pvp: React.FC = () => {
             </div>
 
             <div className="rounded-2xl bg-[#0e1a2b] border border-[#00f0ff20] p-3 text-center">
-              <div className="text-[11px] opacity-70">{t('pvp_power', { defaultValue: 'Glow' })}</div>
+              <div className="text-[11px] opacity-70">{t('pvp_power', { defaultValue: 'Güc' })}</div>
               <div className="text-2xl font-extrabold">{Math.round(glow * 100)}%</div>
             </div>
           </div>
@@ -1150,7 +1185,7 @@ const Pvp: React.FC = () => {
                     </div>
                   ) : (
                     <div className="mt-3 text-[11px] opacity-70">
-                      {t('pvp_speed_hint', { defaultValue: 'Sürət artdıqca glow güclənir' })}
+                      {t('pvp_speed_hint', { defaultValue: 'Sürət artdıqca effekt güclənir' })}
                     </div>
                   )}
                 </div>
