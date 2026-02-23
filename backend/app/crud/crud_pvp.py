@@ -6,6 +6,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional, List, Tuple
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import select, desc, func, or_, text
 from sqlalchemy.ext.asyncio import AsyncSession
