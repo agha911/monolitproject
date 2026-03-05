@@ -15,30 +15,8 @@ type SpawnedBooster =
   | { kind: 'coins'; id: number; x: number; y: number; expiresAt: number }
   | { kind: 'mult'; id: number; x: number; y: number; expiresAt: number };
 
-// ❄️ Winter snow overlay (minimal)
-type Snowflake = {
-  id: number;
-  left: number;     // %
-  size: number;     // px
-  duration: number; // seconds
-  delay: number;    // seconds
-  opacity: number;
-};
-
 const Clicker: React.FC = () => {
   const { t } = useTranslation();
-
-  // ❄️ Generate snowflakes once per mount
-  const snowflakes = useMemo<Snowflake[]>(() => {
-    return Array.from({ length: 28 }).map((_, i) => ({
-      id: i,
-      left: Math.random() * 100,
-      size: 2 + Math.random() * 3,
-      duration: 10 + Math.random() * 10,
-      delay: Math.random() * 10,
-      opacity: 0.25 + Math.random() * 0.35,
-    }));
-  }, []);
 
   const [telegramUser, setTelegramUser] = useState<any | null>(null);
   const [totalXp, setTotalXp] = useState(0);
@@ -375,32 +353,14 @@ const Clicker: React.FC = () => {
   const energyInt = Math.floor(smoothEnergy);
 
   return (
-    <div className="w-full min-h-screen bg-[#131f2f] text-center flex flex-col items-center justify-start pt-8 px-4 text-[#00f0ff] relative overflow-hidden">
-      {/* ❄️ Minimal winter snow overlay (doesn't block clicks) */}
+    <div className="w-full min-h-screen text-center flex flex-col items-center justify-start pt-8 px-4 text-[#00f0ff] relative overflow-hidden bg-gradient-to-b from-[#0e1e18] via-[#12362b] to-[#0f1f2e]">
+      {/* 🌿 Spring glow overlay (doesn't block clicks) */}
       <div className="pointer-events-none fixed inset-0 z-0 overflow-hidden">
-        {snowflakes.map((f) => (
-          <span
-            key={f.id}
-            className="absolute top-[-10px] rounded-full bg-[#9fefff]"
-            style={{
-              left: `${f.left}%`,
-              width: `${f.size}px`,
-              height: `${f.size}px`,
-              opacity: f.opacity,
-              filter: 'drop-shadow(0 0 6px rgba(0,240,255,0.6))',
-              animation: `snowFall ${f.duration}s linear infinite, snowSway ${Math.max(3, f.duration / 2)}s ease-in-out infinite`,
-              animationDelay: `${f.delay}s`,
-            }}
-          />
-        ))}
-      </div>
-
-      {/* ❄️ Frost corners overlay (doesn't block clicks) */}
-      <div className="pointer-events-none fixed inset-0 z-0 overflow-hidden">
-        <div className="frost-corner tl" />
-        <div className="frost-corner tr" />
-        <div className="frost-corner bl" />
-        <div className="frost-corner br" />
+        <div className="spring-glow tl" />
+        <div className="spring-glow tr" />
+        <div className="spring-glow bl" />
+        <div className="spring-glow br" />
+        <div className="spring-vignette" />
       </div>
 
       {/* Кнопка «Карта пользователя» */}
@@ -541,35 +501,33 @@ const Clicker: React.FC = () => {
             animation: pulsePop 0.9s ease-in-out infinite;
           }
 
-          /* ❄️ Winter snow animations */
-          @keyframes snowFall {
-            from { transform: translateY(0); }
-            to   { transform: translateY(110vh); }
-          }
-          @keyframes snowSway {
-            0%   { margin-left: 0; }
-            50%  { margin-left: 10px; }
-            100% { margin-left: 0; }
-          }
-
-          /* ❄️ Frost corners */
-          .frost-corner {
+          /* 🌿 Spring glow corners (soft, non-winter) */
+          .spring-glow {
             position: absolute;
-            width: 190px;
-            height: 190px;
+            width: 220px;
+            height: 220px;
             background: radial-gradient(
               circle at center,
-              rgba(160, 240, 255, 0.30),
-              rgba(160, 240, 255, 0.14) 42%,
-              rgba(160, 240, 255, 0.06) 62%,
-              transparent 72%
+              rgba(120, 255, 190, 0.18),
+              rgba(120, 255, 190, 0.10) 40%,
+              rgba(0, 240, 255, 0.06) 62%,
+              transparent 74%
             );
-            filter: blur(10px);
+            filter: blur(14px);
+            opacity: 0.85;
           }
-          .frost-corner.tl { top: -55px; left: -55px; }
-          .frost-corner.tr { top: -55px; right: -55px; }
-          .frost-corner.bl { bottom: -55px; left: -55px; }
-          .frost-corner.br { bottom: -55px; right: -55px; }
+          .spring-glow.tl { top: -70px; left: -70px; }
+          .spring-glow.tr { top: -70px; right: -70px; }
+          .spring-glow.bl { bottom: -70px; left: -70px; }
+          .spring-glow.br { bottom: -70px; right: -70px; }
+
+          /* subtle vignette for depth */
+          .spring-vignette {
+            position: absolute;
+            inset: 0;
+            background: radial-gradient(circle at 50% 35%, transparent 0%, rgba(0,0,0,0.25) 70%, rgba(0,0,0,0.45) 100%);
+            pointer-events: none;
+          }
         `}</style>
       </div>
 
