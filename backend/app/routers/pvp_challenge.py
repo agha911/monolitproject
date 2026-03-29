@@ -10,24 +10,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_async_session
 from app.models.user import User
-from app.helpers.pvp_helpers import calc_best_result_range
-
-from app.crud.crud_pvp import (
-    count_today_challenge_attempts,
-    create_challenge_attempt,
-    get_challenge_attempt_for_update,
-    finish_challenge_attempt,
-    expire_challenge_attempt,
-)
-
-from app.routers.pvp_common import (
-    CHALLENGE_DAILY_LIMIT,
-    PVP_MATCH_DURATION_SEC,
-    _cleanup_expired,
-    _ensure_registered_user,
-)
 from app.helpers.pvp_helpers import calc_best_result_range, review_telemetry
-from app.models.pvp_anticheat_models import PvpChallengeTelemetry
+
 from app.crud.crud_pvp import (
     count_today_challenge_attempts,
     create_challenge_attempt,
@@ -37,6 +21,7 @@ from app.crud.crud_pvp import (
     create_challenge_telemetry,
     create_cheat_events_from_flags,
 )
+
 from app.routers.pvp_common import (
     CHALLENGE_DAILY_LIMIT,
     PVP_MATCH_DURATION_SEC,
@@ -59,12 +44,6 @@ class ChallengeStartResponse(BaseModel):
     attempts_today: int
     attempts_left: int
     opponent: dict
-
-
-class ChallengeFinishRequest(BaseModel):
-    telegram_id: int
-    attempt_id: int
-    my_clicks: int = Field(ge=0)
 
 
 class ChallengeFinishRequest(BaseModel):
