@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from sqlalchemy import (
+    BigInteger,
     Boolean,
     CheckConstraint,
     Column,
@@ -34,8 +35,8 @@ class PvpLiveTelemetry(Base):
     reported_clicks = Column(Integer, nullable=False)
     validated_clicks = Column(Integer, nullable=False)
 
-    client_started_at_ms = Column(Integer, nullable=True)
-    client_finished_at_ms = Column(Integer, nullable=True)
+    client_started_at_ms = Column(BigInteger, nullable=True)
+    client_finished_at_ms = Column(BigInteger, nullable=True)
 
     tap_count = Column(Integer, nullable=True)
     max_concurrent_touches = Column(Integer, nullable=True)
@@ -109,8 +110,8 @@ class PvpChallengeTelemetry(Base):
     reported_clicks = Column(Integer, nullable=False)
     validated_clicks = Column(Integer, nullable=False)
 
-    client_started_at_ms = Column(Integer, nullable=True)
-    client_finished_at_ms = Column(Integer, nullable=True)
+    client_started_at_ms = Column(BigInteger, nullable=True)
+    client_finished_at_ms = Column(BigInteger, nullable=True)
 
     tap_count = Column(Integer, nullable=True)
     max_concurrent_touches = Column(Integer, nullable=True)
