@@ -38,13 +38,21 @@ from app.routers.pvp_common import (
     _ensure_registered_user,
     _gen_invite_code,
     _gen_match_token,
+    _user_public,
 )
-
+from app.helpers.pvp_helpers import review_telemetry
+from app.models.pvp_anticheat_models import PvpLiveTelemetry
+from app.crud.crud_pvp import (
+    upsert_live_telemetry,
+    get_live_telemetry_map,
+    create_cheat_events_from_flags,
+)
 router = APIRouter(prefix="/api/pvp", tags=["pvp"])
 
 
 @router.post("/live/finish")
 async def live_finish(body: LiveFinishRequest, session: AsyncSession = Depends(get_async_session)):
+    raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": "Endpoint not available"})
     """
     OLD debug endpoint (kept for tests):
     requester sends both clicks. Frontend should NOT use it in production.
@@ -120,7 +128,19 @@ async def live_submit(body: LiveSubmitRequest, session: AsyncSession = Depends(g
             raise HTTPException(status_code=403, detail={"code": "FORBIDDEN", "message": "Not a participant"})
 
         # save my clicks
-        if int(me.id) == int(sess.player1_id):
+        telemetry_dict = body.telemetry.model_dump(exclude_none=True) if body.telemetry else {}
+        telemetry_dict["reported_clicks"] = int(body.my_clicks)
+
+        verdict = review_telemetry(
+            reported_clicks=int(body.my_clicks),
+            telemetry=body.telemetry,
+            server_started_at=(sess.created_at or now),
+            server_finished_at=now,
+        )
+
+        player_slot = "player1" if int(me.id) == int(sess.player1_id) else "player2"
+
+        if player_slot == "player1":
             if sess.player1_reported_clicks is not None:
                 raise HTTPException(status_code=409, detail={"code": "ALREADY_SUBMITTED", "message": "You already submitted"})
             sess.player1_reported_clicks = int(body.my_clicks)
@@ -131,6 +151,31 @@ async def live_submit(body: LiveSubmitRequest, session: AsyncSession = Depends(g
             sess.player2_reported_clicks = int(body.my_clicks)
             sess.player2_reported_at = now
 
+        tel = await upsert_live_telemetry(
+            session,
+            session_id=int(sess.id),
+            match_token=sess.match_token,
+            user_id=int(me.id),
+            player_slot=player_slot,
+            payload=telemetry_dict,
+            verdict=verdict,
+        )
+
+        if verdict.flags:
+            await create_cheat_events_from_flags(
+                session,
+                mode="live",
+                user_id=int(me.id),
+                flags=list(verdict.flags),
+                reason=verdict.reason,
+                session_id=int(sess.id),
+                details_json={
+                    "reported_clicks": int(body.my_clicks),
+                    "validated_clicks": int(verdict.validated_clicks),
+                    "score": int(verdict.suspicion_score),
+                },
+            )
+
         await session.flush()
 
         p1_done = sess.player1_reported_clicks is not None
@@ -139,12 +184,19 @@ async def live_submit(body: LiveSubmitRequest, session: AsyncSession = Depends(g
         if p1_done and p2_done:
             opponent_user_id = int(sess.player2_id) if int(me.id) == int(sess.player1_id) else int(sess.player1_id)
 
+            tel_map = await get_live_telemetry_map(session, session_id=int(sess.id))
+            p1_tel = tel_map.get(int(sess.player1_id))
+            p2_tel = tel_map.get(int(sess.player2_id))
+
+            if not p1_tel or not p2_tel:
+                raise HTTPException(status_code=409, detail={"code": "TELEMETRY_MISSING", "message": "Telemetry not fully submitted"})
+
             if int(me.id) == int(sess.player1_id):
-                opponent_clicks = int(sess.player2_reported_clicks or 0)
-                my_clicks = int(sess.player1_reported_clicks or 0)
+                opponent_clicks = int(p2_tel.validated_clicks or 0)
+                my_clicks = int(p1_tel.validated_clicks or 0)
             else:
-                opponent_clicks = int(sess.player1_reported_clicks or 0)
-                my_clicks = int(sess.player2_reported_clicks or 0)
+                opponent_clicks = int(p1_tel.validated_clicks or 0)
+                my_clicks = int(p2_tel.validated_clicks or 0)
 
             try:
                 res = await finish_live_pvp_session(
@@ -156,6 +208,8 @@ async def live_submit(body: LiveSubmitRequest, session: AsyncSession = Depends(g
                     opponent_clicks=opponent_clicks,
                     stake_fixed=PVP_DEFAULT_STAKE,
                 )
+                p1_user = await session.get(User, int(sess.player1_id))
+                p2_user = await session.get(User, int(sess.player2_id))
             except (SessionNotFound, SessionNotActive, SessionExpired) as e:
                 raise HTTPException(status_code=409, detail={"code": getattr(e, "code", "PVP_SESSION_ERROR"), "message": str(e)})
             except InsufficientCoins as e:
@@ -177,8 +231,32 @@ async def live_submit(body: LiveSubmitRequest, session: AsyncSession = Depends(g
                 "stake": res.stake,
                 "player1_total_xp": res.player1_total_xp,
                 "player2_total_xp": res.player2_total_xp,
+                "player1": _user_public(p1_user),
+                "player2": _user_public(p2_user),
+                "anti_cheat": {
+                    "player1": {
+                        "reported_clicks": int(p1_tel.reported_clicks),
+                        "validated_clicks": int(p1_tel.validated_clicks),
+                        "is_suspicious": bool(p1_tel.is_suspicious),
+                        "confidence": float(p1_tel.confidence or 0),
+                        "score": int(p1_tel.suspicion_score or 0),
+                        "reason": p1_tel.reason,
+                        "flags": p1_tel.flags_json or [],
+                    },
+                    "player2": {
+                        "reported_clicks": int(p2_tel.reported_clicks),
+                        "validated_clicks": int(p2_tel.validated_clicks),
+                        "is_suspicious": bool(p2_tel.is_suspicious),
+                        "confidence": float(p2_tel.confidence or 0),
+                        "score": int(p2_tel.suspicion_score or 0),
+                        "reason": p2_tel.reason,
+                        "flags": p2_tel.flags_json or [],
+                    },
+                },
             }
-
+        
+        p1_user = await session.get(User, int(sess.player1_id))
+        p2_user = await session.get(User, int(sess.player2_id))
         return {
             "ok": True,
             "status": "waiting",
@@ -186,6 +264,8 @@ async def live_submit(body: LiveSubmitRequest, session: AsyncSession = Depends(g
             "expires_at": sess.expires_at.isoformat() if sess.expires_at else None,
             "player1_id": int(sess.player1_id),
             "player2_id": int(sess.player2_id),
+            "player1": _user_public(p1_user),
+            "player2": _user_public(p2_user),
             "submitted": {
                 "player1": p1_done,
                 "player2": p2_done,
@@ -202,6 +282,12 @@ async def live_status(telegram_id: int, match_token: str, session: AsyncSession 
         (await session.execute(select(PvpSession).where(PvpSession.match_token == match_token).limit(1)))
         .scalar_one_or_none()
     )
+    p1_user = await session.get(User, int(sess.player1_id))
+    p2_user = await session.get(User, int(sess.player2_id))
+    tel_map = await get_live_telemetry_map(session, session_id=int(sess.id))
+    p1_tel = tel_map.get(int(sess.player1_id))
+    p2_tel = tel_map.get(int(sess.player2_id))
+    opponent_user = p2_user if int(me.id) == int(sess.player1_id) else p1_user
     if not sess:
         raise HTTPException(status_code=404, detail={"code": "SESSION_NOT_FOUND", "message": "Match session not found"})
 
@@ -222,6 +308,29 @@ async def live_status(telegram_id: int, match_token: str, session: AsyncSession 
             "player2": sess.player2_reported_clicks is not None,
         },
         "match_id": int(sess.match_id) if sess.match_id else None,
+        "player1": _user_public(p1_user),
+        "player2": _user_public(p2_user),
+        "opponent": _user_public(opponent_user),
+        "anti_cheat": {
+            "player1": {
+                "reported_clicks": int(p1_tel.reported_clicks) if p1_tel else None,
+                "validated_clicks": int(p1_tel.validated_clicks) if p1_tel else None,
+                "is_suspicious": bool(p1_tel.is_suspicious) if p1_tel else None,
+                "confidence": float(p1_tel.confidence or 0) if p1_tel else None,
+                "score": int(p1_tel.suspicion_score or 0) if p1_tel else None,
+                "reason": p1_tel.reason if p1_tel else None,
+                "flags": p1_tel.flags_json if p1_tel else [],
+            },
+            "player2": {
+                "reported_clicks": int(p2_tel.reported_clicks) if p2_tel else None,
+                "validated_clicks": int(p2_tel.validated_clicks) if p2_tel else None,
+                "is_suspicious": bool(p2_tel.is_suspicious) if p2_tel else None,
+                "confidence": float(p2_tel.confidence or 0) if p2_tel else None,
+                "score": int(p2_tel.suspicion_score or 0) if p2_tel else None,
+                "reason": p2_tel.reason if p2_tel else None,
+                "flags": p2_tel.flags_json if p2_tel else [],
+            },
+        },
     }
 
     if sess.status == "finished" and sess.match_id:
@@ -302,6 +411,7 @@ async def invite_status(invite_code: str, session: AsyncSession = Depends(get_as
             match_token = sess.match_token
             player1_id = int(sess.player1_id)
             player2_id = int(sess.player2_id)
+            
 
     return {
         "ok": True,
@@ -367,6 +477,9 @@ async def invite_accept(body: InviteAcceptRequest, session: AsyncSession = Depen
             expires_at=expires_at,
         )
         session.add(sess)
+
+        "player1": _user_public(creator),
+        "player2": _user_public(opponent),
 
         return {
             "ok": True,
