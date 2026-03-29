@@ -277,8 +277,3 @@ def review_telemetry(
         reason=reason,
         flags=flags,
     )
-
-    if high < low:
-        high = low
-
-    return low, high
