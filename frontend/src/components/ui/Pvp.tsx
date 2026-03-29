@@ -39,6 +39,38 @@ type DuelMode = 'live' | 'challenge';
 type DuelPhase = 'prep' | 'active';
 type Outcome = 'win' | 'lose' | 'draw' | 'unknown';
 
+type TelemetryPayload = {
+  client_started_at_ms?: number | null;
+  client_finished_at_ms?: number | null;
+  tap_count?: number;
+  max_concurrent_touches?: number;
+  avg_taps_per_sec?: number;
+  peak_taps_per_sec?: number;
+  send_batches_count?: number;
+  had_pauses?: boolean;
+  pause_count?: number;
+  longest_pause_ms?: number;
+};
+
+type AntiCheatVerdict = {
+  reported_clicks?: number | null;
+  validated_clicks?: number | null;
+  is_suspicious?: boolean | null;
+  confidence?: number | null;
+  score?: number | null;
+  reason?: string | null;
+  flags?: string[];
+};
+
+type PublicUser = {
+  user_id?: number;
+  id?: number;
+  telegram_id?: number;
+  username?: string | null;
+  first_name?: string | null;
+  last_name?: string | null;
+};
+
 const BOT_USERNAME = 'monolit_42_bot';
 const PREP_SECONDS = 5;
 
@@ -48,6 +80,10 @@ const GLOW_MAX_CPS = 12;
 const GLOW_DECAY_PER_TICK = 0.05;
 const GLOW_TICK_MS = 45;
 const GLOW_RISE_LERP = 0.12;
+
+// telemetry tuning
+const PAUSE_THRESHOLD_MS = 250;
+const PEAK_WINDOW_MS = 1000;
 
 function buildInviteLink(code: string) {
   return `https://t.me/${BOT_USERNAME}?startapp=pvp_${code}`;
@@ -60,6 +96,11 @@ function buildShareLink(url: string, text: string) {
 function intOrZero(v: any): number {
   const n = Number(v);
   return Number.isFinite(n) ? Math.floor(n) : 0;
+}
+
+function numOrNull(v: any): number | null {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
 }
 
 function pickVictories(me: any): number {
@@ -131,7 +172,7 @@ function normalizeOutcome(raw: any, meUserId?: number | null): Outcome {
   if (meUserId && typeof winnerId === 'number') return winnerId === meUserId ? 'win' : 'lose';
   if (meUserId && typeof loserId === 'number') return loserId === meUserId ? 'lose' : 'win';
 
-  const won = raw?.won ?? raw?.is_winner ?? raw?.isWinner;
+  const won = raw?.won ?? raw?.is_winner ?? raw?.isWinner ?? raw?.is_win;
   if (typeof won === 'boolean') return won ? 'win' : 'lose';
 
   return 'unknown';
@@ -150,6 +191,13 @@ function extractNumber(raw: any, keys: string[]): number | null {
 function parseServerError(e: any): { code?: string; message?: string } {
   const payload = e?.payload;
   if (payload && typeof payload === 'object') {
+    const detail = payload.detail;
+    if (detail && typeof detail === 'object') {
+      return {
+        code: detail.code || payload.code,
+        message: detail.message || detail.detail || payload.message || payload.detail || payload.error,
+      };
+    }
     return { code: payload.code, message: payload.message || payload.detail || payload.error };
   }
   const msg = e?.message;
@@ -162,6 +210,69 @@ function parseServerError(e: any): { code?: string; message?: string } {
   return { message: typeof msg === 'string' ? msg : undefined };
 }
 
+function getUserId(u: any): number | null {
+  const v = u?.user_id ?? u?.id;
+  return typeof v === 'number' ? v : null;
+}
+
+function getEmbeddedLiveOpponent(matchInfo: any, meUserId: number | null): PublicUser | null {
+  if (!matchInfo) return null;
+  if (matchInfo?.opponent) return matchInfo.opponent;
+  if (matchInfo?.opponent_user) return matchInfo.opponent_user;
+
+  const p1 = matchInfo?.player1;
+  const p2 = matchInfo?.player2;
+  const p1Id = getUserId(p1) ?? matchInfo?.player1_id ?? null;
+  const p2Id = getUserId(p2) ?? matchInfo?.player2_id ?? null;
+
+  if (meUserId && p1Id === meUserId) return p2 ?? null;
+  if (meUserId && p2Id === meUserId) return p1 ?? null;
+
+  return null;
+}
+
+function getLiveVerdicts(raw: any, meUserId?: number | null) {
+  const anti = raw?.anti_cheat ?? raw?.result?.anti_cheat ?? null;
+  if (!anti) return { me: null as AntiCheatVerdict | null, opponent: null as AntiCheatVerdict | null };
+
+  const p1 = anti?.player1 ?? null;
+  const p2 = anti?.player2 ?? null;
+
+  const p1Id = raw?.player1_id ?? raw?.result?.player1_id ?? null;
+  const p2Id = raw?.player2_id ?? raw?.result?.player2_id ?? null;
+
+  if (meUserId && p1Id === meUserId) return { me: p1, opponent: p2 };
+  if (meUserId && p2Id === meUserId) return { me: p2, opponent: p1 };
+
+  return { me: p1, opponent: p2 };
+}
+
+function resolveLiveClicks(raw: any, meUserId?: number | null) {
+  const src = raw?.result ?? raw;
+  const p1Id = src?.player1_id;
+  const p2Id = src?.player2_id;
+  const p1Clicks = extractNumber(src, ['player1_clicks']);
+  const p2Clicks = extractNumber(src, ['player2_clicks']);
+
+  if (meUserId && p1Id === meUserId) {
+    return { myClicks: p1Clicks, opponentClicks: p2Clicks };
+  }
+  if (meUserId && p2Id === meUserId) {
+    return { myClicks: p2Clicks, opponentClicks: p1Clicks };
+  }
+
+  return { myClicks: p1Clicks, opponentClicks: p2Clicks };
+}
+
+function getChallengeVerdict(raw: any): AntiCheatVerdict | null {
+  return raw?.anti_cheat ?? raw?.result?.anti_cheat ?? null;
+}
+
+function formatFlags(flags?: string[]) {
+  if (!Array.isArray(flags) || flags.length === 0) return '—';
+  return flags.join(', ');
+}
+
 const Pvp: React.FC = () => {
   const { t } = useTranslation();
 
@@ -170,7 +281,6 @@ const Pvp: React.FC = () => {
 
   const [loading, setLoading] = useState(false);
 
-  // user-friendly error only (no debug payloads)
   const [error, setError] = useState<string>('');
 
   const [config, setConfig] = useState<any>(null);
@@ -178,7 +288,6 @@ const Pvp: React.FC = () => {
   const [meUserId, setMeUserId] = useState<number | null>(null);
   const [meInfo, setMeInfo] = useState<any>(null);
 
-  // Weekly season leaderboard
   const [weeklySeason, setWeeklySeason] = useState<any>(null);
   const [weeklyItems, setWeeklyItems] = useState<any[]>([]);
   const [weeklyLoading, setWeeklyLoading] = useState<boolean>(false);
@@ -200,22 +309,18 @@ const Pvp: React.FC = () => {
 
   const [myClicks, setMyClicks] = useState<number>(0);
 
-  // live submit / finish
   const [liveSubmitState, setLiveSubmitState] = useState<'idle' | 'waiting' | 'finished'>('idle');
   const livePollRef = useRef<number | null>(null);
   const [finishResponse, setFinishResponse] = useState<any>(null);
 
-  // challenge
   const [challengeAttemptId, setChallengeAttemptId] = useState<number | null>(null);
   const [challengeOpponent, setChallengeOpponent] = useState<any>(null);
   const [challengeFinishResp, setChallengeFinishResp] = useState<any>(null);
   const [challengeAttemptsLeft, setChallengeAttemptsLeft] = useState<number | null>(null);
 
-  // guard against double-finish (challenge)
   const challengeFinishInFlightRef = useRef(false);
   const challengeFinishedRef = useRef(false);
 
-  // opponent info for live
   const [liveOpponent, setLiveOpponent] = useState<any>(null);
 
   const matchDurationSec = config?.match_duration_sec ?? 30;
@@ -226,14 +331,20 @@ const Pvp: React.FC = () => {
     config?.challenge_attempts_per_day ??
     5;
 
-  // -----------------------------
-  // Refs for auto-submit / auto-finish
-  // -----------------------------
   const autoEndTriggeredRef = useRef(false);
   const duelModeRef = useRef<DuelMode>('live');
   const liveSubmitStateRef = useRef<'idle' | 'waiting' | 'finished'>('idle');
   const challengeAttemptIdRef = useRef<number | null>(null);
   const myClicksRef = useRef<number>(0);
+
+  // telemetry refs
+  const sessionStartedAtRef = useRef<number | null>(null);
+  const tapTimestampsRef = useRef<number[]>([]);
+  const pauseCountRef = useRef<number>(0);
+  const longestPauseMsRef = useRef<number>(0);
+  const lastTapTsRef = useRef<number | null>(null);
+  const maxConcurrentTouchesRef = useRef<number>(1);
+  const sendBatchesCountRef = useRef<number>(0);
 
   useEffect(() => {
     duelModeRef.current = duelMode;
@@ -279,16 +390,58 @@ const Pvp: React.FC = () => {
     }
   };
 
+  const resetTelemetry = () => {
+    sessionStartedAtRef.current = null;
+    tapTimestampsRef.current = [];
+    pauseCountRef.current = 0;
+    longestPauseMsRef.current = 0;
+    lastTapTsRef.current = null;
+    maxConcurrentTouchesRef.current = 1;
+    sendBatchesCountRef.current = 0;
+  };
+
+  const buildTelemetryPayload = (): TelemetryPayload => {
+    const started = sessionStartedAtRef.current;
+    const finished = Date.now();
+    const taps = tapTimestampsRef.current.slice().sort((a, b) => a - b);
+
+    const tapCount = taps.length;
+    const elapsedSec = started ? Math.max((finished - started) / 1000, 0) : 0;
+    const avgTps = elapsedSec > 0 ? tapCount / elapsedSec : tapCount;
+
+    let peakTps = 0;
+    for (let i = 0; i < taps.length; i += 1) {
+      const windowStart = taps[i];
+      let cnt = 0;
+      for (let j = i; j < taps.length; j += 1) {
+        if (taps[j] - windowStart <= PEAK_WINDOW_MS) cnt += 1;
+        else break;
+      }
+      peakTps = Math.max(peakTps, cnt);
+    }
+
+    return {
+      client_started_at_ms: started,
+      client_finished_at_ms: finished,
+      tap_count: tapCount,
+      max_concurrent_touches: Math.max(1, maxConcurrentTouchesRef.current),
+      avg_taps_per_sec: Number(avgTps.toFixed(2)),
+      peak_taps_per_sec: Number(peakTps.toFixed(2)),
+      send_batches_count: Math.max(1, sendBatchesCountRef.current),
+      had_pauses: pauseCountRef.current > 0,
+      pause_count: pauseCountRef.current,
+      longest_pause_ms: longestPauseMsRef.current,
+    };
+  };
+
   const setUserFriendlyError = (e: any) => {
     const parsed = parseServerError(e);
 
-    // silently ignore "already finished" for challenge
     if (parsed?.code === 'ATTEMPT_NOT_ACTIVE' && String(parsed?.message || '').toLowerCase().includes('finished')) {
       setError('');
       return;
     }
 
-    // for user: no debug, only simple message
     setError(t('pvp_error_generic', { defaultValue: 'Bir xəta baş verdi. Zəhmət olmasa yenidən cəhd edin.' }));
   };
 
@@ -302,7 +455,7 @@ const Pvp: React.FC = () => {
       const left = pickChallengeAttemptsLeft(me);
       if (left != null) setChallengeAttemptsLeft(left);
     } catch {
-      // silently ignore
+      // ignore
     }
   };
 
@@ -390,13 +543,7 @@ const Pvp: React.FC = () => {
     (async () => {
       if (duelMode !== 'live') return;
 
-      const embedded =
-        matchInfo?.opponent ??
-        matchInfo?.opponent_user ??
-        matchInfo?.opponentProfile ??
-        matchInfo?.opponent_info ??
-        null;
-
+      const embedded = getEmbeddedLiveOpponent(matchInfo, meUserId);
       if (embedded) {
         setLiveOpponent(embedded);
         return;
@@ -423,16 +570,31 @@ const Pvp: React.FC = () => {
           `/api/pvp/live/status?telegram_id=${telegramId}&match_token=${encodeURIComponent(matchToken)}`
         );
 
+        if (st?.opponent) setLiveOpponent(st.opponent);
+
         if (st?.status === 'finished' && (st?.result || st?.match_id)) {
           setLiveSubmitState('finished');
-          setFinishResponse(st?.result || st);
+
+          const merged =
+            st?.result
+              ? {
+                  ...st.result,
+                  status: st.status,
+                  anti_cheat: st.anti_cheat ?? null,
+                  player1: st.player1 ?? st.result?.player1 ?? null,
+                  player2: st.player2 ?? st.result?.player2 ?? null,
+                  opponent: st.opponent ?? null,
+                  match_token: st.match_token,
+                }
+              : st;
+
+          setFinishResponse(merged);
           stopLivePoll();
           await refreshMe();
           await refreshWeekly();
         }
 
         if (st?.status === 'expired') {
-          // Do not keep user stuck on result screen forever
           setError(t('pvp_error_generic', { defaultValue: 'Bir xəta baş verdi. Zəhmət olmasa yenidən cəhd edin.' }));
           stopLivePoll();
         }
@@ -455,14 +617,23 @@ const Pvp: React.FC = () => {
     setError('');
     setLoading(true);
     try {
+      sendBatchesCountRef.current += 1;
+
+      const telemetry = buildTelemetryPayload();
+
       const res = await apiRequest<any>('/api/pvp/live/submit', {
         method: 'POST',
         body: JSON.stringify({
           telegram_id: telegramId,
           match_token: token,
           my_clicks: myClicksRef.current,
+          telemetry,
         }),
       });
+
+      if (res?.player1 || res?.player2 || res?.opponent) {
+        setMatchInfo((prev: any) => ({ ...(prev || {}), ...res }));
+      }
 
       if (res?.status === 'finished') {
         setLiveSubmitState('finished');
@@ -471,11 +642,12 @@ const Pvp: React.FC = () => {
         await refreshWeekly();
       } else {
         setLiveSubmitState('waiting');
+        if (res?.player1 || res?.player2 || res?.opponent) {
+          setMatchInfo((prev: any) => ({ ...(prev || {}), ...res }));
+        }
         pollLiveStatus(token);
       }
     } catch (e: any) {
-      // If submit failed for a transient reason or because server already has our submit,
-      // fall back to status polling so the result is still counted and displayed.
       const parsed = parseServerError(e);
       const msg = String(parsed?.message || '').toLowerCase();
       const code = String(parsed?.code || '').toUpperCase();
@@ -494,7 +666,6 @@ const Pvp: React.FC = () => {
         setLiveSubmitState('waiting');
         pollLiveStatus(token);
       } else {
-        // Best-effort: still try to poll once, but show a generic message if nothing comes back.
         setLiveSubmitState('waiting');
         pollLiveStatus(token);
         setUserFriendlyError(e);
@@ -504,8 +675,6 @@ const Pvp: React.FC = () => {
     }
   };
 
-  // If we got to the result screen but the finish call didn't happen (or failed),
-  // ensure we still submit/poll once. This prevents "result not counted" situations.
   useEffect(() => {
     if (screen !== 'result') return;
 
@@ -516,7 +685,6 @@ const Pvp: React.FC = () => {
       return;
     }
 
-    // live
     if (liveSubmitStateRef.current === 'idle' && matchInfo?.match_token) {
       void onLiveSubmit();
     } else if (liveSubmitStateRef.current === 'waiting' && matchInfo?.match_token) {
@@ -528,7 +696,6 @@ const Pvp: React.FC = () => {
   const onChallengeFinish = async () => {
     if (!telegramId) return;
 
-    // prevent double finish
     if (challengeFinishedRef.current) return;
     if (challengeFinishInFlightRef.current) return;
 
@@ -543,12 +710,17 @@ const Pvp: React.FC = () => {
     setLoading(true);
 
     try {
+      sendBatchesCountRef.current += 1;
+
+      const telemetry = buildTelemetryPayload();
+
       const res = await apiRequest<any>('/api/pvp/challenge/finish', {
         method: 'POST',
         body: JSON.stringify({
           telegram_id: telegramId,
           attempt_id: attemptId,
           my_clicks: myClicksRef.current,
+          telemetry,
         }),
       });
 
@@ -558,12 +730,13 @@ const Pvp: React.FC = () => {
       const left = pickChallengeAttemptsLeft(res);
       if (left != null) setChallengeAttemptsLeft(left);
 
+      if (res?.opponent) setChallengeOpponent(res.opponent);
+
       await refreshMe();
       await refreshWeekly();
     } catch (e: any) {
       const parsed = parseServerError(e);
       if (parsed?.code === 'ATTEMPT_NOT_ACTIVE' && String(parsed?.message || '').toLowerCase().includes('finished')) {
-        // treat as success
         challengeFinishedRef.current = true;
         setError('');
         await refreshMe();
@@ -592,6 +765,7 @@ const Pvp: React.FC = () => {
 
   const startActiveTimer = () => {
     stopDuelTimer();
+    sessionStartedAtRef.current = Date.now();
 
     const startedAt = Date.now();
     duelTimerRef.current = window.setInterval(() => {
@@ -630,9 +804,10 @@ const Pvp: React.FC = () => {
     setFinishResponse(null);
     setChallengeFinishResp(null);
 
-    // reset challenge guards
     challengeFinishInFlightRef.current = false;
     challengeFinishedRef.current = false;
+
+    resetTelemetry();
 
     setMyClicks(0);
     setLiveSubmitState('idle');
@@ -652,7 +827,6 @@ const Pvp: React.FC = () => {
     startPrepCountdown();
   };
 
-  // auto accept from start_param
   const autoAcceptRef = useRef<string | null>(null);
   useEffect(() => {
     const sp = (WebApp.initDataUnsafe as any)?.start_param;
@@ -676,6 +850,9 @@ const Pvp: React.FC = () => {
         });
 
         setMatchInfo(data);
+        if (data?.player1 || data?.player2 || data?.opponent) {
+          setLiveOpponent(getEmbeddedLiveOpponent(data, meUserId));
+        }
 
         if (data?.match_token) startDuel('live');
       } catch (e: any) {
@@ -687,9 +864,6 @@ const Pvp: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [telegramId]);
 
-  // -----------------------------
-  // CLICK GLOW
-  // -----------------------------
   const [glow, setGlow] = useState<number>(0);
   const recentClicksRef = useRef<Array<{ ts: number; delta: number }>>([]);
   const glowTickRef = useRef<number | null>(null);
@@ -723,6 +897,22 @@ const Pvp: React.FC = () => {
     };
   }, []);
 
+  const registerTapBatch = (batchSize: number) => {
+    const now = Date.now();
+    for (let i = 0; i < batchSize; i += 1) {
+      tapTimestampsRef.current.push(now);
+    }
+
+    if (lastTapTsRef.current != null) {
+      const gap = now - lastTapTsRef.current;
+      if (gap >= PAUSE_THRESHOLD_MS) {
+        pauseCountRef.current += 1;
+        longestPauseMsRef.current = Math.max(longestPauseMsRef.current, gap);
+      }
+    }
+    lastTapTsRef.current = now;
+  };
+
   const addClicks = (delta: number) => {
     if (screen !== 'duel') return;
     if (phase !== 'active') return;
@@ -731,20 +921,23 @@ const Pvp: React.FC = () => {
     const d = Math.max(0, delta);
     setMyClicks((prev) => prev + d);
 
+    registerTapBatch(d);
+
     recentClicksRef.current.push({ ts: Date.now(), delta: d });
     computeGlow();
   };
 
   const onTouchStart = (e: React.TouchEvent) => {
-    const delta = Math.min(e.changedTouches?.length || 1, 2);
-    addClicks(delta);
+    const touches = Math.min(e.changedTouches?.length || 1, 2);
+    maxConcurrentTouchesRef.current = Math.max(maxConcurrentTouchesRef.current, touches);
+    addClicks(touches);
   };
 
-  const onMouseDown = () => addClicks(1);
+  const onMouseDown = () => {
+    maxConcurrentTouchesRef.current = Math.max(maxConcurrentTouchesRef.current, 1);
+    addClicks(1);
+  };
 
-  // -----------------------------
-  // Lobby actions
-  // -----------------------------
   const startInvitePolling = (code: string) => {
     stopInvitePoll();
     invitePollRef.current = window.setInterval(async () => {
@@ -760,6 +953,9 @@ const Pvp: React.FC = () => {
             mode: 'invite',
             player1_id: st.player1_id,
             player2_id: st.player2_id,
+            player1: st.player1 ?? null,
+            player2: st.player2 ?? null,
+            opponent: st.opponent ?? null,
           };
           setMatchInfo(mi);
           stopInvitePoll();
@@ -877,19 +1073,16 @@ const Pvp: React.FC = () => {
     setGlow(0);
     recentClicksRef.current = [];
 
-    // reset challenge guards
     challengeFinishInFlightRef.current = false;
     challengeFinishedRef.current = false;
 
+    resetTelemetry();
+
     setError('');
-    // refresh counters / attempts in lobby
     void refreshMe();
     void refreshWeekly();
   };
 
-  // -----------------------------
-  // Derived UI values
-  // -----------------------------
   const isChallenge = duelMode === 'challenge';
   const victories = pickVictories(meInfo);
   const best = pickBest(meInfo);
@@ -919,14 +1112,37 @@ const Pvp: React.FC = () => {
   const rawResult = duelMode === 'challenge' ? challengeFinishResp : finishResponse;
   const outcome: Outcome = normalizeOutcome(rawResult, meUserId);
 
-  const oppClicksFromResult =
-    extractNumber(rawResult, ['opponent_clicks', 'enemy_clicks', 'their_clicks', 'opponentClicks', 'enemyClicks']) ??
-    extractNumber(rawResult?.result, ['opponent_clicks', 'enemy_clicks', 'their_clicks', 'opponentClicks', 'enemyClicks']);
+  const liveResolvedClicks = !isChallenge ? resolveLiveClicks(rawResult, meUserId) : null;
+  const liveVerdicts = !isChallenge ? getLiveVerdicts(rawResult, meUserId) : { me: null, opponent: null };
+  const challengeVerdict = isChallenge ? getChallengeVerdict(rawResult) : null;
+
+  const myValidatedClicks =
+    isChallenge
+      ? extractNumber(challengeVerdict, ['validated_clicks'])
+      : extractNumber(liveVerdicts.me, ['validated_clicks']);
+
+  const myReportedClicks =
+    isChallenge
+      ? extractNumber(challengeVerdict, ['reported_clicks'])
+      : extractNumber(liveVerdicts.me, ['reported_clicks']);
+
+  const oppValidatedClicks =
+    !isChallenge
+      ? extractNumber(liveVerdicts.opponent, ['validated_clicks'])
+      : null;
 
   const myClicksFromResult =
-    extractNumber(rawResult, ['my_clicks', 'your_clicks', 'clicks', 'myClicks', 'yourClicks']) ??
-    extractNumber(rawResult?.result, ['my_clicks', 'your_clicks', 'clicks', 'myClicks', 'yourClicks']) ??
-    myClicks;
+    isChallenge
+      ? extractNumber(rawResult, ['challenger_clicks', 'my_clicks', 'your_clicks', 'clicks', 'myClicks', 'yourClicks']) ??
+        myValidatedClicks ??
+        myClicks
+      : liveResolvedClicks?.myClicks ?? myValidatedClicks ?? myClicks;
+
+  const oppClicksFromResult =
+    isChallenge
+      ? extractNumber(rawResult, ['opponent_best_result', 'opponent_clicks', 'enemy_clicks', 'their_clicks']) ??
+        opponentBest
+      : liveResolvedClicks?.opponentClicks ?? oppValidatedClicks;
 
   const deltaCoins =
     extractNumber(rawResult, ['delta_coins', 'deltaCoins', 'reward_delta', 'rewardDelta', 'coins_delta']) ??
@@ -945,8 +1161,19 @@ const Pvp: React.FC = () => {
     extractNumber(rawResult, ['pot', 'bank', 'pool', 'potValue']) ??
     extractNumber(rawResult?.result, ['pot', 'bank', 'pool', 'potValue']);
 
+  const mySuspicious = isChallenge
+    ? Boolean(challengeVerdict?.is_suspicious)
+    : Boolean(liveVerdicts.me?.is_suspicious);
+
+  const opponentSuspicious = !isChallenge ? Boolean(liveVerdicts.opponent?.is_suspicious) : false;
+
+  const myVerdictReason = isChallenge ? challengeVerdict?.reason : liveVerdicts.me?.reason;
+  const opponentVerdictReason = !isChallenge ? liveVerdicts.opponent?.reason : null;
+
   const outcomeTitle =
-    outcome === 'win'
+    mySuspicious
+      ? t('pvp_outcome_invalidated', { defaultValue: 'Nəticə ləğv edildi' })
+      : outcome === 'win'
       ? t('pvp_outcome_win', { defaultValue: 'Qələbə 🎉' })
       : outcome === 'lose'
       ? t('pvp_outcome_lose', { defaultValue: 'Məğlubiyyət' })
@@ -955,7 +1182,9 @@ const Pvp: React.FC = () => {
       : t('pvp_outcome_unknown', { defaultValue: '—' });
 
   const outcomeBadge =
-    outcome === 'win'
+    mySuspicious
+      ? 'bg-rose-500/15 border-rose-400/30 text-rose-200'
+      : outcome === 'win'
       ? 'bg-emerald-500/15 border-emerald-400/30 text-emerald-200'
       : outcome === 'lose'
       ? 'bg-rose-500/15 border-rose-400/30 text-rose-200'
@@ -964,10 +1193,14 @@ const Pvp: React.FC = () => {
       : 'bg-white/5 border-white/10 text-white/80';
 
   const rewardLine = (() => {
+    if (mySuspicious) {
+      return t('pvp_reward_invalidated', { defaultValue: 'Nəticə suspicious telemetry səbəbilə nəzərə alınmadı' });
+    }
     if (rewardCoins != null) return `+${intOrZero(rewardCoins)} $GAP`;
     if (deltaCoins != null) return `${deltaCoins >= 0 ? '+' : ''}${intOrZero(deltaCoins)} $GAP`;
-    // if backend returns balance change in another key - show something neutral
-    const maybe = extractNumber(rawResult, ['delta', 'change', 'balance_change']) ?? extractNumber(rawResult?.result, ['delta', 'change', 'balance_change']);
+    const maybe =
+      extractNumber(rawResult, ['delta', 'change', 'balance_change']) ??
+      extractNumber(rawResult?.result, ['delta', 'change', 'balance_change']);
     if (maybe != null) return `${maybe >= 0 ? '+' : ''}${intOrZero(maybe)} $GAP`;
     return t('pvp_reward_unknown', { defaultValue: '—' });
   })();
@@ -977,6 +1210,45 @@ const Pvp: React.FC = () => {
     return (
       <div className="mt-3 rounded-2xl bg-rose-500/10 border border-rose-400/20 p-3 text-xs text-rose-100">
         {error}
+      </div>
+    );
+  };
+
+  const renderAntiCheatBanner = () => {
+    if (screen !== 'result') return null;
+    if (!mySuspicious && !opponentSuspicious) return null;
+
+    return (
+      <div className="mt-4 rounded-2xl bg-amber-500/10 border border-amber-400/25 p-4 text-xs text-amber-100">
+        <div className="font-semibold text-sm">
+          {t('pvp_fairplay_notice', { defaultValue: 'Fair Play yoxlaması' })}
+        </div>
+
+        {mySuspicious ? (
+          <div className="mt-2">
+            {t('pvp_me_flagged', {
+              defaultValue: 'Sənin nəticən suspicious kimi işarələndi və qələbə hesablanmadı.',
+            })}
+            {myVerdictReason ? (
+              <div className="mt-1 opacity-80">
+                {t('pvp_reason', { defaultValue: 'Səbəb' })}: <span className="font-mono">{myVerdictReason}</span>
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+
+        {!mySuspicious && opponentSuspicious ? (
+          <div className="mt-2">
+            {t('pvp_opponent_flagged', {
+              defaultValue: 'Rəqibin nəticəsi suspicious kimi işarələndi və validasiya olundu.',
+            })}
+            {opponentVerdictReason ? (
+              <div className="mt-1 opacity-80">
+                {t('pvp_reason', { defaultValue: 'Səbəb' })}: <span className="font-mono">{opponentVerdictReason}</span>
+              </div>
+            ) : null}
+          </div>
+        ) : null}
       </div>
     );
   };
@@ -1231,15 +1503,35 @@ const Pvp: React.FC = () => {
                     <div className="mt-1 text-sm font-semibold">{formatUserLabel(meInfo, meUserId)}</div>
                     <div className="mt-2 text-[11px] opacity-70">{t('pvp_clicks', { defaultValue: 'Kliklər' })}</div>
                     <div className="text-2xl font-extrabold">{myClicksFromResult}</div>
+
+                    {(myReportedClicks != null || myValidatedClicks != null) && (
+                      <div className="mt-2 text-[11px] opacity-75">
+                        raw: <span className="font-mono">{myReportedClicks ?? '—'}</span>
+                        {' • '}
+                        valid: <span className="font-mono">{myValidatedClicks ?? '—'}</span>
+                      </div>
+                    )}
                   </div>
 
                   <div className="rounded-2xl bg-[#0b1320] border border-[#00f0ff20] p-3">
                     <div className="text-[11px] opacity-70">{t('pvp_opponent', { defaultValue: 'Rəqib' })}</div>
                     <div className="mt-1 text-sm font-semibold truncate">{duelOpponentLabel}</div>
-                    <div className="mt-2 text-[11px] opacity-70">{t('pvp_clicks', { defaultValue: 'Kliklər' })}</div>
+                    <div className="mt-2 text-[11px] opacity-70">
+                      {isChallenge
+                        ? t('pvp_target', { defaultValue: 'Hədəf nəticə' })
+                        : t('pvp_clicks', { defaultValue: 'Kliklər' })}
+                    </div>
                     <div className="text-2xl font-extrabold">{oppClicksFromResult ?? '—'}</div>
+
+                    {!isChallenge && oppValidatedClicks != null && (
+                      <div className="mt-2 text-[11px] opacity-75">
+                        valid: <span className="font-mono">{oppValidatedClicks}</span>
+                      </div>
+                    )}
                   </div>
                 </div>
+
+                {renderAntiCheatBanner()}
 
                 <div className="mt-4 rounded-2xl bg-[#0b1320] border border-white/10 p-3">
                   <div className="text-[11px] opacity-70">{t('pvp_reward', { defaultValue: 'Mükafat / dəyişiklik' })}</div>
@@ -1261,6 +1553,25 @@ const Pvp: React.FC = () => {
                     </div>
                   )}
                 </div>
+
+                {(mySuspicious || opponentSuspicious) && (
+                  <div className="mt-4 rounded-2xl bg-[#0b1320] border border-white/10 p-3 text-[11px] opacity-85">
+                    <div>
+                      {t('pvp_flags', { defaultValue: 'Flags' })}:{' '}
+                      <span className="font-mono">
+                        {formatFlags(
+                          isChallenge ? challengeVerdict?.flags : liveVerdicts.me?.flags
+                        )}
+                      </span>
+                    </div>
+                    {!isChallenge && opponentSuspicious ? (
+                      <div className="mt-1">
+                        {t('pvp_opponent_flags', { defaultValue: 'Opponent flags' })}:{' '}
+                        <span className="font-mono">{formatFlags(liveVerdicts.opponent?.flags)}</span>
+                      </div>
+                    ) : null}
+                  </div>
+                )}
               </>
             )}
 
@@ -1278,7 +1589,6 @@ const Pvp: React.FC = () => {
       );
     }
 
-    // lobby
     return (
       <>
         {renderLobbyHeader()}
