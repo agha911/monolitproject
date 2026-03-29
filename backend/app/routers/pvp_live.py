@@ -41,7 +41,6 @@ from app.routers.pvp_common import (
     _user_public,
 )
 from app.helpers.pvp_helpers import review_telemetry
-from app.models.pvp_anticheat_models import PvpLiveTelemetry
 from app.crud.crud_pvp import (
     upsert_live_telemetry,
     get_live_telemetry_map,
