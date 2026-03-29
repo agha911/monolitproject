@@ -94,11 +94,25 @@ class ChallengeRunRequest(BaseModel):
     my_clicks: int = Field(ge=0)
 
 
+class TelemetryPayload(BaseModel):
+    client_started_at_ms: Optional[int] = None
+    client_finished_at_ms: Optional[int] = None
+    tap_count: Optional[int] = Field(default=None, ge=0)
+    max_concurrent_touches: Optional[int] = Field(default=None, ge=0)
+    avg_taps_per_sec: Optional[float] = Field(default=None, ge=0)
+    peak_taps_per_sec: Optional[float] = Field(default=None, ge=0)
+    send_batches_count: Optional[int] = Field(default=1, ge=0)
+    had_pauses: Optional[bool] = None
+    pause_count: Optional[int] = Field(default=None, ge=0)
+    longest_pause_ms: Optional[int] = Field(default=None, ge=0)
+
+
 
 class LiveSubmitRequest(BaseModel):
     telegram_id: int
     match_token: str
     my_clicks: int = Field(ge=0)
+    telemetry: Optional[TelemetryPayload] = None
 
 
 # -----------------------------------------------------------------------------
@@ -206,6 +220,16 @@ async def _ensure_registered_user(session: AsyncSession, telegram_id: int) -> Us
     await session.flush()
     return user
 
+def _user_public(user: User | None) -> Optional[Dict[str, Any]]:
+    if not user:
+        return None
+    return {
+        "user_id": int(user.id),
+        "telegram_id": int(user.telegram_id) if getattr(user, "telegram_id", None) is not None else None,
+        "username": getattr(user, "username", None),
+        "first_name": getattr(user, "first_name", None),
+        "last_name": getattr(user, "last_name", None),
+    }
 
 # -----------------------------------------------------------------------------
 # Routes: общие
@@ -274,6 +298,9 @@ async def live_history(telegram_id: int, session: AsyncSession = Depends(get_asy
                 "player2_clicks": m.player2_clicks,
                 "stake": m.stake,
                 "created_at": m.created_at.isoformat() if m.created_at else None,
+                "player1": _user_public(getattr(m, "player1", None)),
+                "player2": _user_public(getattr(m, "player2", None)),
+                "winner": _user_public(getattr(m, "winner", None)),
             }
         )
     return {"ok": True, "items": items}
@@ -294,6 +321,8 @@ async def challenge_history(telegram_id: int, session: AsyncSession = Depends(ge
                 "opponent_best_result": m.opponent_best_result,
                 "is_win": m.is_win,
                 "created_at": m.created_at.isoformat() if m.created_at else None,
+                "challenger": _user_public(getattr(m, "challenger", None)),
+                "opponent": _user_public(getattr(m, "opponent", None)),
             }
         )
     return {"ok": True, "items": items}
