@@ -282,14 +282,16 @@ async def live_status(telegram_id: int, match_token: str, session: AsyncSession 
         (await session.execute(select(PvpSession).where(PvpSession.match_token == match_token).limit(1)))
         .scalar_one_or_none()
     )
+    
+    if not sess:
+        raise HTTPException(status_code=404, detail={"code": "SESSION_NOT_FOUND", "message": "Match session not found"})
+
     p1_user = await session.get(User, int(sess.player1_id))
     p2_user = await session.get(User, int(sess.player2_id))
     tel_map = await get_live_telemetry_map(session, session_id=int(sess.id))
     p1_tel = tel_map.get(int(sess.player1_id))
     p2_tel = tel_map.get(int(sess.player2_id))
     opponent_user = p2_user if int(me.id) == int(sess.player1_id) else p1_user
-    if not sess:
-        raise HTTPException(status_code=404, detail={"code": "SESSION_NOT_FOUND", "message": "Match session not found"})
 
     players = {int(sess.player1_id), int(sess.player2_id)}
     if int(me.id) not in players:
@@ -397,6 +399,9 @@ async def invite_status(invite_code: str, session: AsyncSession = Depends(get_as
     match_token = None
     player1_id = None
     player2_id = None
+    player1 = None
+    player2 = None
+    opponent = None
     if inv.status == "accepted":
         sess = (
             (await session.execute(
@@ -411,6 +416,10 @@ async def invite_status(invite_code: str, session: AsyncSession = Depends(get_as
             match_token = sess.match_token
             player1_id = int(sess.player1_id)
             player2_id = int(sess.player2_id)
+            p1_user = await session.get(User, int(sess.player1_id))
+            p2_user = await session.get(User, int(sess.player2_id))
+            player1 = _user_public(p1_user)
+            player2 = _user_public(p2_user)
             
 
     return {
@@ -427,6 +436,9 @@ async def invite_status(invite_code: str, session: AsyncSession = Depends(get_as
         "expires_at": inv.expires_at.isoformat() if inv.expires_at else None,
         "accepted_at": inv.accepted_at.isoformat() if inv.accepted_at else None,
         "cancelled_at": inv.cancelled_at.isoformat() if inv.cancelled_at else None,
+        "player1": player1,
+        "player2": player2,
+        "opponent": player2,
     }
 
 
@@ -622,6 +634,9 @@ async def matchmaking_poll(telegram_id: int, session: AsyncSession = Depends(get
 
             if sess:
                 opponent_user_id = int(sess.player2_id) if int(sess.player1_id) == int(me.id) else int(sess.player1_id)
+                p1_user = await session.get(User, int(sess.player1_id))
+                p2_user = await session.get(User, int(sess.player2_id))
+                opponent_user = p2_user if int(sess.player1_id) == int(me.id) else p1_user
                 return {
                     "ok": True,
                     "status": "matched",
@@ -633,6 +648,9 @@ async def matchmaking_poll(telegram_id: int, session: AsyncSession = Depends(get
                     "player1_id": int(sess.player1_id),
                     "player2_id": int(sess.player2_id),
                     "opponent_user_id": opponent_user_id,
+                    "player1": _user_public(p1_user),
+                    "player2": _user_public(p2_user),
+                    "opponent": _user_public(opponent_user),
                 }
 
         opp_q_id = (
@@ -694,7 +712,8 @@ async def matchmaking_poll(telegram_id: int, session: AsyncSession = Depends(get
             expires_at=expires_at,
         )
         session.add(sess)
-
+        p1_user = me
+        p2_user = opponent
         return {
             "ok": True,
             "status": "matched",
@@ -706,4 +725,7 @@ async def matchmaking_poll(telegram_id: int, session: AsyncSession = Depends(get
             "player1_id": int(sess.player1_id),
             "player2_id": int(sess.player2_id),
             "opponent_user_id": int(opponent.id),
+            "player1": _user_public(p1_user),
+            "player2": _user_public(p2_user),
+            "opponent": _user_public(opponent),
         }
