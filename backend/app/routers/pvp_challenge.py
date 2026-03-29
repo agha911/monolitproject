@@ -26,7 +26,25 @@ from app.routers.pvp_common import (
     _cleanup_expired,
     _ensure_registered_user,
 )
-
+from app.helpers.pvp_helpers import calc_best_result_range, review_telemetry
+from app.models.pvp_anticheat_models import PvpChallengeTelemetry
+from app.crud.crud_pvp import (
+    count_today_challenge_attempts,
+    create_challenge_attempt,
+    get_challenge_attempt_for_update,
+    finish_challenge_attempt,
+    expire_challenge_attempt,
+    create_challenge_telemetry,
+    create_cheat_events_from_flags,
+)
+from app.routers.pvp_common import (
+    CHALLENGE_DAILY_LIMIT,
+    PVP_MATCH_DURATION_SEC,
+    TelemetryPayload,
+    _cleanup_expired,
+    _ensure_registered_user,
+    _user_public,
+)
 router = APIRouter(prefix="/api/pvp", tags=["pvp"])
 
 
@@ -47,6 +65,13 @@ class ChallengeFinishRequest(BaseModel):
     telegram_id: int
     attempt_id: int
     my_clicks: int = Field(ge=0)
+
+
+class ChallengeFinishRequest(BaseModel):
+    telegram_id: int
+    attempt_id: int
+    my_clicks: int = Field(ge=0)
+    telemetry: TelemetryPayload | None = None
 
 
 def _order_zeros_last():
@@ -187,12 +212,48 @@ async def challenge_finish(body: ChallengeFinishRequest, session: AsyncSession =
             await expire_challenge_attempt(session, attempt=attempt)
             raise HTTPException(status_code=409, detail={"code": "ATTEMPT_EXPIRED", "message": "Attempt expired"})
 
+
+        telemetry_dict = body.telemetry.model_dump(exclude_none=True) if body.telemetry else {}
+        telemetry_dict["reported_clicks"] = int(body.my_clicks)
+
+        verdict = review_telemetry(
+            reported_clicks=int(body.my_clicks),
+            telemetry=body.telemetry,
+            server_started_at=(attempt.started_at or now),
+            server_finished_at=now,
+        )
+
+        tel = await create_challenge_telemetry(
+            session,
+            attempt_id=int(attempt.id),
+            challenger_id=int(attempt.challenger_id),
+            opponent_id=int(attempt.opponent_id),
+            payload=telemetry_dict,
+            verdict=verdict,
+        )
+
+        if verdict.flags:
+            await create_cheat_events_from_flags(
+                session,
+                mode="challenge",
+                user_id=int(attempt.challenger_id),
+                flags=list(verdict.flags),
+                reason=verdict.reason,
+                attempt_id=int(attempt.id),
+                details_json={
+                    "reported_clicks": int(body.my_clicks),
+                    "validated_clicks": int(verdict.validated_clicks),
+                    "score": int(verdict.suspicion_score),
+                },
+            )
+
         match = await finish_challenge_attempt(
             session,
             attempt=attempt,
-            challenger_clicks=int(body.my_clicks),
+            challenger_clicks=int(verdict.validated_clicks),
         )
 
+        opponent = await session.get(User, int(match.opponent_id))
         return {
             "ok": True,
             "attempt_id": int(attempt.id),
@@ -203,6 +264,16 @@ async def challenge_finish(body: ChallengeFinishRequest, session: AsyncSession =
             "opponent_best_result": int(match.opponent_best_result),
             "is_win": bool(match.is_win),
             "victories_delta": 1 if bool(match.is_win) else 0,
+            "opponent": _user_public(opponent),
+            "anti_cheat": {
+                "reported_clicks": int(tel.reported_clicks),
+                "validated_clicks": int(tel.validated_clicks),
+                "is_suspicious": bool(tel.is_suspicious),
+                "confidence": float(tel.confidence or 0),
+                "score": int(tel.suspicion_score or 0),
+                "reason": tel.reason,
+                "flags": tel.flags_json or [],
+            },
         }
 
 
