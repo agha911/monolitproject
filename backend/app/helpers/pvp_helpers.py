@@ -191,8 +191,8 @@ def review_telemetry(
     server_started_at: datetime,
     server_finished_at: datetime,
     max_touches: int = 2,
-    max_avg_tps: float = 16.0,
-    max_peak_tps: float = 22.0,
+    max_avg_tps: float = 20.0,
+    max_peak_tps: float = 32.0,
     duration_tolerance_sec: float = 4.0,
     click_grace: int = 20,
 ) -> TelemetryVerdict:
@@ -235,11 +235,11 @@ def review_telemetry(
         flags.append("too_many_touches")
 
     if avg_taps_per_sec is not None and float(avg_taps_per_sec) > max_avg_tps:
-        score += 80
+        score += 40
         flags.append("avg_tps_too_high")
 
     if peak_taps_per_sec is not None and float(peak_taps_per_sec) > max_peak_tps:
-        score += 80
+        score += 40
         flags.append("peak_tps_too_high")
 
     if (
