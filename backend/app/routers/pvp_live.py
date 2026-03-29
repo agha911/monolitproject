@@ -478,8 +478,7 @@ async def invite_accept(body: InviteAcceptRequest, session: AsyncSession = Depen
         )
         session.add(sess)
 
-        "player1": _user_public(creator),
-        "player2": _user_public(opponent),
+        
 
         return {
             "ok": True,
@@ -490,6 +489,8 @@ async def invite_accept(body: InviteAcceptRequest, session: AsyncSession = Depen
             "mode": "invite",
             "player1_id": int(sess.player1_id),
             "player2_id": int(sess.player2_id),
+            "player1": _user_public(creator),
+            "player2": _user_public(opponent),
         }
 
 
