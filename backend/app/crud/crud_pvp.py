@@ -13,6 +13,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.user import User
 from app.models.pvp_models import PvpMatch, ChallengeMatch, PvpChallengeAttempt, PvpWeeklySeason, PvpWeeklyLeaderboardRow
+from app.models.pvp_anticheat_models import (
+    PvpLiveTelemetry,
+    PvpChallengeTelemetry,
+    PvpCheatEvent,
+)
 
 
 
@@ -174,12 +179,9 @@ async def list_recent_challenge_matches(
     challenger_id: int,
     limit: int = 20,
 ) -> List[ChallengeMatch]:
-    """
-    Backward-compatible helper expected by routers: returns matches where the user is challenger.
-    """
     q = (
         select(ChallengeMatch)
-        .where(ChallengeMatch.challenger_id == challenger_id)
+        .where(or_(ChallengeMatch.challenger_id == challenger_id, ChallengeMatch.opponent_id == challenger_id))
         .order_by(desc(ChallengeMatch.created_at))
         .limit(limit)
     )
@@ -531,3 +533,135 @@ async def get_weekly_leaderboard_snapshot(
         .limit(limit)
     )
     return list((await session.execute(q)).scalars().all())
+
+
+
+
+
+
+async def upsert_live_telemetry(
+    session: AsyncSession,
+    *,
+    session_id: int,
+    match_token: str,
+    user_id: int,
+    player_slot: str,
+    payload: dict,
+    verdict,
+) -> PvpLiveTelemetry:
+    row = (
+        await session.execute(
+            select(PvpLiveTelemetry)
+            .where(PvpLiveTelemetry.session_id == session_id)
+            .where(PvpLiveTelemetry.user_id == user_id)
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+
+    if not row:
+        row = PvpLiveTelemetry(
+            session_id=int(session_id),
+            match_token=match_token,
+            user_id=int(user_id),
+            player_slot=player_slot,
+        )
+        session.add(row)
+
+    row.reported_clicks = int(payload.get("reported_clicks", 0))
+    row.validated_clicks = int(verdict.validated_clicks)
+    row.client_started_at_ms = payload.get("client_started_at_ms")
+    row.client_finished_at_ms = payload.get("client_finished_at_ms")
+    row.tap_count = payload.get("tap_count")
+    row.max_concurrent_touches = payload.get("max_concurrent_touches")
+    row.avg_taps_per_sec = payload.get("avg_taps_per_sec")
+    row.peak_taps_per_sec = payload.get("peak_taps_per_sec")
+    row.send_batches_count = payload.get("send_batches_count")
+    row.had_pauses = payload.get("had_pauses")
+    row.pause_count = payload.get("pause_count")
+    row.longest_pause_ms = payload.get("longest_pause_ms")
+    row.suspicion_score = int(verdict.suspicion_score)
+    row.confidence = float(verdict.confidence)
+    row.is_suspicious = bool(verdict.is_suspicious)
+    row.reason = verdict.reason
+    row.flags_json = list(verdict.flags)
+    row.raw_payload_json = payload
+
+    await session.flush()
+    return row
+
+
+async def get_live_telemetry_map(
+    session: AsyncSession,
+    *,
+    session_id: int,
+) -> dict[int, PvpLiveTelemetry]:
+    rows = (
+        await session.execute(
+            select(PvpLiveTelemetry).where(PvpLiveTelemetry.session_id == session_id)
+        )
+    ).scalars().all()
+    return {int(r.user_id): r for r in rows}
+
+
+async def create_challenge_telemetry(
+    session: AsyncSession,
+    *,
+    attempt_id: int,
+    challenger_id: int,
+    opponent_id: int,
+    payload: dict,
+    verdict,
+) -> PvpChallengeTelemetry:
+    row = PvpChallengeTelemetry(
+        attempt_id=int(attempt_id),
+        challenger_id=int(challenger_id),
+        opponent_id=int(opponent_id),
+        reported_clicks=int(payload.get("reported_clicks", 0)),
+        validated_clicks=int(verdict.validated_clicks),
+        client_started_at_ms=payload.get("client_started_at_ms"),
+        client_finished_at_ms=payload.get("client_finished_at_ms"),
+        tap_count=payload.get("tap_count"),
+        max_concurrent_touches=payload.get("max_concurrent_touches"),
+        avg_taps_per_sec=payload.get("avg_taps_per_sec"),
+        peak_taps_per_sec=payload.get("peak_taps_per_sec"),
+        send_batches_count=payload.get("send_batches_count"),
+        had_pauses=payload.get("had_pauses"),
+        pause_count=payload.get("pause_count"),
+        longest_pause_ms=payload.get("longest_pause_ms"),
+        suspicion_score=int(verdict.suspicion_score),
+        confidence=float(verdict.confidence),
+        is_suspicious=bool(verdict.is_suspicious),
+        reason=verdict.reason,
+        flags_json=list(verdict.flags),
+        raw_payload_json=payload,
+    )
+    session.add(row)
+    await session.flush()
+    return row
+
+
+async def create_cheat_events_from_flags(
+    session: AsyncSession,
+    *,
+    mode: str,
+    user_id: int,
+    flags: list[str],
+    reason: str | None = None,
+    session_id: int | None = None,
+    attempt_id: int | None = None,
+    details_json: dict | None = None,
+) -> None:
+    for flag in flags:
+        session.add(
+            PvpCheatEvent(
+                mode=mode,
+                event_code=flag,
+                severity="high" if "limit" in flag or "touches" in flag else "medium",
+                user_id=int(user_id),
+                session_id=session_id,
+                attempt_id=attempt_id,
+                reason=reason,
+                details_json=details_json,
+            )
+        )
+    await session.flush()
