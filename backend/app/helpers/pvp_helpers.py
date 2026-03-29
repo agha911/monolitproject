@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import Optional, Tuple
+from typing import Optional, Tuple, List, Any
 
 
 # ---------------------------------------------------------------------
@@ -168,6 +168,115 @@ def resolve_challenge_outcome(
     is_win = challenger_clicks > opponent_best_result
     return ChallengeOutcome(is_win=is_win, victories_delta=(1 if is_win else 0))
 
+
+
+
+
+
+
+@dataclass(frozen=True)
+class TelemetryVerdict:
+    validated_clicks: int
+    suspicion_score: int
+    confidence: float
+    is_suspicious: bool
+    reason: str | None
+    flags: list[str]
+
+
+def review_telemetry(
+    *,
+    reported_clicks: int,
+    telemetry: Any | None,
+    server_started_at: datetime,
+    server_finished_at: datetime,
+    max_touches: int = 2,
+    max_avg_tps: float = 16.0,
+    max_peak_tps: float = 22.0,
+    duration_tolerance_sec: float = 4.0,
+    click_grace: int = 20,
+) -> TelemetryVerdict:
+    reported_clicks = max(0, int(reported_clicks or 0))
+    score = 0
+    flags: list[str] = []
+
+    if telemetry is None:
+        t = {}
+    elif hasattr(telemetry, "model_dump"):
+        t = telemetry.model_dump(exclude_none=True)
+    elif isinstance(telemetry, dict):
+        t = telemetry
+    else:
+        t = {}
+
+    server_elapsed = max(0.0, (server_finished_at - server_started_at).total_seconds())
+    server_hard_limit = int(server_elapsed * max_touches * max_avg_tps) + click_grace
+
+    tap_count = t.get("tap_count")
+    max_concurrent_touches = t.get("max_concurrent_touches")
+    avg_taps_per_sec = t.get("avg_taps_per_sec")
+    peak_taps_per_sec = t.get("peak_taps_per_sec")
+    had_pauses = t.get("had_pauses")
+    pause_count = t.get("pause_count")
+    longest_pause_ms = t.get("longest_pause_ms")
+    client_started_at_ms = t.get("client_started_at_ms")
+    client_finished_at_ms = t.get("client_finished_at_ms")
+
+    if reported_clicks > server_hard_limit:
+        score += 100
+        flags.append("server_hard_limit_exceeded")
+
+    if tap_count is not None and int(tap_count) != reported_clicks:
+        score += 70
+        flags.append("tap_count_mismatch")
+
+    if max_concurrent_touches is not None and int(max_concurrent_touches) > max_touches:
+        score += 100
+        flags.append("too_many_touches")
+
+    if avg_taps_per_sec is not None and float(avg_taps_per_sec) > max_avg_tps:
+        score += 80
+        flags.append("avg_tps_too_high")
+
+    if peak_taps_per_sec is not None and float(peak_taps_per_sec) > max_peak_tps:
+        score += 80
+        flags.append("peak_tps_too_high")
+
+    if (
+        client_started_at_ms is not None
+        and client_finished_at_ms is not None
+        and int(client_finished_at_ms) >= int(client_started_at_ms)
+    ):
+        client_elapsed = (int(client_finished_at_ms) - int(client_started_at_ms)) / 1000.0
+        if abs(client_elapsed - server_elapsed) > duration_tolerance_sec:
+            score += 35
+            flags.append("client_server_duration_mismatch")
+
+    if bool(had_pauses) is False and reported_clicks >= 180 and float(avg_taps_per_sec or 0) >= 9.0:
+        score += 20
+        flags.append("no_pauses_high_speed")
+
+    if pause_count is not None and int(pause_count) == 0 and reported_clicks >= 220:
+        score += 20
+        flags.append("zero_pause_pattern")
+
+    if longest_pause_ms is not None and int(longest_pause_ms) < 0:
+        score += 25
+        flags.append("invalid_pause_value")
+
+    is_suspicious = score >= 100
+    validated_clicks = 0 if is_suspicious else min(reported_clicks, server_hard_limit)
+    confidence = min(1.0, round(score / 100.0, 2))
+    reason = flags[0] if flags else None
+
+    return TelemetryVerdict(
+        validated_clicks=validated_clicks,
+        suspicion_score=score,
+        confidence=confidence,
+        is_suspicious=is_suspicious,
+        reason=reason,
+        flags=flags,
+    )
 
     if high < low:
         high = low
