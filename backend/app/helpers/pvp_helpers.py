@@ -191,8 +191,8 @@ def review_telemetry(
     server_started_at: datetime,
     server_finished_at: datetime,
     max_touches: int = 2,
-    max_avg_tps: float = 20.0,
-    max_peak_tps: float = 32.0,
+    max_avg_tps: float = 40.0,
+    max_peak_tps: float = 55.0,
     duration_tolerance_sec: float = 4.0,
     click_grace: int = 20,
 ) -> TelemetryVerdict:
