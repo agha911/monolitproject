@@ -803,6 +803,7 @@ const Pvp: React.FC = () => {
     setError('');
     setFinishResponse(null);
     setChallengeFinishResp(null);
+    clearAllTouches();
 
     challengeFinishInFlightRef.current = false;
     challengeFinishedRef.current = false;
@@ -927,16 +928,66 @@ const Pvp: React.FC = () => {
     computeGlow();
   };
 
-  const onTouchStart = (e: React.TouchEvent) => {
-    const touches = Math.min(e.changedTouches?.length || 1, 2);
-    maxConcurrentTouchesRef.current = Math.max(maxConcurrentTouchesRef.current, touches);
-    addClicks(touches);
-  };
+  const activeTouchIdsRef = useRef<Set<number>>(new Set());
+const lastTouchAtRef = useRef<number>(0);
 
-  const onMouseDown = () => {
-    maxConcurrentTouchesRef.current = Math.max(maxConcurrentTouchesRef.current, 1);
-    addClicks(1);
-  };
+const clearAllTouches = () => {
+  activeTouchIdsRef.current.clear();
+};
+
+const onTouchStart = (e: React.TouchEvent<HTMLButtonElement>) => {
+  e.preventDefault();
+
+  if (screen !== 'duel') return;
+  if (phase !== 'active') return;
+  if (duelSecondsLeft <= 0) return;
+
+  lastTouchAtRef.current = Date.now();
+
+  let accepted = 0;
+
+  for (let i = 0; i < e.changedTouches.length; i += 1) {
+    const touch = e.changedTouches[i];
+    const id = touch.identifier;
+
+    if (activeTouchIdsRef.current.has(id)) continue;
+    if (activeTouchIdsRef.current.size >= 2) continue;
+
+    activeTouchIdsRef.current.add(id);
+    accepted += 1;
+  }
+
+  maxConcurrentTouchesRef.current = Math.max(
+    maxConcurrentTouchesRef.current,
+    activeTouchIdsRef.current.size
+  );
+
+  if (accepted > 0) addClicks(accepted);
+};
+
+const onTouchEnd = (e: React.TouchEvent<HTMLButtonElement>) => {
+  e.preventDefault();
+  for (let i = 0; i < e.changedTouches.length; i += 1) {
+    activeTouchIdsRef.current.delete(e.changedTouches[i].identifier);
+  }
+};
+
+const onTouchCancel = (e: React.TouchEvent<HTMLButtonElement>) => {
+  e.preventDefault();
+  for (let i = 0; i < e.changedTouches.length; i += 1) {
+    activeTouchIdsRef.current.delete(e.changedTouches[i].identifier);
+  }
+};
+
+const onMouseDown = (e: React.MouseEvent<HTMLButtonElement>) => {
+  e.preventDefault();
+
+  if (Date.now() - lastTouchAtRef.current < 700) return;
+  if (activeTouchIdsRef.current.size > 0) return;
+
+  maxConcurrentTouchesRef.current = Math.max(maxConcurrentTouchesRef.current, 1);
+  addClicks(1);
+};
 
   const startInvitePolling = (code: string) => {
     stopInvitePoll();
@@ -1058,6 +1109,7 @@ const Pvp: React.FC = () => {
 
     setScreen('lobby');
     setMyClicks(0);
+    clearAllTouches();
     setFinishResponse(null);
     setLiveSubmitState('idle');
 
@@ -1423,11 +1475,13 @@ const Pvp: React.FC = () => {
               <button
                 className="relative rounded-full border border-[#00f0ff50] bg-[#0b1320] active:scale-[0.99] transition-transform"
                 onTouchStart={onTouchStart}
+                onTouchEnd={onTouchEnd}
+                onTouchCancel={onTouchCancel}
                 onMouseDown={onMouseDown}
                 style={{
                   width: 260,
                   height: 260,
-                  touchAction: 'manipulation',
+                  touchAction: 'none',
                   boxShadow: '0 0 14px rgba(0,240,255,0.12)',
                 }}
               >
