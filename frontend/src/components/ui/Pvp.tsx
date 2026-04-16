@@ -803,7 +803,6 @@ const Pvp: React.FC = () => {
     setError('');
     setFinishResponse(null);
     setChallengeFinishResp(null);
-    clearAllTouches();
 
     challengeFinishInFlightRef.current = false;
     challengeFinishedRef.current = false;
@@ -928,12 +927,7 @@ const Pvp: React.FC = () => {
     computeGlow();
   };
 
-  const activeTouchIdsRef = useRef<Set<number>>(new Set());
 const lastTouchAtRef = useRef<number>(0);
-
-const clearAllTouches = () => {
-  activeTouchIdsRef.current.clear();
-};
 
 const onTouchStart = (e: React.TouchEvent<HTMLButtonElement>) => {
   e.preventDefault();
@@ -944,46 +938,23 @@ const onTouchStart = (e: React.TouchEvent<HTMLButtonElement>) => {
 
   lastTouchAtRef.current = Date.now();
 
-  let accepted = 0;
+  const changed = e.changedTouches?.length || 1;
+  const activeNow = e.touches?.length || changed;
 
-  for (let i = 0; i < e.changedTouches.length; i += 1) {
-    const touch = e.changedTouches[i];
-    const id = touch.identifier;
-
-    if (activeTouchIdsRef.current.has(id)) continue;
-    if (activeTouchIdsRef.current.size >= 2) continue;
-
-    activeTouchIdsRef.current.add(id);
-    accepted += 1;
-  }
+  const accepted = Math.min(changed, 2);
 
   maxConcurrentTouchesRef.current = Math.max(
     maxConcurrentTouchesRef.current,
-    activeTouchIdsRef.current.size
+    Math.min(activeNow, 2)
   );
 
   if (accepted > 0) addClicks(accepted);
-};
-
-const onTouchEnd = (e: React.TouchEvent<HTMLButtonElement>) => {
-  e.preventDefault();
-  for (let i = 0; i < e.changedTouches.length; i += 1) {
-    activeTouchIdsRef.current.delete(e.changedTouches[i].identifier);
-  }
-};
-
-const onTouchCancel = (e: React.TouchEvent<HTMLButtonElement>) => {
-  e.preventDefault();
-  for (let i = 0; i < e.changedTouches.length; i += 1) {
-    activeTouchIdsRef.current.delete(e.changedTouches[i].identifier);
-  }
 };
 
 const onMouseDown = (e: React.MouseEvent<HTMLButtonElement>) => {
   e.preventDefault();
 
   if (Date.now() - lastTouchAtRef.current < 700) return;
-  if (activeTouchIdsRef.current.size > 0) return;
 
   maxConcurrentTouchesRef.current = Math.max(maxConcurrentTouchesRef.current, 1);
   addClicks(1);
@@ -1109,7 +1080,6 @@ const onMouseDown = (e: React.MouseEvent<HTMLButtonElement>) => {
 
     setScreen('lobby');
     setMyClicks(0);
-    clearAllTouches();
     setFinishResponse(null);
     setLiveSubmitState('idle');
 
@@ -1475,13 +1445,14 @@ const onMouseDown = (e: React.MouseEvent<HTMLButtonElement>) => {
               <button
                 className="relative rounded-full border border-[#00f0ff50] bg-[#0b1320] active:scale-[0.99] transition-transform"
                 onTouchStart={onTouchStart}
-                onTouchEnd={onTouchEnd}
-                onTouchCancel={onTouchCancel}
                 onMouseDown={onMouseDown}
                 style={{
                   width: 260,
                   height: 260,
-                  touchAction: 'none',
+                  touchAction: 'manipulation',
+                  userSelect: 'none',
+                  WebkitUserSelect: 'none',
+                  WebkitTouchCallout: 'none',
                   boxShadow: '0 0 14px rgba(0,240,255,0.12)',
                 }}
               >
