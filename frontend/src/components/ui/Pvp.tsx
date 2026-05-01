@@ -363,7 +363,7 @@ const Pvp: React.FC = () => {
   }, [myClicks]);
 
   useEffect(() => {
-  if (screen !== 'duel') return;
+  if (screen !== 'duel' || phase !== 'active') return;
 
   const preventZoom = (e: TouchEvent) => {
     if (e.touches.length > 1) {
@@ -421,7 +421,7 @@ const Pvp: React.FC = () => {
     document.body.style.touchAction = '';
     document.body.style.overscrollBehavior = '';
   };
-}, [screen]);
+}, [screen, phase]);
 
   const stopInvitePoll = () => {
     if (invitePollRef.current) {
