@@ -175,6 +175,23 @@ async def handle_start(message: types.Message):
                                 user_telegram_id, str(int(creator_telegram_id)), invite_code
                             )
 
+                            webapp_url = f"https://t.me/monolit_42_bot?startapp=pvp_{invite_code}"
+
+                            markup = types.InlineKeyboardMarkup()
+                            markup.add(
+                                types.InlineKeyboardButton(
+                                    text="⚔️ Duelə qoşul",
+                                    web_app=types.WebAppInfo(url=webapp_url),
+                                )
+                            )
+                            
+                            await bot.send_message(
+                                message.chat.id,
+                                "⚔️ Duel dəvəti qəbul edildi.\n\nDuelə qoşulmaq üçün aşağıdakı düyməyə toxun:",
+                                reply_markup=markup,
+                            )
+                            return
+
             except Exception:
                 api_log.exception(
                     "PVP start_param failed | user=%s arg=%s",
@@ -647,7 +664,7 @@ async def _weekly_season_daemon():
 @app.on_event("startup")
 async def start_background_tasks():
     asyncio.create_task(notify_loop())
-    asyncio.create_task(reset_loop())
+    #asyncio.create_task(reset_loop())
     register_winners_handlers(bot)
     register_delivery_handlers(bot)
     asyncio.create_task(run_bot_polling())
