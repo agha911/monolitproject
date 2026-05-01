@@ -137,6 +137,7 @@ async def handle_start(message: types.Message):
             "REF-CACHE set | user=%s invited_by=%s (legacy_start_param)",
             user_telegram_id, inviter_telegram_id
         )
+        return
 
     # --- 2) Новая логика: /start pvp_<invite_code> ---
     elif arg and arg.startswith("pvp_"):
@@ -156,47 +157,71 @@ async def handle_start(message: types.Message):
                             "PVP start_param | invite not found | user=%s code=%s",
                             user_telegram_id, invite_code
                         )
-                    else:
-                        # 2.2) найти telegram_id создателя инвайта
-                        creator_res = await session.execute(
-                            select(User.telegram_id).where(User.id == invite.creator_user_id).limit(1)
+                        await bot.send_message(
+                            message.chat.id,
+                            "Bu duel dəvəti artıq aktiv deyil və ya tapılmadı."
                         )
-                        creator_telegram_id = creator_res.scalar_one_or_none()
+                        return
 
-                        if not creator_telegram_id:
-                            api_log.info(
-                                "PVP start_param | creator not found | user=%s code=%s creator_user_id=%s",
-                                user_telegram_id, invite_code, invite.creator_user_id
-                            )
-                        else:
-                            referral_cache[user_telegram_id] = str(int(creator_telegram_id))
-                            api_log.info(
-                                "REF-CACHE set | user=%s invited_by=%s (pvp_start_param=%s)",
-                                user_telegram_id, str(int(creator_telegram_id)), invite_code
-                            )
+                    # 2.2) найти telegram_id создателя инвайта
+                    creator_res = await session.execute(
+                        select(User.telegram_id).where(User.id == invite.creator_user_id).limit(1)
+                    )
+                    creator_telegram_id = creator_res.scalar_one_or_none()
 
-                            webapp_url = f"https://t.me/monolit_42_bot?startapp=pvp_{invite_code}"
+                    if not creator_telegram_id:
+                        api_log.info(
+                            "PVP start_param | creator not found | user=%s code=%s creator_user_id=%s",
+                            user_telegram_id, invite_code, invite.creator_user_id
+                        )
+                        await bot.send_message(
+                            message.chat.id,
+                            "Bu duel dəvətində xəta yarandı. Zəhmət olmasa yeni dəvət linki istəyin."
+                        )
+                        return
 
-                            markup = types.InlineKeyboardMarkup()
-                            markup.add(
-                                types.InlineKeyboardButton(
-                                    text="⚔️ Duelə qoşul",
-                                    web_app=types.WebAppInfo(url=webapp_url),
-                                )
-                            )
-                            
-                            await bot.send_message(
-                                message.chat.id,
-                                "⚔️ Duel dəvəti qəbul edildi.\n\nDuelə qoşulmaq üçün aşağıdakı düyməyə toxun:",
-                                reply_markup=markup,
-                            )
-                            return
+                    # 2.3) записываем реферал
+                    referral_cache[user_telegram_id] = str(int(creator_telegram_id))
+                    api_log.info(
+                        "REF-CACHE set | user=%s invited_by=%s (pvp_start_param=%s)",
+                        user_telegram_id, str(int(creator_telegram_id)), invite_code
+                    )
+
+                    # 2.4) отправляем кнопку открытия дуэли
+                    webapp_url = f"https://t.me/monolit_42_bot?startapp=pvp_{invite_code}"
+
+                    markup = types.InlineKeyboardMarkup()
+                    markup.add(
+                        types.InlineKeyboardButton(
+                            text="⚔️ Duelə qoşul",
+                            web_app=types.WebAppInfo(url=webapp_url),
+                        )
+                    )
+
+                    await bot.send_message(
+                        message.chat.id,
+                        "⚔️ Duel dəvəti qəbul edildi.\n\nDuelə qoşulmaq üçün aşağıdakı düyməyə toxun:",
+                        reply_markup=markup,
+                    )
+                    return
 
             except Exception:
                 api_log.exception(
                     "PVP start_param failed | user=%s arg=%s",
                     user_telegram_id, arg
                 )
+
+                await bot.send_message(
+                    message.chat.id,
+                    "Xəta baş verdi. Zəhmət olmasa yenidən cəhd edin."
+                )
+                return
+
+    # --- 3) fallback обычный старт ---
+    await bot.send_message(
+        message.chat.id,
+        "Xoş gəlmisiniz 👋\nOyuna başlamaq üçün tətbiqi açın."
+    )
 
     # (опционально) лог user info — оставляю как было, если тебе надо
     info = get_user_info_from_bot_api(int(user_telegram_id))
@@ -664,7 +689,7 @@ async def _weekly_season_daemon():
 @app.on_event("startup")
 async def start_background_tasks():
     asyncio.create_task(notify_loop())
-    #asyncio.create_task(reset_loop())
+    asyncio.create_task(reset_loop())
     register_winners_handlers(bot)
     register_delivery_handlers(bot)
     asyncio.create_task(run_bot_polling())
