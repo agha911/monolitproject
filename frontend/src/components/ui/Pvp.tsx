@@ -362,6 +362,67 @@ const Pvp: React.FC = () => {
     myClicksRef.current = myClicks;
   }, [myClicks]);
 
+  useEffect(() => {
+  if (screen !== 'duel') return;
+
+  const preventZoom = (e: TouchEvent) => {
+    if (e.touches.length > 1) {
+      e.preventDefault();
+    }
+  };
+
+  const preventGesture = (e: Event) => {
+    e.preventDefault();
+  };
+
+  const preventDoubleTapZoom = (e: TouchEvent) => {
+    const now = Date.now();
+    const lastTouch = Number((window as any).__lastTouchEnd || 0);
+
+    if (now - lastTouch <= 300) {
+      e.preventDefault();
+    }
+
+    (window as any).__lastTouchEnd = now;
+  };
+
+  document.addEventListener('touchmove', preventZoom, { passive: false });
+  document.addEventListener('touchend', preventDoubleTapZoom, { passive: false });
+
+  document.addEventListener('gesturestart', preventGesture, { passive: false } as AddEventListenerOptions);
+  document.addEventListener('gesturechange', preventGesture, { passive: false } as AddEventListenerOptions);
+  document.addEventListener('gestureend', preventGesture, { passive: false } as AddEventListenerOptions);
+
+  const viewport = document.querySelector('meta[name=viewport]');
+  const originalViewport = viewport?.getAttribute('content');
+
+  viewport?.setAttribute(
+    'content',
+    'width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover'
+  );
+
+  document.documentElement.style.touchAction = 'none';
+  document.body.style.touchAction = 'none';
+  document.body.style.overscrollBehavior = 'none';
+
+  return () => {
+    document.removeEventListener('touchmove', preventZoom);
+    document.removeEventListener('touchend', preventDoubleTapZoom);
+
+    document.removeEventListener('gesturestart', preventGesture);
+    document.removeEventListener('gesturechange', preventGesture);
+    document.removeEventListener('gestureend', preventGesture);
+
+    if (originalViewport != null) {
+      viewport?.setAttribute('content', originalViewport);
+    }
+
+    document.documentElement.style.touchAction = '';
+    document.body.style.touchAction = '';
+    document.body.style.overscrollBehavior = '';
+  };
+}, [screen]);
+
   const stopInvitePoll = () => {
     if (invitePollRef.current) {
       window.clearInterval(invitePollRef.current);
