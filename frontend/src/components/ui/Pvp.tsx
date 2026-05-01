@@ -997,16 +997,20 @@ const onTouchStart = (e: React.TouchEvent<HTMLButtonElement>) => {
   if (phase !== 'active') return;
   if (duelSecondsLeft <= 0) return;
 
+  const activeNow = e.touches?.length || 0;
+
+  if (activeNow > 2) {
+    return;
+  }
+
   lastTouchAtRef.current = Date.now();
 
   const changed = e.changedTouches?.length || 1;
-  const activeNow = e.touches?.length || changed;
-
   const accepted = Math.min(changed, 2);
 
   maxConcurrentTouchesRef.current = Math.max(
     maxConcurrentTouchesRef.current,
-    Math.min(activeNow, 2)
+    activeNow || accepted
   );
 
   if (accepted > 0) addClicks(accepted);
