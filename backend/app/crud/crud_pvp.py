@@ -339,13 +339,16 @@ async def get_pvp_rank_for_user(session: AsyncSession, *, user_id: int) -> int:
 # Weekly reset
 # ----------------------------
 
-async def reset_weekly_pvp_victories_for_all(session: AsyncSession) -> int:
+async def reset_weekly_pvp_results_for_all(session: AsyncSession) -> int:
     """
-    Сбрасывает pvp_victories у всех пользователей.
+    Сбрасывает pvp_victories и pvp_best_result у всех пользователей.
     Возвращает количество затронутых строк.
     """
     res = await session.execute(
-        User.__table__.update().values(pvp_victories=0)  # type: ignore
+        User.__table__.update().values(
+            pvp_victories=0,
+            pvp_best_result=0,  # 👈 добавили
+        )  # type: ignore
     )
     await session.flush()
     return int(getattr(res, "rowcount", 0) or 0)
