@@ -86,7 +86,7 @@ const PAUSE_THRESHOLD_MS = 250;
 const PEAK_WINDOW_MS = 1000;
 
 function buildInviteLink(code: string) {
-  return `https://t.me/${BOT_USERNAME}?start=pvp_${code}`;
+  return `https://t.me/${BOT_USERNAME}?startapp=pvp_${code}`;
 }
 
 function buildShareLink(url: string, text: string) {
