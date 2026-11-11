@@ -56,7 +56,7 @@ const UserCard: React.FC<Props> = ({ onClose }) => {
         document.execCommand('copy');
         document.body.removeChild(ta);
         alert(t('alerts.copied', { defaultValue: 'ID скопирован' }));
-      } catch {}
+      } catch (error) { console.warn('Could not copy user ID', error); }
     }
   };
 
@@ -71,8 +71,8 @@ const UserCard: React.FC<Props> = ({ onClose }) => {
         if (!res.ok) throw new Error((await res.text()) || `HTTP ${res.status}`);
         const json: IUserCard = await res.json();
         setData(json);
-      } catch (e: any) {
-        setErr(e?.message || t('errors.loadFailed', { defaultValue: 'Ошибка загрузки' }));
+      } catch (e) {
+        setErr(e instanceof Error ? e.message : t('errors.loadFailed', { defaultValue: 'Ошибка загрузки' }));
       } finally {
         setLoading(false);
       }

@@ -25,6 +25,7 @@ const WebApp: typeof Telegram = isDemo ? new Proxy(Telegram, {
     if (property === 'initDataUnsafe') return { user: demoUser };
     if (property === 'ready' || property === 'expand') return () => undefined;
     if (property === 'openTelegramLink' || property === 'openInvoice') return () => showDemoNotice();
+    if (property === 'showPopup') return (params: { message: string }) => showDemoNotice(params.message);
     if (property === 'HapticFeedback') return {
       impactOccurred: () => undefined, notificationOccurred: () => undefined, selectionChanged: () => undefined,
     };

@@ -1,4 +1,4 @@
-# Portfolio preparation — stages 1–4
+# Portfolio preparation — stages 1–5
 
 12 November 2026. Base: master / 628129e. Branch: codex/portfolio-readiness.
 
@@ -25,7 +25,7 @@
 
 ## Remaining
 
-- Existing ESLint errors remain (many explicit any types, empty catches, React hook dependency warnings). Lint was run and is not green; it is not hidden by disabling rules or added as a falsely passing CI gate.
+- The initial ESLint backlog was resolved in stage 5. Full lint now runs with zero warnings and is included in CI; the earlier stages below describe their historical checks.
 - PostgreSQL 17 was found and a separate cluster was started on loopback port 55432. The schema and gameplay tests were exercised against isolated test schemas. The Docker recipe itself was not exercised locally.
 - Still need migration strategy for existing databases and broader coverage of referrals, PvP completion/settlement, and partner workflows.
 - A separate browser playground now exists in app.demo with synthetic players and a local demo signing token. Production app.main still requires real signed Telegram credentials. Demo is limited to clicks, rewards, upgrades and leaderboard, not all Telegram screens.
@@ -64,3 +64,12 @@ The demo is local only; public hosting, production migration, full feature verif
 - Fixed click-buffer lifecycle restoration after React StrictMode cleanup; browser checks confirmed a click was persisted and appeared in the Friends leaderboard.
 - Browser checks: all five original tabs render; three fictional players load in the rankings; referral countdown loads; purchasing the 5,000-point booster reduced the balance from 59,591 to 54,591 and changed the multiplier to x2. Corrected purchase confirmation to use the returned level.
 - TypeScript and targeted ESLint for the new adapter/notice/transport pass. Production build succeeds. Screenshot: docs/original-demo.jpg. Full legacy lint cleanup and exhaustive workflow testing remain unfinished; no public hosting was added.
+
+## Stage 5 — frontend checks and API contract fixes
+
+- Full frontend ESLint passes with zero warnings; npm run lint enforces that threshold and is now part of GitHub Actions. No lint rule was disabled or relaxed for this cleanup.
+- Replaced explicit any types with player, match, leaderboard, configuration and error types in PvP, and typed referral/drop/task/UI state. Removed unused suppression directives and fixed effect dependencies. Extracted invite redirection from the entry point to its own component.
+- Drop UI uses the server's user_left/disabled_for_user fields, refreshes offers after a purchase and no longer mutates an item in state or reads nonexistent remaining/user_remaining fields. It does not invent a global remaining count from total supply.
+- Referral UI recognizes nothing_to_claim and no longer reports a payout when the server response is unreadable or lacks a confirmed amount. Demo popups display their message in the existing notice area.
+- Extended the offer integration scenario to verify personal availability before/after purchase; this test passes on isolated PostgreSQL. Frontend lint, typecheck and production build pass locally.
+- Migration strategy, dependency hardening, further workflow coverage and public hosting remain open.

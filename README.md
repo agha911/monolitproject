@@ -61,7 +61,7 @@ From `frontend/`: `npm run build`, `npm run typecheck`, `npm run lint`.
 
 Authentication/startup tests do not contact Telegram or a database. To include PostgreSQL integration tests, set `TEST_DATABASE_URL` to a loopback PostgreSQL database named `monolit_test`. Each integration test creates and drops only its own randomly named schema. The suite checks registration, duplicate click packets, concurrent daily claims, concurrent purchases, offer supply, spending totals, and PvP daily limits. Without the variable, these integration tests are explicitly skipped. GitHub Actions provisions PostgreSQL and runs them.
 
-Additional gameplay/database regression coverage, migration scripts, dependency hardening, and cleanup of existing lint errors remain part of portfolio preparation. See `PORTFOLIO_PROGRESS.md` for verified results and limitations.
+Frontend ESLint now passes with zero warnings and runs in CI alongside TypeScript and the production build. Additional gameplay/database regression coverage, migration scripts, dependency hardening and public demo hosting remain part of portfolio preparation. See `PORTFOLIO_PROGRESS.md` for verified results and limitations.
 
 ## Layout
 

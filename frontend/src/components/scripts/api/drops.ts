@@ -13,6 +13,9 @@ export type Drop = {
   total_supply?: number | null;
   active: boolean;
   visible: boolean;
+  user_used: number;
+  user_left: number;
+  disabled_for_user: boolean;
   partner?: { id: number; name: string; slug: string } | null;
 };
 

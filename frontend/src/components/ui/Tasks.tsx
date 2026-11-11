@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import API_BASE_URL from '../config';
 import WebApp, { isDemo, showDemoNotice } from '../../telegram';
@@ -160,7 +160,7 @@ const Tasks: React.FC = () => {
   };
 
   /** ---------- Daily Task ---------- */
-  const fetchDailyTask = async () => {
+  const fetchDailyTask = useCallback(async () => {
     if (!telegramUserId) return;
     try {
       const res = await fetch(`${API_BASE_URL}/api/task/daily`, {
@@ -179,18 +179,18 @@ const Tasks: React.FC = () => {
     } catch (err) {
       console.error('Ошибка при загрузке ежедневной задачи', err);
     }
-  };
+  }, [telegramUserId]);
 
   useEffect(() => {
     fetchDailyTask();
-  }, [telegramUserId]);
+  }, [fetchDailyTask]);
 
   useEffect(() => {
     const interval = setInterval(() => {
       fetchDailyTask();
     }, 10000);
     return () => clearInterval(interval);
-  }, [telegramUserId]);
+  }, [fetchDailyTask]);
 
   /** ---------- Partner Task: load on mount ---------- */
   useEffect(() => {
@@ -224,7 +224,7 @@ const Tasks: React.FC = () => {
     setOpenedGroup(true);
   };
 
-  const handleComplete = async (task_id: string, setter: any, msgSetter: any) => {
+  const handleComplete = async (task_id: string, setter: (done: boolean) => void, msgSetter: (message: string) => void) => {
     if (!telegramUserId) {
       msgSetter(t('error_user_unknown'));
       return;

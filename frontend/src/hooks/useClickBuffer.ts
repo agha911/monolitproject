@@ -78,7 +78,7 @@ export function useClickBuffer({
   }, [seqStorageKey]);
 
   const saveSeq = (n: number) => {
-    try { if (seqStorageKey) localStorage.setItem(seqStorageKey, String(n)); } catch {}
+    try { if (seqStorageKey) localStorage.setItem(seqStorageKey, String(n)); } catch { /* Server sequence still protects against duplicate batches without local storage. */ }
   };
 
   const resolveInitData = () => {
@@ -171,7 +171,7 @@ export function useClickBuffer({
         inflight.current = false;
         currentBatch.current = null;
 
-        try { onReconcile(data); } catch {}
+        try { onReconcile(data); } catch (error) { console.error('Click reconciliation failed', error); }
 
         if (buffered > 0 && canSendRef.current) scheduleRetry(0); // продолжаем дожёвывать
       } else {
@@ -181,7 +181,7 @@ export function useClickBuffer({
         inflight.current = false;
         currentBatch.current = null;
         // onReconcile всё равно дернём — пусть UI синхронизируется
-        try { onReconcile(data); } catch {}
+        try { onReconcile(data); } catch (error) { console.error('Click reconciliation failed', error); }
       }
     } catch {
       // сеть/исключение — тоже ждём новых кликов

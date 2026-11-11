@@ -2,10 +2,10 @@ import './apiFetch';
 import Demo from './Demo';
 import DemoNotice from './DemoNotice';
 import { initializeDemo, isDemo } from './telegram';
-import React, { useEffect } from 'react';
+import React from 'react';
 import ReactDOM from 'react-dom/client';
-import { BrowserRouter, Routes, Route, useNavigate } from 'react-router-dom';
-import MainScreen from './components/ui/MainScreen';
+import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import StartParamRedirect from './StartParamRedirect';
 import Tasks from './components/ui/Tasks';
 import Pvp from './components/ui/Pvp';
 import './index.css';
@@ -13,32 +13,8 @@ import './i18n';
 import WebApp from './telegram';
 
 // Безопасная инициализация Telegram WebApp
-if (typeof WebApp !== 'undefined' && WebApp.initDataUnsafe?.user) {
+if (!isDemo && WebApp.initDataUnsafe?.user) {
   WebApp.ready();
-  console.log('[Telegram WebApp] Инициализирован для пользователя:', WebApp.initDataUnsafe.user);
-} else {
-  console.warn('[Telegram WebApp] Пользователь не определён — запуск вне Telegram?');
-}
-
-/**
- * Если приложение открыто по invite-ссылке (start_param начинается с pvp_),
- * сразу перекидываем пользователя на /pvp, чтобы он видел дуэльный экран.
- */
-function StartParamRedirect() {
-  const navigate = useNavigate();
-
-  useEffect(() => {
-    try {
-      const sp = WebApp.initDataUnsafe?.start_param;
-      if (typeof sp === 'string' && sp.startsWith('pvp_')) {
-        navigate('/pvp', { replace: true });
-      }
-    } catch {
-      // ignore
-    }
-  }, [navigate]);
-
-  return <MainScreen />;
 }
 
 const root = ReactDOM.createRoot(document.getElementById('root')!);

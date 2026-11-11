@@ -148,11 +148,20 @@ def test_drop_purchase_obeys_supply_and_balance(game):
             await session.commit()
             return drop.id
     drop_id = asyncio.run(offer())
+    headers = {"X-Telegram-Init-Data": signed(), "X-Telegram-User-Id": "101"}
+    before = client.get("/api/drops", headers=headers)
+    assert before.status_code == 200, before.text
+    listed = next(d for d in before.json() if d["id"] == drop_id)
+    assert listed["user_left"] == 1 and listed["disabled_for_user"] is False
     with ThreadPoolExecutor(max_workers=2) as pool:
         responses = list(pool.map(lambda _: client.post("/api/drops/buy", json={"telegram_id": 101, "drop_id": drop_id},
                                  headers={"X-Telegram-Init-Data": signed()}), range(2)))
     assert sorted(r.status_code for r in responses) == [200, 400], [r.text for r in responses]
     assert user_state(maker).total_xp == 9000
+    after = client.get("/api/drops", headers=headers)
+    assert after.status_code == 200, after.text
+    listed = next(d for d in after.json() if d["id"] == drop_id)
+    assert listed["user_left"] == 0 and listed["disabled_for_user"] is True
 
 
 def test_purchases_by_different_users_preserve_total_spent(game):

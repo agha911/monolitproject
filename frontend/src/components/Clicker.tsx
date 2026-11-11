@@ -27,7 +27,7 @@ const Clicker: React.FC = () => {
   const [timeToFullEnergy, setTimeToFullEnergy] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [clickBoost, setClickBoost] = useState(1);
-  const [floatingTexts, setFloatingTexts] = useState<any[]>([]);
+  const [floatingTexts, setFloatingTexts] = useState<{ id: number; value: number; x: number; y: number }[]>([]);
   const [serverSeq, setServerSeq] = useState<number | null>(null);
   const [seqReady, setSeqReady] = useState(false);
   const [showUserCard, setShowUserCard] = useState(false);
@@ -118,7 +118,7 @@ const Clicker: React.FC = () => {
 
         const s = Number(data.last_client_seq ?? 0);
         setServerSeq(s);
-        try { localStorage.setItem(seqStorageKey, String(s)); } catch {}
+        try { localStorage.setItem(seqStorageKey, String(s)); } catch { /* Server sequence remains the source of truth when storage is unavailable. */ }
 
         setSeqReady(true);
         setLoading(false);
@@ -148,7 +148,7 @@ const Clicker: React.FC = () => {
         const s = Number(data.last_client_seq ?? 0);
         if (serverSeq === null || s > serverSeq) {
           setServerSeq(s);
-          try { localStorage.setItem(seqStorageKey, String(s)); } catch {}
+          try { localStorage.setItem(seqStorageKey, String(s)); } catch { /* Server sequence remains the source of truth when storage is unavailable. */ }
           setSeqReady(true);
         }
       } catch (err) {
