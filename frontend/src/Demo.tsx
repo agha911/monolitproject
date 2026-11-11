@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import API_BASE_URL from './components/config';
 import './demo.css';
 
@@ -14,7 +14,7 @@ export default function Demo() {
   const [message, setMessage] = useState('Loading your playground…');
   const sequence = useRef(0);
 
-  async function request<T>(path: string, auth: Session, body?: unknown): Promise<T> {
+  const request = useCallback(async <T,>(path: string, auth: Session, body?: unknown): Promise<T> => {
     const res = await fetch(`${API_BASE_URL}${path}`, {
       method: body === undefined ? 'GET' : 'POST',
       headers: { 'Content-Type': 'application/json', 'X-Telegram-Init-Data': auth.init_data },
@@ -23,14 +23,14 @@ export default function Demo() {
     const data = await res.json();
     if (!res.ok) throw new Error(typeof data.detail === 'string' ? data.detail : 'Please try again.');
     return data;
-  }
+  }, []);
 
-  async function refresh(auth: Session) {
+  const refresh = useCallback(async (auth: Session) => {
     const p = await request<Progress>('/api/game/progress', auth, { init_data: auth.init_data });
     sequence.current = Math.max(sequence.current, p.last_client_seq);
     setProgress(p);
     setPlayers(await request<Player[]>('/api/game/leaderboard', auth));
-  }
+  }, [request]);
 
   useEffect(() => {
     let cancelled = false;
@@ -48,7 +48,7 @@ export default function Demo() {
       }
     })();
     return () => { cancelled = true; };
-  }, []);
+  }, [refresh]);
 
   async function act(action: 'click' | 'reward' | 'upgrade') {
     if (!session || busy) return;

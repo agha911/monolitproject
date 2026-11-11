@@ -1,4 +1,4 @@
-# Portfolio preparation — stages 1 and 2
+# Portfolio preparation — stages 1–3
 
 12 November 2026. Base: master / 628129e. Branch: codex/portfolio-readiness.
 
@@ -47,3 +47,11 @@ No production deployment, real Telegram messages, production database access, or
 - Demo backend binds to 127.0.0.1:8000, frontend to 127.0.0.1:5173. Dedicated databases: monolit_demo and monolit_test. No real Telegram account, bot credentials, production database or paid service was used.
 
 The demo is local only; public hosting, production migration, full feature verification, and existing lint cleanup remain unfinished.
+
+## Stage 3 — referrals and PvP
+
+- Added eight PostgreSQL integration scenarios covering first referral accrual, duplicate click packets, concurrent claims, expired referral cycles, PvP win/draw settlement, concurrent invitation acceptance, challenge ownership/replay, and expired matches.
+- Referral accrual and claims now share a persisted cycle lock. Initializing the cycle preserves recent credits; empty claims return the response schema's supported status and persist cycle initialization.
+- PvP invite acceptance and cancellation lock the invitation row, preventing two opponents from accepting the same invitation concurrently.
+- Removed unnecessary pointer-event casts and fixed the demo effect dependencies. Targeted ESLint and TypeScript checks pass; the full legacy frontend lint backlog remains.
+- All 38 backend tests pass locally against isolated schemas in monolit_test. No production data or default branch changed.

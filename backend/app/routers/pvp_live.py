@@ -450,7 +450,7 @@ async def invite_accept(body: InviteAcceptRequest, session: AsyncSession = Depen
 
         inv = (
             (await session.execute(
-                select(PvpInvite).where(PvpInvite.code == body.invite_code)
+                select(PvpInvite).where(PvpInvite.code == body.invite_code).with_for_update()
             ))
             .scalar_one_or_none()
         )
@@ -513,7 +513,7 @@ async def invite_cancel(body: InviteCancelRequest, session: AsyncSession = Depen
         user = await _ensure_registered_user(session, body.telegram_id)
 
         inv = (
-            (await session.execute(select(PvpInvite).where(PvpInvite.code == body.invite_code)))
+            (await session.execute(select(PvpInvite).where(PvpInvite.code == body.invite_code).with_for_update()))
             .scalar_one_or_none()
         )
         if not inv:

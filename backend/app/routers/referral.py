@@ -8,27 +8,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_async_session
 from app.utils import parse_telegram_user_id
 from app.models.user import User
-from app.models.referral import ReferralShareEvent, ReferralClaim, ReferralCycle
+from app.models.referral import ReferralShareEvent, ReferralClaim
 from app.schemas.referral import ReferralBalanceOut, ReferralClaimOut
 
 from app.referral_utils.time_az import baku_now
+from app.referral_utils.cycle import get_cycle_for_update
 
 router = APIRouter()
 ROLLING_HOURS = 24
-
-
-async def _ensure_cycle(session: AsyncSession, referrer_id: int) -> ReferralCycle:
-    q = await session.execute(
-        select(ReferralCycle).where(ReferralCycle.referrer_id == referrer_id).limit(1)
-    )
-    row = q.scalar_one_or_none()
-    if row:
-        return row
-    now = baku_now()
-    rc = ReferralCycle(referrer_id=referrer_id, anchor_at=now, updated_at=now)
-    session.add(rc)
-    await session.flush()
-    return rc
 
 
 async def _sum_since_anchor(session: AsyncSession, referrer_id: int, anchor: datetime) -> int:
@@ -49,12 +36,12 @@ async def get_referral_balance(
 ):
     telegram_id = parse_telegram_user_id(init_data)
 
-    res = await session.execute(select(User).where(User.telegram_id == telegram_id))
+    res = await session.execute(select(User).where(User.telegram_id == telegram_id).with_for_update(key_share=True))
     user: Optional[User] = res.scalar_one_or_none()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
-    cycle = await _ensure_cycle(session, user.id)
+    cycle = await get_cycle_for_update(session, user.id)
     now = baku_now()
     deadline = cycle.anchor_at + timedelta(hours=ROLLING_HOURS)
     seconds_left = max(0, int((deadline - now).total_seconds()))
@@ -81,6 +68,7 @@ async def get_referral_balance(
     # Окно активно — считаем с anchor_at
     amount = await _sum_since_anchor(session, user.id, cycle.anchor_at)
     status = "open" if amount > 0 else "none"
+    await session.commit()
 
     return ReferralBalanceOut(
         day_date=now.date().isoformat(),
@@ -102,12 +90,12 @@ async def claim_referral_reward(
 
     telegram_id = parse_telegram_user_id(init_data)
 
-    res = await session.execute(select(User).where(User.telegram_id == telegram_id))
+    res = await session.execute(select(User).where(User.telegram_id == telegram_id).with_for_update(key_share=True))
     user: Optional[User] = res.scalar_one_or_none()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
-    cycle = await _ensure_cycle(session, user.id)
+    cycle = await get_cycle_for_update(session, user.id)
     now = baku_now()
     deadline = cycle.anchor_at + timedelta(hours=ROLLING_HOURS)
 
@@ -126,8 +114,9 @@ async def claim_referral_reward(
     # Сумма с момента anchor_at
     amount = await _sum_since_anchor(session, user.id, cycle.anchor_at)
     if amount <= 0:
+        await session.commit()
         return ReferralClaimOut(
-            status="nothing",
+            status="nothing_to_claim",
             claimed_amount=0,
             total_xp=user.total_xp or 0,
         )

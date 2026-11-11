@@ -26,7 +26,7 @@ const MainButton: React.FC<MainButtonProps> = ({ onMultiClick, energy }) => {
     activePointers.current.add(id);
 
     try {
-      (e.currentTarget as any).setPointerCapture?.(id);
+      e.currentTarget.setPointerCapture(id);
     } catch {
       /* ignore */
     }
@@ -38,7 +38,7 @@ const MainButton: React.FC<MainButtonProps> = ({ onMultiClick, energy }) => {
   const handlePointerUp = (e: React.PointerEvent<HTMLButtonElement>) => {
     activePointers.current.delete(e.pointerId);
     try {
-      (e.currentTarget as any).releasePointerCapture?.(e.pointerId);
+      e.currentTarget.releasePointerCapture(e.pointerId);
     } catch {
       /* ignore */
     }
@@ -47,7 +47,7 @@ const MainButton: React.FC<MainButtonProps> = ({ onMultiClick, energy }) => {
   const handlePointerCancel = (e: React.PointerEvent<HTMLButtonElement>) => {
     activePointers.current.delete(e.pointerId);
     try {
-      (e.currentTarget as any).releasePointerCapture?.(e.pointerId);
+      e.currentTarget.releasePointerCapture(e.pointerId);
     } catch {
       /* ignore */
     }
