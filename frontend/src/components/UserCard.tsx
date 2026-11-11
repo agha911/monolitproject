@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import API_BASE_URL from './config';
-import WebApp from '@twa-dev/sdk';
+import WebApp from '../telegram';
 
 type Props = { onClose: () => void };
 

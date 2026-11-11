@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import WebApp from '@twa-dev/sdk';
+import WebApp from '../../telegram';
 import API_BASE_URL from '../config';
 
 function getTelegramId(): number | null {

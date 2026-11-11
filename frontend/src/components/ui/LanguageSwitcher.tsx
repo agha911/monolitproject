@@ -10,7 +10,7 @@ const LanguageSwitcher: React.FC = () => {
   };
 
   return (
-    <div className="fixed top-2 right-2 z-50 flex gap-2 text-sm text-[#00f0ff]">
+    <div className="language-switcher fixed top-2 right-2 z-50 flex gap-2 text-sm text-[#00f0ff]">
       <button onClick={() => changeLanguage('en')} className="hover:underline">🇬🇧</button>
       <button onClick={() => changeLanguage('ru')} className="hover:underline">🇷🇺</button>
       <button onClick={() => changeLanguage('az')} className="hover:underline">🇦🇿</button>

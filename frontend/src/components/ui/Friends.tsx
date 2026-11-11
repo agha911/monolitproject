@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import WebApp from '@twa-dev/sdk';
+import WebApp, { isDemo, showDemoNotice } from '../../telegram';
 import API_BASE_URL from '../config';
 
 interface UserEntry {
@@ -130,6 +130,7 @@ const Friends: React.FC = () => {
   }, [refBalance?.expires_at_iso, refBalance?.seconds_left]);
 
   const handleInvite = () => {
+    if (isDemo) { showDemoNotice('Inviting real Telegram users is unavailable in this demo.'); return; }
     const link = `https://t.me/monolit_42_bot?start=${WebApp.initDataUnsafe.user?.id}`;
     const message = encodeURIComponent('Qaqa, Sumqayıta gedirəm, 20 $GAPiyin olmaz?');
     window.open(`https://t.me/share/url?url=${link}&text=${message}`, '_blank');

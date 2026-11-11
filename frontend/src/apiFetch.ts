@@ -1,4 +1,4 @@
-import WebApp from '@twa-dev/sdk';
+import WebApp from './telegram';
 import API_BASE_URL from './components/config';
 
 // Shared transport for existing screens, including their direct fetch calls.

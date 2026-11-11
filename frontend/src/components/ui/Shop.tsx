@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import API_BASE_URL from '../config';
-import WebApp from '@twa-dev/sdk';
+import WebApp from '../../telegram';
 
 // дропы API
 import { listDrops, buyDrop, type Drop, type Purchase } from '../scripts/api/drops';
@@ -277,7 +277,7 @@ const Shop: React.FC = () => {
         await fetchUserData();
         await fetchTotalSpent();
         await fetchInvitesCount();
-        setMessage(t('shop_success_boost', { value: `x${clickBoostLevel + 1}` }));
+        setMessage(t('shop_success_boost', { value: `x${data.new_boost_level + 1}` }));
       } else {
         setMessage(`${t('shop_error')}: ${data.message ?? ''}`);
       }

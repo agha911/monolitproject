@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useMemo } from 'react';
-import WebApp from '@twa-dev/sdk';
+import WebApp from '../../telegram';
 import { useTranslation } from 'react-i18next';
 import API_BASE_URL from '../config';
 

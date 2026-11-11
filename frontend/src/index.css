@@ -2,3 +2,20 @@
 @tailwind components;
 @tailwind utilities;
 
+.demo-notice {
+  height: 60px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 10px 16px;
+  background: #0e1a2b;
+  color: #b4d3dc;
+  border-bottom: 1px solid #00f0ff40;
+  font: 12px/1.5 system-ui, sans-serif;
+}
+.demo-notice strong { color: #00f0ff; letter-spacing: .08em; }
+.demo-original .language-switcher { top: 68px; }
+.demo-original .user-card-trigger { top: 72px; }
+.demo-start-error { padding: 40px; font-family: system-ui, sans-serif; }
+

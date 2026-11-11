@@ -21,7 +21,7 @@ const NavigationTabs: React.FC<Props> = ({ activeTab, setActiveTab }) => {
     'text-[#00f0ff] opacity-80 hover:opacity-100 hover:drop-shadow-[0_0_4px_#00f0ff40]';
 
   return (
-    <div className="fixed bottom-0 w-full flex justify-around bg-[#0e1a2b] border-t border-[#00f0ff40] py-2 shadow-[0_0_10px_#00f0ff20]">
+    <div className="fixed bottom-0 z-40 w-full flex justify-around bg-[#0e1a2b] border-t border-[#00f0ff40] py-2 shadow-[0_0_10px_#00f0ff20]">
       <button
         onClick={() => setActiveTab('home')}
         className={`${baseBtn} ${activeTab === 'home' ? active : inactive}`}

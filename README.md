@@ -4,9 +4,9 @@ A Telegram Mini App with a React/TypeScript frontend and a FastAPI/PostgreSQL ba
 
 ## Portfolio preparation status
 
-This branch includes an isolated browser playground for clicks, daily rewards, virtual-currency upgrades and the leaderboard. The original Telegram UI remains available when demo mode is off. The playground uses real backend operations with synthetic players; it does not demonstrate every Telegram feature. No production database or bot should be used for development.
+The portfolio demo uses the original Telegram interface with synthetic players and a browser demo session. Home, tasks, friends, shop and PvP screens use real local backend operations. A small DEMO notice identifies the fictional data; Telegram sharing, social subscription tasks and payments are unavailable. No production database or bot should be used for development.
 
-![Portfolio playground](docs/portfolio-demo.jpg)
+![Original interface in browser demo mode](docs/original-demo.jpg)
 
 ## Browser playground
 
@@ -16,7 +16,7 @@ Start the backend from `backend/` with a dedicated loopback `DATABASE_URL` and `
 
 Start the frontend from `frontend/` with `VITE_DEMO_MODE=true` and `npm run dev`. In PowerShell set the variable first with `$env:VITE_DEMO_MODE='true'`; in bash use `VITE_DEMO_MODE=true npm run dev`. Visit the local URL printed by Vite. The API URL defaults to `http://127.0.0.1:8000`.
 
-Try: tap twice → claim the daily reward → buy an energy-capacity upgrade → inspect the updated leaderboard. Progress is persisted in the isolated demo database. The demo session lasts one hour; reload the page to obtain a fresh one. These points have no monetary value.
+Try the original Home, Tasks, Friends, Shop and PvP tabs. Progress is persisted in the isolated demo database. The demo session lasts one hour; reload the page to obtain a fresh one. These points have no monetary value. The earlier simplified playground remains available at `/playground` in demo mode only. This does not claim every game workflow has been verified end to end.
 
 For the original Telegram frontend, leave `VITE_DEMO_MODE` unset and use `app.main:app` with a real **development** bot.
 

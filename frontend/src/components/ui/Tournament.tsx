@@ -1,4 +1,4 @@
-import WebApp from '@twa-dev/sdk';
+import WebApp from '../../telegram';
 import { useEffect, useState } from "react";
 import API_BASE_URL from "../config";
 import { useTranslation } from "react-i18next";

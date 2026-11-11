@@ -1,5 +1,5 @@
 import { apiGet, apiPost } from './http';
-import WebApp from '@twa-dev/sdk';
+import WebApp from '../../../telegram';
 
 export type Drop = {
   id: number;

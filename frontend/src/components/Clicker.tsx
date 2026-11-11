@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import WebApp from '@twa-dev/sdk';
+import WebApp from '../telegram';
 import { useTranslation } from 'react-i18next';
 import MainButton from './MainButton';
 import API_BASE_URL from './config';
@@ -18,7 +18,7 @@ type SpawnedBooster =
 const Clicker: React.FC = () => {
   const { t } = useTranslation();
 
-  const [telegramUser, setTelegramUser] = useState<any | null>(null);
+  const [telegramUser, setTelegramUser] = useState<typeof WebApp.initDataUnsafe.user>(undefined);
   const [totalXp, setTotalXp] = useState(0);
   const [energy, setEnergy] = useState(1000);
   const smoothEnergy = useAnimatedInt(energy, { speedPerUnit: 8, minDuration: 120, maxDuration: 600 });
@@ -225,7 +225,7 @@ const Clicker: React.FC = () => {
     initialSeq: Math.max(serverSeq ?? 0, initialLocalSeq),
     maxBatch: 480,
     lockKey: userId,
-    seqStorageKey: seqStorageKey as any,
+    seqStorageKey,
     canSend: energy > 0
   });
 
@@ -364,7 +364,7 @@ const Clicker: React.FC = () => {
 
       {/* Кнопка «Карта пользователя» */}
       <button
-        className="fixed top-3 left-3 z-50 w-9 h-9 rounded-full bg-black/80 text-white shadow flex items-center justify-center active:scale-95"
+        className="user-card-trigger fixed top-3 left-3 z-50 w-9 h-9 rounded-full bg-black/80 text-white shadow flex items-center justify-center active:scale-95"
         onClick={() => setShowUserCard(true)}
         aria-label={t('userCard.open', { defaultValue: 'User card' })}
         title={t('userCard.open', { defaultValue: 'User card' })}

@@ -1,4 +1,4 @@
-# Portfolio preparation — stages 1–3
+# Portfolio preparation — stages 1–4
 
 12 November 2026. Base: master / 628129e. Branch: codex/portfolio-readiness.
 
@@ -55,3 +55,12 @@ The demo is local only; public hosting, production migration, full feature verif
 - PvP invite acceptance and cancellation lock the invitation row, preventing two opponents from accepting the same invitation concurrently.
 - Removed unnecessary pointer-event casts and fixed the demo effect dependencies. Targeted ESLint and TypeScript checks pass; the full legacy frontend lint backlog remains.
 - All 38 backend tests pass locally against isolated schemas in monolit_test. No production data or default branch changed.
+
+## Stage 4 — original interface in the browser demo
+
+- Portfolio direction: preserve the original design and screens. `VITE_DEMO_MODE=true` now starts that interface after obtaining a synthetic, signed session from the isolated demo backend. The earlier simplified screen remains at `/playground` in demo mode.
+- Central Telegram adapter leaves production on the real SDK. Demo mode supplies fictional identity and avoids Telegram sharing/invoice actions. Social subscription tasks and real user invitations show a demo notice instead of opening promotions.
+- Added a DEMO notice and moved fixed profile/language controls below it. Fixed bottom navigation stacking so the coin no longer intercepts tab clicks on short screens.
+- Fixed click-buffer lifecycle restoration after React StrictMode cleanup; browser checks confirmed a click was persisted and appeared in the Friends leaderboard.
+- Browser checks: all five original tabs render; three fictional players load in the rankings; referral countdown loads; purchasing the 5,000-point booster reduced the balance from 59,591 to 54,591 and changed the multiplier to x2. Corrected purchase confirmation to use the returned level.
+- TypeScript and targeted ESLint for the new adapter/notice/transport pass. Production build succeeds. Screenshot: docs/original-demo.jpg. Full legacy lint cleanup and exhaustive workflow testing remain unfinished; no public hosting was added.

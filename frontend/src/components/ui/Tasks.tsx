@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import API_BASE_URL from '../config';
-import WebApp from '@twa-dev/sdk';
+import WebApp, { isDemo, showDemoNotice } from '../../telegram';
 
 /** ======================= Types ======================= */
 type Slide = { title: string; text: string; image?: string };
@@ -33,6 +33,7 @@ const PartnerSlidesModal: React.FC<{
   const next = () => setI((x) => Math.min(x + 1, task.slides.length - 1));
 
   const claim = async () => {
+    if (isDemo) { showDemoNotice('Partner promotions are unavailable in this demo.'); return; }
     try {
       setBusy(true);
       window.open(igUrl, '_blank', 'noopener,noreferrer');
@@ -212,11 +213,13 @@ const Tasks: React.FC = () => {
 
   /** ---------- Old Instagram task (kept) ---------- */
   const handleInstagramClick = () => {
+    if (isDemo) { showDemoNotice('Social subscription tasks require the real Telegram app.'); return; }
     window.open('https://www.instagram.com/gap_pick', '_blank');
     setOpenedInstagram(true);
   };
 
   const handleGroupClick = () => {
+    if (isDemo) { showDemoNotice('Social subscription tasks require the real Telegram app.'); return; }
     window.open('https://t.me/+h-VjXbnz0BI2OGI6', '_blank');
     setOpenedGroup(true);
   };
