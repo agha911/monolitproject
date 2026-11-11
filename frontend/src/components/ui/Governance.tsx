@@ -68,22 +68,22 @@ const resolveImageUrl = (src: string | null): string | null => {
 const DaoPage: React.FC = () => {
   const { t } = useTranslation('dao');
 
-  const [telegramUser, setTelegramUser] = useState<any | null>(null);
+  const [, setTelegramUser] = useState<any | null>(null);
 
   const [proposals, setProposals] = useState<DaoProposal[]>([]);
   const [loadingProposals, setLoadingProposals] = useState(true);
 
   // финальные результаты (когда голосование завершено)
   const [results, setResults] = useState<DaoResultsOut | null>(null);
-  const [loadingResults, setLoadingResults] = useState(false);
+  const [, setLoadingResults] = useState(false);
 
   // лайв-результаты по активному голосованию
   const [liveResults, setLiveResults] = useState<DaoResultsOut | null>(null);
-  const [loadingLiveResults, setLoadingLiveResults] = useState(false);
+  const [, setLoadingLiveResults] = useState(false);
 
   // общий GAP (total_xp)
   const [balance, setBalance] = useState<number>(0);
-  const [loadingBalance, setLoadingBalance] = useState(true);
+  const [, setLoadingBalance] = useState(true);
 
   // DAO-баланс (остаток лимита по текущему голосованию)
   const [votingBalance, setVotingBalance] = useState<number>(0);

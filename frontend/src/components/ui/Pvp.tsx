@@ -98,11 +98,6 @@ function intOrZero(v: any): number {
   return Number.isFinite(n) ? Math.floor(n) : 0;
 }
 
-function numOrNull(v: any): number | null {
-  const n = Number(v);
-  return Number.isFinite(n) ? n : null;
-}
-
 function pickVictories(me: any): number {
   const v = me?.pvp_victories ?? me?.victories ?? me?.pvp_weekly_victories ?? me?.weekly_victories ?? 0;
   return Number.isFinite(Number(v)) ? Number(v) : 0;
@@ -1098,7 +1093,7 @@ const onMouseDown = (e: React.MouseEvent<HTMLButtonElement>) => {
   const copyText = async (txt: string) => {
     try {
       await navigator.clipboard.writeText(txt);
-      WebApp.showToast?.(t('copied', { defaultValue: 'Kopyalandı' }));
+      WebApp.HapticFeedback?.notificationOccurred('success');
     } catch {}
   };
 

@@ -1,4 +1,5 @@
-import React, { useEffect, useState } from "react";
+import WebApp from '@twa-dev/sdk';
+import { useEffect, useState } from "react";
 import API_BASE_URL from "../config";
 import { useTranslation } from "react-i18next";
 
@@ -34,7 +35,7 @@ export default function Tournament() {
   const fetchUserInfo = async () => {
     try {
       const res = await fetch(`${API_BASE_URL}/api/tournament/me`, {
-        headers: { "init-data": window?.Telegram?.WebApp?.initData || "" },
+        headers: { "init-data": WebApp.initData || "" },
       });
       const data = await res.json();
       setUserInfo(data);

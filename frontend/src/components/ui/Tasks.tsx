@@ -133,7 +133,7 @@ const Tasks: React.FC = () => {
   const [openedGroup, setOpenedGroup] = useState(false);
 
   const [streak, setStreak] = useState<number | null>(null);
-  const [reward, setReward] = useState<number | null>(null);
+  const [, setReward] = useState<number | null>(null);
   const [checkedIn, setCheckedIn] = useState(false);
   const [checkinMessage, setCheckinMessage] = useState('');
 

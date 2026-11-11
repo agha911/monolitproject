@@ -3,7 +3,7 @@ import WebApp from '@twa-dev/sdk';
 import { useTranslation } from 'react-i18next';
 import MainButton from './MainButton';
 import API_BASE_URL from './config';
-import { useClickBuffer, FlushResponse } from '../hooks/useClickBuffer';
+import { useClickBuffer, type FlushResponse } from '../hooks/useClickBuffer';
 import { useAnimatedInt } from '../hooks/useAnimatedInt';
 import UserCard from './UserCard';
 
@@ -214,7 +214,6 @@ const Clicker: React.FC = () => {
 
   // временный множитель x10, если активирован бустер
   const tempMultiplierActive = tempMultUntil !== null && Date.now() < tempMultUntil ? 10 : 1;
-  const effectiveBoost = clickBoost * tempMultiplierActive;
 
   const { addClicks } = useClickBuffer({
     initData: WebApp.initData,

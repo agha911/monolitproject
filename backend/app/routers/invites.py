@@ -4,8 +4,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 from app.database import get_async_session
 from app.models.user import User
-import urllib.parse
-import json
+from app.utils import parse_telegram_user_id
 
 router = APIRouter()
 
@@ -14,27 +13,7 @@ async def get_user_invites(
     init_data: str = Query(...),
     session: AsyncSession = Depends(get_async_session),
 ):
-    try:
-        decoded = urllib.parse.unquote(init_data)
-        parsed = json.loads(decoded) if decoded.startswith('{') else dict(urllib.parse.parse_qsl(decoded))
-
-        user_raw = parsed.get("user")
-        if isinstance(user_raw, str):
-            user_raw = json.loads(user_raw)
-
-        user_id = (
-            user_raw.get("id")
-            if isinstance(user_raw, dict)
-            else parsed.get("id")
-        )
-
-        if not user_id:
-            raise ValueError("Missing user_id")
-
-        telegram_id = int(user_id)
-
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Invalid init_data: {str(e)}")
+    telegram_id = parse_telegram_user_id(init_data)
 
     # 🧠 Не забываем выбрать связь через selectinload
     result = await session.execute(

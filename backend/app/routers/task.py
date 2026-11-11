@@ -5,7 +5,7 @@ from pydantic import BaseModel
 
 from app.database import get_async_session
 from app.models.user import User
-from app.crud.user import get_user, complete_task, daily_checkin, assign_or_get_daily_task
+from app.crud.user import get_user, complete_task, daily_checkin, assign_or_get_daily_task, mark_joined_group
 
 router = APIRouter(prefix="/api/task")
 

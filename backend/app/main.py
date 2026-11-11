@@ -18,7 +18,7 @@ from app.models.user import User
 from app.utils import parse_telegram_user_id
 from app.core.referral_cache import referral_cache
 import app.helpers.bot_partner
-import app.helpers.partner_debug
+# Debug bot handlers intentionally excluded.
 from app.bot_instance import bot
 from app.config import TELEGRAM_BOT_TOKEN
 from app.notifications.notify_energy import notify_max_energy_users
@@ -91,12 +91,14 @@ MAX_DELTA_PER_FLUSH = 500
 
 # ---------------- app + CORS ----------------
 
-app = FastAPI()
-api_log.info("APP start | DATABASE_URL=%s", os.getenv("DATABASE_URL"))
+from app.auth import require_telegram_user
+
+app = FastAPI(dependencies=[Depends(require_telegram_user)])
+api_log.info("APP start")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[origin.strip() for origin in os.getenv("CORS_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173").split(",") if origin.strip()],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -105,6 +107,8 @@ app.add_middleware(
 # ---------------- helpers ----------------
 
 def get_user_info_from_bot_api(user_id: int) -> dict:
+    if os.getenv("ALLOW_TELEGRAM_LOOKUPS", "false").lower() != "true":
+        return {}
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/getChat"
     params = {"chat_id": user_id}
     try:
@@ -686,16 +690,34 @@ async def _weekly_season_daemon():
         await asyncio.sleep(60)
 
 
+def feature_enabled(name: str) -> bool:
+    return os.getenv(name, "false").lower() == "true"
+
+_background_tasks: list[asyncio.Task] = []
+
 @app.on_event("startup")
 async def start_background_tasks():
-    asyncio.create_task(notify_loop())
-    asyncio.create_task(reset_loop())
-    register_winners_handlers(bot)
-    register_delivery_handlers(bot)
-    asyncio.create_task(run_bot_polling())
-    #asyncio.create_task(tournament_reset_loop())# ← добавили
-    register_oneoff_finalize_task()
-    asyncio.create_task(_weekly_season_daemon())
+    if feature_enabled("ENABLE_NOTIFICATIONS"):
+        _background_tasks.extend([asyncio.create_task(notify_loop()), asyncio.create_task(reset_loop())])
+    if feature_enabled("ENABLE_BOT_POLLING"):
+        register_winners_handlers(bot)
+        register_delivery_handlers(bot)
+        _background_tasks.append(asyncio.create_task(run_bot_polling()))
+    if feature_enabled("ENABLE_HISTORICAL_FINALIZER"):
+        register_oneoff_finalize_task()
+    if feature_enabled("ENABLE_SEASON_WORKER"):
+        _background_tasks.append(asyncio.create_task(_weekly_season_daemon()))
+
+@app.on_event("shutdown")
+async def stop_background_tasks():
+    for task in _background_tasks:
+        task.cancel()
+    await asyncio.gather(*_background_tasks, return_exceptions=True)
+    _background_tasks.clear()
+    # Telebot raises if no HTTP session was ever created (the default local mode).
+    from telebot import asyncio_helper
+    if asyncio_helper.session_manager.session is not None:
+        await bot.close_session()
 
 async def notify_loop():
     while True:

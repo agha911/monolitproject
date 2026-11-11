@@ -8,7 +8,9 @@ load_dotenv()
 DATABASE_URL = os.getenv("DATABASE_URL")
 
 # Создание движка
-engine = create_async_engine(DATABASE_URL, echo=True)
+if not DATABASE_URL:
+    raise RuntimeError("DATABASE_URL is required; see backend/.env.example")
+engine = create_async_engine(DATABASE_URL, echo=False)
 
 # Сессия
 async_session_maker = sessionmaker(
