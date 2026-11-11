@@ -72,4 +72,5 @@ The demo is local only; public hosting, production migration, full feature verif
 - Drop UI uses the server's user_left/disabled_for_user fields, refreshes offers after a purchase and no longer mutates an item in state or reads nonexistent remaining/user_remaining fields. It does not invent a global remaining count from total supply.
 - Referral UI recognizes nothing_to_claim and no longer reports a payout when the server response is unreadable or lacks a confirmed amount. Demo popups display their message in the existing notice area.
 - Extended the offer integration scenario to verify personal availability before/after purchase; this test passes on isolated PostgreSQL. Frontend lint, typecheck and production build pass locally.
+- Browser PvP check completed: challenge starts, one tap is accepted and the final loss result is received without console errors. The result header now uses the server's snapshot of opponent_best_result, matching the target shown in the result card.
 - Migration strategy, dependency hardening, further workflow coverage and public hosting remain open.

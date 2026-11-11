@@ -1203,7 +1203,9 @@ const onMouseDown = (e: React.MouseEvent<HTMLButtonElement>) => {
     ? formatUserLabel(challengeOpponent, challengeOpponent?.user_id ?? null)
     : formatUserLabel(liveOpponent, opponentUserId);
 
-  const opponentBest = isChallenge ? intOrZero(challengeOpponent?.best_result ?? challengeOpponent?.pvp_best_result) : null;
+  const opponentBest = isChallenge
+    ? extractNumber(challengeFinishResp, ['opponent_best_result']) ?? intOrZero(challengeOpponent?.best_result ?? challengeOpponent?.pvp_best_result)
+    : null;
 
   const bubbleGlowStyle: React.CSSProperties = {
     background:
