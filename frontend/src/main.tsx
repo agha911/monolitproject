@@ -1,4 +1,5 @@
 import './apiFetch';
+import Demo from './Demo';
 import React, { useEffect } from 'react';
 import ReactDOM from 'react-dom/client';
 import { BrowserRouter, Routes, Route, useNavigate } from 'react-router-dom';
@@ -40,6 +41,7 @@ function StartParamRedirect() {
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
+    {import.meta.env.VITE_DEMO_MODE === 'true' ? <Demo /> : (
     <BrowserRouter>
       <Routes>
         {/* вместо прямого MainScreen — ставим редирект-обертку */}
@@ -48,6 +50,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
         <Route path="/pvp" element={<Pvp />} />
       </Routes>
     </BrowserRouter>
+    )}
   </React.StrictMode>
 );
 

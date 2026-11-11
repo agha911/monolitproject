@@ -384,6 +384,8 @@ async def get_progress(data: dict = Body(...), session: AsyncSession = Depends(g
         "energy_refill_count": user.energy_refill_count or 0,
         "energy_refills_left": energy_refills_left,
         "daily_reward_claimed": user.daily_reward_claimed or False,
+        "daily_progress": user.daily_progress or 0,
+        "daily_target": user.daily_target or 0,
         "last_client_seq": user.last_client_seq or 0,
     }
 
@@ -486,7 +488,7 @@ async def clicks_flush(
 async def claim_daily_reward(data: dict = Body(...), session: AsyncSession = Depends(get_async_session)):
     try:
         telegram_id = parse_telegram_user_id(data["init_data"])
-        user = await crud_user.get_user(session, telegram_id)
+        user = (await session.execute(select(User).where(User.telegram_id == telegram_id).with_for_update())).scalar_one_or_none()
 
         if not user:
             raise HTTPException(status_code=404, detail="User not found")
@@ -505,8 +507,12 @@ async def claim_daily_reward(data: dict = Body(...), session: AsyncSession = Dep
 
         return {"status": "reward_claimed", "reward": reward, "total_xp": user.total_xp}
 
-    except Exception as e:
-        return {"status": "error", "message": str(e)}
+    except HTTPException:
+        raise
+    except Exception:
+        await session.rollback()
+        api_log.exception("Daily reward failed")
+        raise HTTPException(status_code=500, detail="Could not claim daily reward")
 
 @app.get("/api/game/leaderboard")
 async def leaderboard(session: AsyncSession = Depends(get_async_session)):

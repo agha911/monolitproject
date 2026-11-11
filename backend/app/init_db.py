@@ -11,9 +11,9 @@ async def init_models():
         for module in pkgutil.iter_modules(models.__path__):
             importlib.import_module(f"app.models.{module.name}")
         async with engine.begin() as conn:
-            print("🔧 Создаём таблицы...")
+            print("Creating development tables...")
             await conn.run_sync(Base.metadata.create_all)
-            print("✅ Таблицы успешно созданы.")
+            print("Development tables ready.")
     except SQLAlchemyError as e:
         raise RuntimeError("Failed to initialize the development database") from e
 

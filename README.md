@@ -4,7 +4,21 @@ A Telegram Mini App with a React/TypeScript frontend and a FastAPI/PostgreSQL ba
 
 ## Portfolio preparation status
 
-This branch is being prepared for a reproducible portfolio demo. It is **not yet a complete standalone browser demo**: gameplay requires signed Telegram Mini App data and a configured test database. No production database or bot should be used for development.
+This branch includes an isolated browser playground for clicks, daily rewards, virtual-currency upgrades and the leaderboard. The original Telegram UI remains available when demo mode is off. The playground uses real backend operations with synthetic players; it does not demonstrate every Telegram feature. No production database or bot should be used for development.
+
+![Portfolio playground](docs/portfolio-demo.jpg)
+
+## Browser playground
+
+Create a separate local PostgreSQL database named `monolit_demo`. The Compose recipe below creates one. Install backend and frontend dependencies as described in Local setup.
+
+Start the backend from `backend/` with a dedicated loopback `DATABASE_URL` and `python -m uvicorn app.demo:app --host 127.0.0.1 --port 8000`. For the Compose database use `postgresql+asyncpg://monolit:local_demo_only@127.0.0.1:5432/monolit_demo`. The demo entry point refuses non-loopback hosts and other database names, disables bot/notification workers, uses a dedicated non-secret demo signing token, and seeds three fictional players without deleting existing demo progress. Do not expose this entry point publicly.
+
+Start the frontend from `frontend/` with `VITE_DEMO_MODE=true` and `npm run dev`. In PowerShell set the variable first with `$env:VITE_DEMO_MODE='true'`; in bash use `VITE_DEMO_MODE=true npm run dev`. Visit the local URL printed by Vite. The API URL defaults to `http://127.0.0.1:8000`.
+
+Try: tap twice → claim the daily reward → buy an energy-capacity upgrade → inspect the updated leaderboard. Progress is persisted in the isolated demo database. The demo session lasts one hour; reload the page to obtain a fresh one. These points have no monetary value.
+
+For the original Telegram frontend, leave `VITE_DEMO_MODE` unset and use `app.main:app` with a real **development** bot.
 
 ## Local setup
 
@@ -45,7 +59,9 @@ From `backend/`: `python -m pytest tests -q`.
 
 From `frontend/`: `npm run build`, `npm run typecheck`, `npm run lint`.
 
-The tests do not contact Telegram or a database. Full gameplay/database regression tests, browser smoke tests, dependency hardening, and cleanup of existing lint errors remain part of portfolio preparation. See `PORTFOLIO_PROGRESS.md` for verified results and limitations.
+Authentication/startup tests do not contact Telegram or a database. To include PostgreSQL integration tests, set `TEST_DATABASE_URL` to a loopback PostgreSQL database named `monolit_test`. Each integration test creates and drops only its own randomly named schema. The suite checks registration, duplicate click packets, concurrent daily claims, concurrent purchases, offer supply, spending totals, and PvP daily limits. Without the variable, these integration tests are explicitly skipped. GitHub Actions provisions PostgreSQL and runs them.
+
+Additional gameplay/database regression coverage, migration scripts, dependency hardening, and cleanup of existing lint errors remain part of portfolio preparation. See `PORTFOLIO_PROGRESS.md` for verified results and limitations.
 
 ## Layout
 
