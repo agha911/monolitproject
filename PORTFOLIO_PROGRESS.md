@@ -1,4 +1,4 @@
-# Portfolio preparation — stages 1–5
+# Portfolio preparation — stages 1–6
 
 12 November 2026. Base: master / 628129e. Branch: codex/portfolio-readiness.
 
@@ -74,3 +74,14 @@ The demo is local only; public hosting, production migration, full feature verif
 - Extended the offer integration scenario to verify personal availability before/after purchase; this test passes on isolated PostgreSQL. Frontend lint, typecheck and production build pass locally.
 - Browser PvP check completed: challenge starts, one tap is accepted and the final loss result is received without console errors. The result header now uses the server's snapshot of opponent_best_result, matching the target shown in the result card.
 - Migration strategy, dependency hardening, further workflow coverage and public hosting remain open.
+
+## Stage 6 — repeatable local package, publication deferred
+
+- User selected preparation only, without publishing. No external hosting or paid resources were created.
+- Added a multi-stage Dockerfile and a dedicated Compose recipe with an internal PostgreSQL service, a separate persistent volume and loopback-only web port. The application image runs as an unprivileged user; environment files and local credentials are excluded from its build context.
+- Added app.demo_site to serve compiled original frontend routes/assets and the existing demo API on one origin. API lifespan still initializes/seeds the demo database. Missing API paths/assets return 404; health remains available at /health.
+- Demo database guard still requires monolit_demo and the async PostgreSQL driver. An explicit container flag permits only the exact Compose hostname db in addition to loopback; arbitrary remote hosts remain rejected.
+- Eight focused tests pass for SPA/API/assets/lifespan separation, missing builds and database configuration guards. The native compiled package and authenticated progress smoke check pass locally on port 8080.
+- The complete local backend suite now has 44 passing tests.
+- Docker is not installed locally. A new GitHub Actions job builds/starts the complete Compose package and runs the same smoke check; its result is reported with the PR.
+- Runbook: docs/DEMO_RUNBOOK.md. Public exposure still requires a separate deployment configuration and demo isolation/session/request controls; this local package is not presented as ready for internet exposure.

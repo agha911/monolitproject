@@ -12,8 +12,11 @@ from sqlalchemy.engine import make_url
 
 load_dotenv()
 url = make_url(os.getenv("DATABASE_URL", "postgresql+asyncpg://monolit@127.0.0.1:55432/monolit_demo"))
-if url.host not in {"127.0.0.1", "localhost", "::1"} or url.database != "monolit_demo":
-    raise RuntimeError("Demo requires a loopback database named monolit_demo")
+allowed_hosts = {"127.0.0.1", "localhost", "::1"}
+if os.getenv("MONOLIT_DEMO_CONTAINER") == "true":
+    allowed_hosts.add("db")  # Dedicated Compose service; never an arbitrary remote host.
+if url.host not in allowed_hosts or url.database != "monolit_demo" or url.drivername != "postgresql+asyncpg":
+    raise RuntimeError("Demo requires a loopback database named monolit_demo (or the explicit Compose db service)")
 os.environ["DATABASE_URL"] = url.render_as_string(hide_password=False)
 # A dedicated, intentionally non-secret demo identity. Never reuse a real bot token.
 DEMO_TOKEN = "123456789:monolit-local-portfolio-demo"

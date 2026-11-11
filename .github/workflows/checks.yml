@@ -43,3 +43,17 @@ jobs:
       - run: npm run typecheck
       - run: npm run lint
       - run: npm run build
+  packaged-demo:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and start the isolated demo
+        run: docker compose -f compose.demo.yaml up --build --detach --wait --wait-timeout 180
+      - name: Check frontend, session and authenticated gameplay
+        run: python scripts/check_packaged_demo.py
+      - name: Show logs on failure
+        if: failure()
+        run: docker compose -f compose.demo.yaml logs --no-color
+      - name: Stop disposable CI demo
+        if: always()
+        run: docker compose -f compose.demo.yaml down --volumes
