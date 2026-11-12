@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import API_BASE_URL from '../config';
-import WebApp from '@twa-dev/sdk';
+import WebApp from '../../telegram';
 
 // дропы API
 import { listDrops, buyDrop, type Drop, type Purchase } from '../scripts/api/drops';
@@ -277,7 +277,7 @@ const Shop: React.FC = () => {
         await fetchUserData();
         await fetchTotalSpent();
         await fetchInvitesCount();
-        setMessage(t('shop_success_boost', { value: `x${clickBoostLevel + 1}` }));
+        setMessage(t('shop_success_boost', { value: `x${data.new_boost_level + 1}` }));
       } else {
         setMessage(`${t('shop_error')}: ${data.message ?? ''}`);
       }
@@ -432,7 +432,7 @@ const Shop: React.FC = () => {
       const data = await res.json().catch(() => ({}));
 
       if (!res.ok) {
-        const detail = (data as any)?.detail ?? 'tshirt_buy_failed';
+        const detail = data?.detail ?? 'tshirt_buy_failed';
         setMessage(translateApiDetail(detail, 'tshirt_buy_failed'));
         return;
       }
@@ -465,7 +465,7 @@ const Shop: React.FC = () => {
       const data = await res.json().catch(() => ({}));
 
       if (!res.ok) {
-        const detail = (data as any)?.detail ?? 'tshirt_claim_failed';
+        const detail = data?.detail ?? 'tshirt_claim_failed';
         setMessage(translateApiDetail(detail, 'tshirt_claim_failed'));
         return;
       }
@@ -653,7 +653,7 @@ const Shop: React.FC = () => {
                   👕 {tr('shop.tshirt.title_fallback', 'Gappick T-shirt (Limited)')}
                 </h3>
                 <p className="text-sm text-[#999999]">
-                  {tshirtLoading ? (tr('common.loading', 'Loading...') as any) : '—'}
+                  {tshirtLoading ? tr('common.loading', 'Loading...') : '—'}
                 </p>
                 <button
                   disabled
@@ -801,9 +801,8 @@ const Shop: React.FC = () => {
 
           <div className="space-y-3">
             {drops.map((d) => {
-              const userOut = (d as any).user_remaining === 0;
-              const leftAll = (d as any).remaining;
-              const leftUser = (d as any).user_remaining;
+              const userOut = d.disabled_for_user;
+              const leftUser = d.per_user_limit > 0 ? d.user_left : null;
 
               return (
                 <div
@@ -819,14 +818,8 @@ const Shop: React.FC = () => {
                       {t('drop_price', { price: d.price_coins })}
                     </div>
 
-                    {(leftAll != null || leftUser != null) && (
+                    {leftUser != null && (
                       <div className="text-[11px] opacity-70 mt-1">
-                        {leftAll != null && (
-                          <span>
-                            {t('available')}: {leftAll}
-                          </span>
-                        )}
-                        {leftAll != null && leftUser != null && <span> • </span>}
                         {leftUser != null && (
                           <span>
                             {t('your_available') ?? 'You'}: {leftUser}
@@ -850,14 +843,9 @@ const Shop: React.FC = () => {
                           setPurchase(p);
                           await fetchUserData();
                           await fetchTotalSpent();
-                          if (leftUser != null) {
-                            (d as any).user_remaining = Math.max(0, leftUser - 1);
-                            setDrops((prev) =>
-                              prev.map((x) => (x.id === d.id ? { ...x, ...(d as any) } : x))
-                            );
-                          }
-                        } catch (e: any) {
-                          alert(e?.message || t('shop_error'));
+                          setDrops(await listDrops());
+                        } catch (e) {
+                          alert(e instanceof Error ? e.message : t('shop_error'));
                         }
                       }}
                     >
@@ -899,14 +887,14 @@ const Shop: React.FC = () => {
                 </div>
 
                 <div className="text-xs opacity-70 mt-2">
-                  {(purchase.partner_name || (selectedDrop as any)?.partner?.name) ?? '—'} ·{' '}
+                  {(purchase.partner_name || selectedDrop?.partner?.name) ?? '—'} ·{' '}
                   {(purchase.discount_percent ??
-                    (selectedDrop as any)?.discount_percent ??
+                    selectedDrop?.discount_percent ??
                     '-') + '%'}
                 </div>
                 <div className="text-xs opacity-70 mt-1">
                   {t('drop_price', {
-                    price: (selectedDrop as any)?.price_coins ?? purchase.price_coins ?? 0,
+                    price: selectedDrop?.price_coins ?? purchase.price_coins ?? 0,
                   })}
                 </div>
 

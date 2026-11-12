@@ -37,10 +37,7 @@ CHALLENGE_DAILY_LIMIT = 5
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 
-try:
-    from app.main import referral_cache  # type: ignore
-except Exception:
-    referral_cache = None  # pragma: no cover
+from app.core.referral_cache import referral_cache
 
 
 # -----------------------------------------------------------------------------
@@ -128,7 +125,7 @@ def _gen_match_token() -> str:
 
 
 def _tg_getchat(telegram_id: int) -> Dict[str, Any]:
-    if not TELEGRAM_BOT_TOKEN:
+    if not TELEGRAM_BOT_TOKEN or os.getenv("ALLOW_TELEGRAM_LOOKUPS", "false").lower() != "true":
         return {}
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/getChat"
     try:

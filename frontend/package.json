@@ -6,8 +6,9 @@
   "scripts": {
     "dev": "vite",
     "build": "npx vite build",
-    "lint": "eslint .",
-    "preview": "vite preview"
+    "lint": "eslint . --max-warnings=0",
+    "preview": "vite preview",
+    "typecheck": "tsc -b"
   },
   "dependencies": {
     "@twa-dev/sdk": "^8.0.2",

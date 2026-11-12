@@ -30,7 +30,7 @@ async def tournament_me(
     request: Request,
     session: AsyncSession = Depends(get_async_session)
 ):
-    init_data = request.headers.get("init-data")
+    init_data = request.headers.get("X-Telegram-Init-Data") or request.headers.get("init-data")
     if not init_data:
         raise HTTPException(status_code=401, detail="No init-data header")
 

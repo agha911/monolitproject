@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import WebApp from '@twa-dev/sdk';
+import WebApp from '../telegram';
 import { useTranslation } from 'react-i18next';
 import MainButton from './MainButton';
 import API_BASE_URL from './config';
-import { useClickBuffer, FlushResponse } from '../hooks/useClickBuffer';
+import { useClickBuffer, type FlushResponse } from '../hooks/useClickBuffer';
 import { useAnimatedInt } from '../hooks/useAnimatedInt';
 import UserCard from './UserCard';
 
@@ -18,7 +18,7 @@ type SpawnedBooster =
 const Clicker: React.FC = () => {
   const { t } = useTranslation();
 
-  const [telegramUser, setTelegramUser] = useState<any | null>(null);
+  const [telegramUser, setTelegramUser] = useState<typeof WebApp.initDataUnsafe.user>(undefined);
   const [totalXp, setTotalXp] = useState(0);
   const [energy, setEnergy] = useState(1000);
   const smoothEnergy = useAnimatedInt(energy, { speedPerUnit: 8, minDuration: 120, maxDuration: 600 });
@@ -27,7 +27,7 @@ const Clicker: React.FC = () => {
   const [timeToFullEnergy, setTimeToFullEnergy] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [clickBoost, setClickBoost] = useState(1);
-  const [floatingTexts, setFloatingTexts] = useState<any[]>([]);
+  const [floatingTexts, setFloatingTexts] = useState<{ id: number; value: number; x: number; y: number }[]>([]);
   const [serverSeq, setServerSeq] = useState<number | null>(null);
   const [seqReady, setSeqReady] = useState(false);
   const [showUserCard, setShowUserCard] = useState(false);
@@ -118,7 +118,7 @@ const Clicker: React.FC = () => {
 
         const s = Number(data.last_client_seq ?? 0);
         setServerSeq(s);
-        try { localStorage.setItem(seqStorageKey, String(s)); } catch {}
+        try { localStorage.setItem(seqStorageKey, String(s)); } catch { /* Server sequence remains the source of truth when storage is unavailable. */ }
 
         setSeqReady(true);
         setLoading(false);
@@ -148,7 +148,7 @@ const Clicker: React.FC = () => {
         const s = Number(data.last_client_seq ?? 0);
         if (serverSeq === null || s > serverSeq) {
           setServerSeq(s);
-          try { localStorage.setItem(seqStorageKey, String(s)); } catch {}
+          try { localStorage.setItem(seqStorageKey, String(s)); } catch { /* Server sequence remains the source of truth when storage is unavailable. */ }
           setSeqReady(true);
         }
       } catch (err) {
@@ -214,7 +214,6 @@ const Clicker: React.FC = () => {
 
   // временный множитель x10, если активирован бустер
   const tempMultiplierActive = tempMultUntil !== null && Date.now() < tempMultUntil ? 10 : 1;
-  const effectiveBoost = clickBoost * tempMultiplierActive;
 
   const { addClicks } = useClickBuffer({
     initData: WebApp.initData,
@@ -226,7 +225,7 @@ const Clicker: React.FC = () => {
     initialSeq: Math.max(serverSeq ?? 0, initialLocalSeq),
     maxBatch: 480,
     lockKey: userId,
-    seqStorageKey: seqStorageKey as any,
+    seqStorageKey,
     canSend: energy > 0
   });
 
@@ -365,7 +364,7 @@ const Clicker: React.FC = () => {
 
       {/* Кнопка «Карта пользователя» */}
       <button
-        className="fixed top-3 left-3 z-50 w-9 h-9 rounded-full bg-black/80 text-white shadow flex items-center justify-center active:scale-95"
+        className="user-card-trigger fixed top-3 left-3 z-50 w-9 h-9 rounded-full bg-black/80 text-white shadow flex items-center justify-center active:scale-95"
         onClick={() => setShowUserCard(true)}
         aria-label={t('userCard.open', { defaultValue: 'User card' })}
         title={t('userCard.open', { defaultValue: 'User card' })}

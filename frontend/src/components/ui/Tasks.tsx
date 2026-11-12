@@ -1,7 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import API_BASE_URL from '../config';
-import WebApp from '@twa-dev/sdk';
+import WebApp, { isDemo, showDemoNotice } from '../../telegram';
 
 /** ======================= Types ======================= */
 type Slide = { title: string; text: string; image?: string };
@@ -33,6 +33,7 @@ const PartnerSlidesModal: React.FC<{
   const next = () => setI((x) => Math.min(x + 1, task.slides.length - 1));
 
   const claim = async () => {
+    if (isDemo) { showDemoNotice('Partner promotions are unavailable in this demo.'); return; }
     try {
       setBusy(true);
       window.open(igUrl, '_blank', 'noopener,noreferrer');
@@ -133,7 +134,7 @@ const Tasks: React.FC = () => {
   const [openedGroup, setOpenedGroup] = useState(false);
 
   const [streak, setStreak] = useState<number | null>(null);
-  const [reward, setReward] = useState<number | null>(null);
+  const [, setReward] = useState<number | null>(null);
   const [checkedIn, setCheckedIn] = useState(false);
   const [checkinMessage, setCheckinMessage] = useState('');
 
@@ -159,7 +160,7 @@ const Tasks: React.FC = () => {
   };
 
   /** ---------- Daily Task ---------- */
-  const fetchDailyTask = async () => {
+  const fetchDailyTask = useCallback(async () => {
     if (!telegramUserId) return;
     try {
       const res = await fetch(`${API_BASE_URL}/api/task/daily`, {
@@ -178,21 +179,22 @@ const Tasks: React.FC = () => {
     } catch (err) {
       console.error('Ошибка при загрузке ежедневной задачи', err);
     }
-  };
+  }, [telegramUserId]);
 
   useEffect(() => {
     fetchDailyTask();
-  }, [telegramUserId]);
+  }, [fetchDailyTask]);
 
   useEffect(() => {
     const interval = setInterval(() => {
       fetchDailyTask();
     }, 10000);
     return () => clearInterval(interval);
-  }, [telegramUserId]);
+  }, [fetchDailyTask]);
 
   /** ---------- Partner Task: load on mount ---------- */
   useEffect(() => {
+    if (isDemo) return;
     const loadPartnerTask = async () => {
       try {
         const res = await fetch(`${API_BASE_URL}/api/partner/task`, {
@@ -212,16 +214,18 @@ const Tasks: React.FC = () => {
 
   /** ---------- Old Instagram task (kept) ---------- */
   const handleInstagramClick = () => {
+    if (isDemo) { showDemoNotice('Social subscription tasks require the real Telegram app.'); return; }
     window.open('https://www.instagram.com/gap_pick', '_blank');
     setOpenedInstagram(true);
   };
 
   const handleGroupClick = () => {
+    if (isDemo) { showDemoNotice('Social subscription tasks require the real Telegram app.'); return; }
     window.open('https://t.me/+h-VjXbnz0BI2OGI6', '_blank');
     setOpenedGroup(true);
   };
 
-  const handleComplete = async (task_id: string, setter: any, msgSetter: any) => {
+  const handleComplete = async (task_id: string, setter: (done: boolean) => void, msgSetter: (message: string) => void) => {
     if (!telegramUserId) {
       msgSetter(t('error_user_unknown'));
       return;

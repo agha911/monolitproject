@@ -1,5 +1,5 @@
 import { apiGet, apiPost } from './http';
-import WebApp from '@twa-dev/sdk';
+import WebApp from '../../../telegram';
 
 export type Drop = {
   id: number;
@@ -13,6 +13,9 @@ export type Drop = {
   total_supply?: number | null;
   active: boolean;
   visible: boolean;
+  user_used: number;
+  user_left: number;
+  disabled_for_user: boolean;
   partner?: { id: number; name: string; slug: string } | null;
 };
 

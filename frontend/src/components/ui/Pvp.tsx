@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import WebApp from '@twa-dev/sdk';
+import WebApp, { isDemo } from '../../telegram';
 import API_BASE_URL from '../config';
 
 function getTelegramId(): number | null {
@@ -18,7 +18,7 @@ async function apiRequest<T>(path: string, opts?: RequestInit): Promise<T> {
   });
 
   const text = await res.text();
-  let data: any = null;
+  let data: unknown = null;
   try {
     data = text ? JSON.parse(text) : null;
   } catch {
@@ -26,10 +26,9 @@ async function apiRequest<T>(path: string, opts?: RequestInit): Promise<T> {
   }
 
   if (!res.ok) {
-    const msg = (data && (data.message || data.detail)) || `HTTP ${res.status}`;
-    const err: any = new Error(typeof msg === 'string' ? msg : JSON.stringify(msg));
-    err.payload = data;
-    throw err;
+    const payload = asRecord(data);
+    const msg = payload.message || payload.detail || `HTTP ${res.status}`;
+    throw Object.assign(new Error(typeof msg === 'string' ? msg : JSON.stringify(msg)), { payload: data });
   }
   return data as T;
 }
@@ -69,7 +68,38 @@ type PublicUser = {
   username?: string | null;
   first_name?: string | null;
   last_name?: string | null;
+  pvp_victories?: number;
+  victories?: number;
+  pvp_weekly_victories?: number;
+  weekly_victories?: number;
+  pvp_best_result?: number;
+  best_result?: number;
+  best?: number;
+  pvp_best?: number;
+  rank?: number;
 };
+
+type PvpConfig = { match_duration_sec?: number; stake?: number; stake_default?: number;
+  challenge_daily_limit?: number; challenge_limit_per_day?: number; challenge_attempts_per_day?: number };
+type WeeklySeason = { season_no: number; end_at?: string };
+type Leaderboard = { season?: WeeklySeason | null; items: PublicUser[] };
+type PvpResult = {
+  status?: string; outcome?: string; state?: string; result?: PvpResult;
+  match_token?: string; match_id?: number; attempt_id?: number;
+  player1_id?: number; player2_id?: number; opponent_user_id?: number;
+  player1?: PublicUser | null; player2?: PublicUser | null;
+  opponent?: PublicUser | null; opponent_user?: PublicUser | null;
+  winner_user_id?: number | null; winner_id?: number | null; winnerUserId?: number | null;
+  loser_user_id?: number | null; loser_id?: number | null; loserUserId?: number | null;
+  winner?: PublicUser; loser?: PublicUser;
+  won?: boolean; is_winner?: boolean; isWinner?: boolean; is_win?: boolean;
+  anti_cheat?: (AntiCheatVerdict & { player1?: AntiCheatVerdict; player2?: AntiCheatVerdict }) | null;
+};
+type PvpInvite = PvpResult & { invite_code?: string; expires_at?: string; stake?: number; match_duration_sec?: number };
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return value !== null && typeof value === 'object' ? value as Record<string, unknown> : {};
+}
 
 const BOT_USERNAME = 'monolit_42_bot';
 const PREP_SECONDS = 5;
@@ -93,27 +123,23 @@ function buildShareLink(url: string, text: string) {
   return `https://t.me/share/url?url=${encodeURIComponent(url)}&text=${encodeURIComponent(text)}`;
 }
 
-function intOrZero(v: any): number {
+function intOrZero(v: unknown): number {
   const n = Number(v);
   return Number.isFinite(n) ? Math.floor(n) : 0;
 }
 
-function numOrNull(v: any): number | null {
-  const n = Number(v);
-  return Number.isFinite(n) ? n : null;
-}
-
-function pickVictories(me: any): number {
+function pickVictories(me: PublicUser | null): number {
   const v = me?.pvp_victories ?? me?.victories ?? me?.pvp_weekly_victories ?? me?.weekly_victories ?? 0;
   return Number.isFinite(Number(v)) ? Number(v) : 0;
 }
 
-function pickBest(me: any): number {
+function pickBest(me: PublicUser | null): number {
   const b = me?.pvp_best_result ?? me?.best_result ?? me?.best ?? me?.pvp_best ?? 0;
   return Number.isFinite(Number(b)) ? Number(b) : 0;
 }
 
-function pickChallengeAttemptsLeft(obj: any): number | null {
+function pickChallengeAttemptsLeft(value: unknown): number | null {
+  const obj = asRecord(value);
   const keys = [
     'challenge_attempts_left',
     'challenge_attempts_remaining',
@@ -139,7 +165,7 @@ function pickChallengeAttemptsLeft(obj: any): number | null {
   return null;
 }
 
-function formatUserLabel(u: any, fallbackId?: number | null) {
+function formatUserLabel(u: PublicUser | null | undefined, fallbackId?: number | null) {
   if (!u && fallbackId != null) return `#${fallbackId}`;
   if (!u) return '—';
 
@@ -157,7 +183,7 @@ function formatUserLabel(u: any, fallbackId?: number | null) {
   return '—';
 }
 
-function normalizeOutcome(raw: any, meUserId?: number | null): Outcome {
+function normalizeOutcome(raw: PvpResult | null, meUserId?: number | null): Outcome {
   const s = String(raw?.status ?? raw?.outcome ?? raw?.result ?? raw?.state ?? '').toLowerCase();
 
   if (s.includes('win')) return 'win';
@@ -178,7 +204,8 @@ function normalizeOutcome(raw: any, meUserId?: number | null): Outcome {
   return 'unknown';
 }
 
-function extractNumber(raw: any, keys: string[]): number | null {
+function extractNumber(value: unknown, keys: string[]): number | null {
+  const raw = asRecord(value);
   for (const k of keys) {
     if (raw && raw[k] != null) {
       const n = Number(raw[k]);
@@ -188,34 +215,27 @@ function extractNumber(raw: any, keys: string[]): number | null {
   return null;
 }
 
-function parseServerError(e: any): { code?: string; message?: string } {
-  const payload = e?.payload;
-  if (payload && typeof payload === 'object') {
-    const detail = payload.detail;
-    if (detail && typeof detail === 'object') {
-      return {
-        code: detail.code || payload.code,
-        message: detail.message || detail.detail || payload.message || payload.detail || payload.error,
-      };
-    }
-    return { code: payload.code, message: payload.message || payload.detail || payload.error };
+function parseServerError(error: unknown): { code?: string; message?: string } {
+  const entry = asRecord(error);
+  let payload = asRecord(entry.payload);
+  const message = error instanceof Error ? error.message : undefined;
+  if (!Object.keys(payload).length && message) {
+    try { payload = asRecord(JSON.parse(message)); }
+    catch { /* Plain-text errors use the Error message below. */ }
   }
-  const msg = e?.message;
-  if (typeof msg === 'string') {
-    try {
-      const j = JSON.parse(msg);
-      if (j && typeof j === 'object') return { code: j.code, message: j.message || j.detail };
-    } catch {}
-  }
-  return { message: typeof msg === 'string' ? msg : undefined };
+  const detail = asRecord(payload.detail);
+  const code = detail.code || payload.code;
+  const text = detail.message || detail.detail || payload.message || payload.detail || payload.error;
+  return { code: typeof code === 'string' ? code : undefined,
+    message: typeof text === 'string' ? text : message };
 }
 
-function getUserId(u: any): number | null {
+function getUserId(u: PublicUser | null | undefined): number | null {
   const v = u?.user_id ?? u?.id;
   return typeof v === 'number' ? v : null;
 }
 
-function getEmbeddedLiveOpponent(matchInfo: any, meUserId: number | null): PublicUser | null {
+function getEmbeddedLiveOpponent(matchInfo: PvpResult | null, meUserId: number | null): PublicUser | null {
   if (!matchInfo) return null;
   if (matchInfo?.opponent) return matchInfo.opponent;
   if (matchInfo?.opponent_user) return matchInfo.opponent_user;
@@ -231,7 +251,7 @@ function getEmbeddedLiveOpponent(matchInfo: any, meUserId: number | null): Publi
   return null;
 }
 
-function getLiveVerdicts(raw: any, meUserId?: number | null) {
+function getLiveVerdicts(raw: PvpResult | null, meUserId?: number | null) {
   const anti = raw?.anti_cheat ?? raw?.result?.anti_cheat ?? null;
   if (!anti) return { me: null as AntiCheatVerdict | null, opponent: null as AntiCheatVerdict | null };
 
@@ -247,7 +267,7 @@ function getLiveVerdicts(raw: any, meUserId?: number | null) {
   return { me: p1, opponent: p2 };
 }
 
-function resolveLiveClicks(raw: any, meUserId?: number | null) {
+function resolveLiveClicks(raw: PvpResult | null, meUserId?: number | null) {
   const src = raw?.result ?? raw;
   const p1Id = src?.player1_id;
   const p2Id = src?.player2_id;
@@ -264,7 +284,7 @@ function resolveLiveClicks(raw: any, meUserId?: number | null) {
   return { myClicks: p1Clicks, opponentClicks: p2Clicks };
 }
 
-function getChallengeVerdict(raw: any): AntiCheatVerdict | null {
+function getChallengeVerdict(raw: PvpResult | null): AntiCheatVerdict | null {
   return raw?.anti_cheat ?? raw?.result?.anti_cheat ?? null;
 }
 
@@ -276,6 +296,7 @@ function formatFlags(flags?: string[]) {
 const Pvp: React.FC = () => {
   const { t } = useTranslation();
 
+  const lastTouchEndRef = useRef(0);
   const telegramId = useMemo(() => getTelegramId(), []);
   const canUse = !!telegramId && !!WebApp.initData;
 
@@ -283,19 +304,19 @@ const Pvp: React.FC = () => {
 
   const [error, setError] = useState<string>('');
 
-  const [config, setConfig] = useState<any>(null);
+  const [config, setConfig] = useState<PvpConfig | null>(null);
 
   const [meUserId, setMeUserId] = useState<number | null>(null);
-  const [meInfo, setMeInfo] = useState<any>(null);
+  const [meInfo, setMeInfo] = useState<PublicUser | null>(null);
 
-  const [weeklySeason, setWeeklySeason] = useState<any>(null);
-  const [weeklyItems, setWeeklyItems] = useState<any[]>([]);
+  const [weeklySeason, setWeeklySeason] = useState<WeeklySeason | null>(null);
+  const [weeklyItems, setWeeklyItems] = useState<PublicUser[]>([]);
   const [weeklyLoading, setWeeklyLoading] = useState<boolean>(false);
 
-  const [createdInvite, setCreatedInvite] = useState<any>(null);
+  const [createdInvite, setCreatedInvite] = useState<PvpInvite | null>(null);
   const invitePollRef = useRef<number | null>(null);
 
-  const [matchInfo, setMatchInfo] = useState<any>(null);
+  const [matchInfo, setMatchInfo] = useState<PvpResult | null>(null);
 
   const [screen, setScreen] = useState<Screen>('lobby');
   const [duelMode, setDuelMode] = useState<DuelMode>('live');
@@ -311,17 +332,17 @@ const Pvp: React.FC = () => {
 
   const [liveSubmitState, setLiveSubmitState] = useState<'idle' | 'waiting' | 'finished'>('idle');
   const livePollRef = useRef<number | null>(null);
-  const [finishResponse, setFinishResponse] = useState<any>(null);
+  const [finishResponse, setFinishResponse] = useState<PvpResult | null>(null);
 
   const [challengeAttemptId, setChallengeAttemptId] = useState<number | null>(null);
-  const [challengeOpponent, setChallengeOpponent] = useState<any>(null);
-  const [challengeFinishResp, setChallengeFinishResp] = useState<any>(null);
+  const [challengeOpponent, setChallengeOpponent] = useState<PublicUser | null>(null);
+  const [challengeFinishResp, setChallengeFinishResp] = useState<PvpResult | null>(null);
   const [challengeAttemptsLeft, setChallengeAttemptsLeft] = useState<number | null>(null);
 
   const challengeFinishInFlightRef = useRef(false);
   const challengeFinishedRef = useRef(false);
 
-  const [liveOpponent, setLiveOpponent] = useState<any>(null);
+  const [liveOpponent, setLiveOpponent] = useState<PublicUser | null>(null);
 
   const matchDurationSec = config?.match_duration_sec ?? 30;
   const stakeDefault = config?.stake ?? config?.stake_default ?? 50000;
@@ -377,13 +398,13 @@ const Pvp: React.FC = () => {
 
   const preventDoubleTapZoom = (e: TouchEvent) => {
     const now = Date.now();
-    const lastTouch = Number((window as any).__lastTouchEnd || 0);
+    const lastTouch = lastTouchEndRef.current;
 
     if (now - lastTouch <= 300) {
       e.preventDefault();
     }
 
-    (window as any).__lastTouchEnd = now;
+    lastTouchEndRef.current = now;
   };
 
   document.addEventListener('touchmove', preventZoom, { passive: false });
@@ -495,7 +516,7 @@ const Pvp: React.FC = () => {
     };
   };
 
-  const setUserFriendlyError = (e: any) => {
+  const setUserFriendlyError = (e: unknown) => {
     const parsed = parseServerError(e);
 
     if (parsed?.code === 'ATTEMPT_NOT_ACTIVE' && String(parsed?.message || '').toLowerCase().includes('finished')) {
@@ -509,7 +530,7 @@ const Pvp: React.FC = () => {
   const refreshMe = async () => {
     if (!telegramId) return;
     try {
-      const me = await apiRequest<any>(`/api/pvp/me?telegram_id=${telegramId}`);
+      const me = await apiRequest<PublicUser>(`/api/pvp/me?telegram_id=${telegramId}`);
       if (me?.user_id) setMeUserId(me.user_id);
       setMeInfo(me);
 
@@ -523,22 +544,22 @@ const Pvp: React.FC = () => {
   const refreshWeekly = async () => {
     setWeeklyLoading(true);
     try {
-      let season: any = null;
+      let season: WeeklySeason | null = null;
       try {
-        const cur = await apiRequest<any>('/api/pvp/weekly-season/current');
+        const cur = await apiRequest<{ season: WeeklySeason | null }>('/api/pvp/weekly-season/current');
         season = cur?.season ?? null;
       } catch {
         season = null;
       }
 
       try {
-        const lb = await apiRequest<any>('/api/pvp/weekly-season/leaderboard?limit=10');
+        const lb = await apiRequest<Leaderboard>('/api/pvp/weekly-season/leaderboard?limit=10');
         setWeeklySeason(lb?.season ?? season);
         setWeeklyItems(Array.isArray(lb?.items) ? lb.items : []);
         return;
-      } catch {}
+      } catch (error) { console.debug('Optional PvP operation failed', error); }
 
-      const legacy = await apiRequest<any>('/api/pvp/leaderboard');
+      const legacy = await apiRequest<Leaderboard>('/api/pvp/leaderboard');
       setWeeklySeason(season);
       setWeeklyItems(Array.isArray(legacy?.items) ? legacy.items : []);
     } catch {
@@ -551,9 +572,9 @@ const Pvp: React.FC = () => {
   useEffect(() => {
     (async () => {
       try {
-        const cfg = await apiRequest<any>('/api/pvp/config');
+        const cfg = await apiRequest<PvpConfig>('/api/pvp/config');
         setConfig(cfg);
-      } catch {}
+      } catch (error) { console.debug('Optional PvP operation failed', error); }
     })();
 
     return () => {
@@ -562,7 +583,6 @@ const Pvp: React.FC = () => {
       stopInvitePoll();
       stopLivePoll();
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -593,9 +613,9 @@ const Pvp: React.FC = () => {
 
     for (const path of candidates) {
       try {
-        const u = await apiRequest<any>(path);
+        const u = await apiRequest<PublicUser & { user?: PublicUser }>(path);
         return u?.user ?? u;
-      } catch {}
+      } catch (error) { console.debug('Optional PvP operation failed', error); }
     }
     return null;
   };
@@ -627,7 +647,7 @@ const Pvp: React.FC = () => {
     livePollRef.current = window.setInterval(async () => {
       if (!telegramId) return;
       try {
-        const st = await apiRequest<any>(
+        const st = await apiRequest<PvpResult>(
           `/api/pvp/live/status?telegram_id=${telegramId}&match_token=${encodeURIComponent(matchToken)}`
         );
 
@@ -682,7 +702,7 @@ const Pvp: React.FC = () => {
 
       const telemetry = buildTelemetryPayload();
 
-      const res = await apiRequest<any>('/api/pvp/live/submit', {
+      const res = await apiRequest<PvpResult>('/api/pvp/live/submit', {
         method: 'POST',
         body: JSON.stringify({
           telegram_id: telegramId,
@@ -693,7 +713,7 @@ const Pvp: React.FC = () => {
       });
 
       if (res?.player1 || res?.player2 || res?.opponent) {
-        setMatchInfo((prev: any) => ({ ...(prev || {}), ...res }));
+        setMatchInfo((prev) => ({ ...(prev || {}), ...res }));
       }
 
       if (res?.status === 'finished') {
@@ -704,11 +724,11 @@ const Pvp: React.FC = () => {
       } else {
         setLiveSubmitState('waiting');
         if (res?.player1 || res?.player2 || res?.opponent) {
-          setMatchInfo((prev: any) => ({ ...(prev || {}), ...res }));
+          setMatchInfo((prev) => ({ ...(prev || {}), ...res }));
         }
         pollLiveStatus(token);
       }
-    } catch (e: any) {
+    } catch (e) {
       const parsed = parseServerError(e);
       const msg = String(parsed?.message || '').toLowerCase();
       const code = String(parsed?.code || '').toUpperCase();
@@ -775,7 +795,7 @@ const Pvp: React.FC = () => {
 
       const telemetry = buildTelemetryPayload();
 
-      const res = await apiRequest<any>('/api/pvp/challenge/finish', {
+      const res = await apiRequest<PvpResult>('/api/pvp/challenge/finish', {
         method: 'POST',
         body: JSON.stringify({
           telegram_id: telegramId,
@@ -795,7 +815,7 @@ const Pvp: React.FC = () => {
 
       await refreshMe();
       await refreshWeekly();
-    } catch (e: any) {
+    } catch (e) {
       const parsed = parseServerError(e);
       if (parsed?.code === 'ATTEMPT_NOT_ACTIVE' && String(parsed?.message || '').toLowerCase().includes('finished')) {
         challengeFinishedRef.current = true;
@@ -890,7 +910,7 @@ const Pvp: React.FC = () => {
 
   const autoAcceptRef = useRef<string | null>(null);
   useEffect(() => {
-    const sp = (WebApp.initDataUnsafe as any)?.start_param;
+    const sp = WebApp.initDataUnsafe?.start_param;
     if (!telegramId) return;
     if (!sp || typeof sp !== 'string') return;
     if (!sp.startsWith('pvp_')) return;
@@ -905,7 +925,7 @@ const Pvp: React.FC = () => {
       setError('');
       setLoading(true);
       try {
-        const data = await apiRequest<any>('/api/pvp/invite/accept', {
+        const data = await apiRequest<PvpInvite>('/api/pvp/invite/accept', {
           method: 'POST',
           body: JSON.stringify({ telegram_id: telegramId, invite_code: code }),
         });
@@ -916,7 +936,7 @@ const Pvp: React.FC = () => {
         }
 
         if (data?.match_token) startDuel('live');
-      } catch (e: any) {
+      } catch (e) {
         setUserFriendlyError(e);
       } finally {
         setLoading(false);
@@ -1029,7 +1049,7 @@ const onMouseDown = (e: React.MouseEvent<HTMLButtonElement>) => {
     stopInvitePoll();
     invitePollRef.current = window.setInterval(async () => {
       try {
-        const st = await apiRequest<any>(`/api/pvp/invite/status?invite_code=${encodeURIComponent(code)}`);
+        const st = await apiRequest<PvpInvite>(`/api/pvp/invite/status?invite_code=${encodeURIComponent(code)}`);
 
         if (st?.status === 'accepted' && st?.match_token) {
           const mi = {
@@ -1061,13 +1081,13 @@ const onMouseDown = (e: React.MouseEvent<HTMLButtonElement>) => {
     setError('');
     setLoading(true);
     try {
-      const data = await apiRequest<any>('/api/pvp/invite/create', {
+      const data = await apiRequest<PvpInvite>('/api/pvp/invite/create', {
         method: 'POST',
         body: JSON.stringify({ telegram_id: telegramId, ttl_seconds: 3600 }),
       });
       setCreatedInvite(data);
       if (data?.invite_code) startInvitePolling(data.invite_code);
-    } catch (e: any) {
+    } catch (e) {
       setUserFriendlyError(e);
     } finally {
       setLoading(false);
@@ -1082,13 +1102,13 @@ const onMouseDown = (e: React.MouseEvent<HTMLButtonElement>) => {
     setError('');
     setLoading(true);
     try {
-      await apiRequest<any>('/api/pvp/invite/cancel', {
+      await apiRequest<PvpInvite>('/api/pvp/invite/cancel', {
         method: 'POST',
         body: JSON.stringify({ telegram_id: telegramId, invite_code: code }),
       });
       stopInvitePoll();
       setCreatedInvite(null);
-    } catch (e: any) {
+    } catch (e) {
       setUserFriendlyError(e);
     } finally {
       setLoading(false);
@@ -1098,8 +1118,8 @@ const onMouseDown = (e: React.MouseEvent<HTMLButtonElement>) => {
   const copyText = async (txt: string) => {
     try {
       await navigator.clipboard.writeText(txt);
-      WebApp.showToast?.(t('copied', { defaultValue: 'Kopyalandı' }));
-    } catch {}
+      WebApp.HapticFeedback?.notificationOccurred('success');
+    } catch (error) { console.debug('Optional PvP operation failed', error); }
   };
 
   const shareInvite = (code: string) => {
@@ -1108,7 +1128,7 @@ const onMouseDown = (e: React.MouseEvent<HTMLButtonElement>) => {
     const tgShare = buildShareLink(url, text);
 
     try {
-      (WebApp as any).openTelegramLink?.(tgShare);
+      WebApp.openTelegramLink?.(tgShare);
     } catch {
       window.open(tgShare, '_blank');
     }
@@ -1119,7 +1139,7 @@ const onMouseDown = (e: React.MouseEvent<HTMLButtonElement>) => {
     setError('');
     setLoading(true);
     try {
-      const res = await apiRequest<any>('/api/pvp/challenge/start', {
+      const res = await apiRequest<PvpResult>('/api/pvp/challenge/start', {
         method: 'POST',
         body: JSON.stringify({ telegram_id: telegramId }),
       });
@@ -1131,7 +1151,7 @@ const onMouseDown = (e: React.MouseEvent<HTMLButtonElement>) => {
       if (left != null) setChallengeAttemptsLeft(left);
 
       startDuel('challenge');
-    } catch (e: any) {
+    } catch (e) {
       setUserFriendlyError(e);
     } finally {
       setLoading(false);
@@ -1183,7 +1203,9 @@ const onMouseDown = (e: React.MouseEvent<HTMLButtonElement>) => {
     ? formatUserLabel(challengeOpponent, challengeOpponent?.user_id ?? null)
     : formatUserLabel(liveOpponent, opponentUserId);
 
-  const opponentBest = isChallenge ? intOrZero(challengeOpponent?.best_result ?? challengeOpponent?.pvp_best_result) : null;
+  const opponentBest = isChallenge
+    ? extractNumber(challengeFinishResp, ['opponent_best_result']) ?? intOrZero(challengeOpponent?.best_result ?? challengeOpponent?.pvp_best_result)
+    : null;
 
   const bubbleGlowStyle: React.CSSProperties = {
     background:
@@ -1420,7 +1442,7 @@ const onMouseDown = (e: React.MouseEvent<HTMLButtonElement>) => {
                 </tr>
               </thead>
               <tbody>
-                {weeklyItems.map((u: any, idx: number) => {
+                {weeklyItems.map((u, idx) => {
                   const isMe = meInfo?.user_id && u?.user_id === meInfo.user_id;
                   const name = u?.username
                     ? `@${u.username}`
@@ -1687,14 +1709,14 @@ const onMouseDown = (e: React.MouseEvent<HTMLButtonElement>) => {
           <div className="rounded-2xl bg-[#0e1a2b] border border-[#00f0ff40] p-4">
             <div className="font-bold">{t('pvp_live_duel', { defaultValue: 'Canlı duel' })}</div>
             <div className="mt-2 text-xs opacity-80">
-              {t('pvp_live_hint', { defaultValue: 'Dəvət linki yarat və rəqibinə göndər.' })}
+              {isDemo ? 'Live invitations are unavailable in the demo. Try Challenge mode below.' : t('pvp_live_hint', { defaultValue: 'Dəvət linki yarat və rəqibinə göndər.' })}
             </div>
 
             <div className="mt-3 space-y-2">
               <button
                 className="rounded-2xl bg-[#00f0ff] text-black font-bold py-3 w-full disabled:opacity-60"
                 onClick={onCreateInvite}
-                disabled={!canUse || loading}
+                disabled={!canUse || loading || isDemo}
               >
                 {t('pvp_create_invite', { defaultValue: 'Dəvət yarat' })}
               </button>
@@ -1713,7 +1735,7 @@ const onMouseDown = (e: React.MouseEvent<HTMLButtonElement>) => {
                     </button>
                     <button
                       className="rounded-2xl bg-white/10 border border-white/10 py-2"
-                      onClick={() => shareInvite(createdInvite.invite_code)}
+                      onClick={() => { if (createdInvite.invite_code) shareInvite(createdInvite.invite_code); }}
                     >
                       {t('pvp_share', { defaultValue: 'Paylaş' })}
                     </button>

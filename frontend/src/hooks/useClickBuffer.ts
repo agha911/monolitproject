@@ -1,6 +1,7 @@
 // frontend/src/hooks/useClickBuffer.ts
 import { useEffect, useRef, useState } from "react";
 import API_BASE_URL from "../components/config";
+import WebApp from "../telegram";
 
 export type FlushResponse = {
   status: "ok" | "noop" | string;
@@ -77,12 +78,12 @@ export function useClickBuffer({
   }, [seqStorageKey]);
 
   const saveSeq = (n: number) => {
-    try { if (seqStorageKey) localStorage.setItem(seqStorageKey, String(n)); } catch {}
+    try { if (seqStorageKey) localStorage.setItem(seqStorageKey, String(n)); } catch { /* Server sequence still protects against duplicate batches without local storage. */ }
   };
 
   const resolveInitData = () => {
     if (initData && initData.length > 0) return initData;
-    const raw = (window as any)?.Telegram?.WebApp?.initData;
+    const raw = WebApp.initData;
     return typeof raw === "string" ? raw : "";
   };
 
@@ -122,12 +123,12 @@ export function useClickBuffer({
   };
 
   const withLock = async <T,>(fn: () => Promise<T>): Promise<T | undefined> => {
-    const locks = (navigator as any).locks;
+    const locks = navigator.locks;
     if (!lockKey || !locks?.request) return fn();
     return locks.request(
       `gappick:flush:${lockKey}`,
       { mode: "exclusive", ifAvailable: true },
-      async (lock: any) => (!lock ? undefined : fn())
+      async (lock) => (!lock ? undefined : fn())
     );
   };
 
@@ -170,7 +171,7 @@ export function useClickBuffer({
         inflight.current = false;
         currentBatch.current = null;
 
-        try { onReconcile(data); } catch {}
+        try { onReconcile(data); } catch (error) { console.error('Click reconciliation failed', error); }
 
         if (buffered > 0 && canSendRef.current) scheduleRetry(0); // продолжаем дожёвывать
       } else {
@@ -180,7 +181,7 @@ export function useClickBuffer({
         inflight.current = false;
         currentBatch.current = null;
         // onReconcile всё равно дернём — пусть UI синхронизируется
-        try { onReconcile(data); } catch {}
+        try { onReconcile(data); } catch (error) { console.error('Click reconciliation failed', error); }
       }
     } catch {
       // сеть/исключение — тоже ждём новых кликов
@@ -223,6 +224,8 @@ export function useClickBuffer({
   }, [buffered, threshold, enabled, canSend]);
 
   useEffect(() => {
+    // StrictMode runs setup/cleanup/setup in development; restore the live state.
+    destroyedRef.current = false;
     return () => {
       destroyedRef.current = true;
       if (retryTimer.current) window.clearTimeout(retryTimer.current);

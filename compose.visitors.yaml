@@ -1,0 +1,7 @@
+# Local preview of the visitor-isolation candidate. Hosting is not configured here.
+name: monolit-visitors-preview
+services:
+  demo:
+    command: ["python", "-m", "uvicorn", "app.public_demo:app", "--host", "0.0.0.0", "--port", "8080", "--workers", "1", "--no-proxy-headers", "--limit-concurrency", "64", "--timeout-keep-alive", "5"]
+    environment:
+      DEMO_PUBLIC_ORIGIN: ${DEMO_PUBLIC_ORIGIN:-http://127.0.0.1:8080}

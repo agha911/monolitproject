@@ -1,0 +1,73 @@
+name: Project checks
+on: [push, pull_request]
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: monolit
+          POSTGRES_PASSWORD: ci_test_only
+          POSTGRES_DB: monolit_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U monolit -d monolit_test"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      TEST_DATABASE_URL: postgresql+asyncpg://monolit:ci_test_only@127.0.0.1:5432/monolit_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: backend/requirements*.txt
+      - run: pip install -r backend/requirements-dev.txt
+      - run: python -m pytest tests -q
+        working-directory: backend
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm run build
+  packaged-demo:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and start the isolated demo
+        run: docker compose -f compose.demo.yaml up --build --detach --wait --wait-timeout 180
+      - name: Check frontend, session and authenticated gameplay
+        run: python scripts/check_packaged_demo.py
+      - name: Show logs on failure
+        if: failure()
+        run: docker compose -f compose.demo.yaml logs --no-color
+      - name: Stop disposable CI demo
+        if: always()
+        run: docker compose -f compose.demo.yaml down --volumes
+  visitor-demo:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and start isolated visitors preview
+        run: docker compose -f compose.demo.yaml -f compose.visitors.yaml up --build --detach --wait --wait-timeout 180
+      - name: Check independent visitors and restricted operations
+        run: python scripts/check_visitor_demo.py
+      - name: Show logs on failure
+        if: failure()
+        run: docker compose -f compose.demo.yaml -f compose.visitors.yaml logs --no-color
+      - name: Stop disposable visitor preview
+        if: always()
+        run: docker compose -f compose.demo.yaml -f compose.visitors.yaml down --volumes

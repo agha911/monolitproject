@@ -12,7 +12,7 @@ from sqlalchemy.dialects.postgresql import ENUM as PGEnum
 from app.database import Base
 from app.models.user import User
 
-LeagueEnum = PGEnum('bronze', 'silver', 'gold', name='league_enum', create_type=False)
+LeagueEnum = PGEnum('bronze', 'silver', 'gold', name='league_enum')
 
 class TournamentWinner(Base):
     __tablename__ = "tournament_winners"

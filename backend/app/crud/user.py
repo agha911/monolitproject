@@ -317,29 +317,14 @@ async def reset_tournament_data(session: AsyncSession):
     _log(tournament_log, "warning", "tournament.reset.ok", affected=affected)
 
 async def increment_total_spent(session: AsyncSession, amount: int):
-    _log(stats_log, "info", "stats.total_spent.inc.start", amount=amount)
-
-    result = await session.execute(select(AppStats).where(AppStats.id == 1))
-    stats = result.scalar_one_or_none()
-
-    if not stats:
-        stats = AppStats(id=1, total_spent=0)
-        session.add(stats)
-        # важно: flush вместо commit
-        await session.flush()
-        _log(stats_log, "info", "stats.total_spent.created", id=1)
-
-    before = int(stats.total_spent or 0)
-    stats.total_spent = before + amount
-
-    # commit здесь НЕ делаем — он должен быть в вызывающей бизнес-операции
-    _log(
-        stats_log,
-        "info",
-        "stats.total_spent.inc.ok",
-        before=before,
-        after=int(stats.total_spent or 0),
+    # One atomic upsert prevents lost updates across purchases by different users.
+    from sqlalchemy.dialects.postgresql import insert
+    statement = insert(AppStats).values(id=1, total_spent=amount)
+    statement = statement.on_conflict_do_update(
+        index_elements=[AppStats.id],
+        set_={"total_spent": AppStats.total_spent + amount},
     )
+    await session.execute(statement)
 
 async def get_total_spent(session: AsyncSession) -> int:
     result = await session.execute(select(AppStats.total_spent).where(AppStats.id == 1))

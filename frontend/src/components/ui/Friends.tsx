@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import WebApp from '@twa-dev/sdk';
+import WebApp, { isDemo, showDemoNotice } from '../../telegram';
 import API_BASE_URL from '../config';
 
 interface UserEntry {
@@ -61,7 +61,7 @@ const Friends: React.FC = () => {
       ]);
 
       // Разбираем реф. баланс отдельно, чтобы ошибка не уронила всё
-      let refBalData: any = null;
+      let refBalData: ReferralBalanceOut | null = null;
       try {
         if (!refBalanceRes.ok) {
           const txt = await refBalanceRes.text().catch(() => '');
@@ -109,7 +109,6 @@ const Friends: React.FC = () => {
 
   useEffect(() => {
     fetchAll();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -127,9 +126,10 @@ const Friends: React.FC = () => {
     return () => {
       if (timerRef.current) window.clearInterval(timerRef.current);
     };
-  }, [refBalance?.expires_at_iso, refBalance?.seconds_left]);
+  }, [refBalance]);
 
   const handleInvite = () => {
+    if (isDemo) { showDemoNotice('Inviting real Telegram users is unavailable in this demo.'); return; }
     const link = `https://t.me/monolit_42_bot?start=${WebApp.initDataUnsafe.user?.id}`;
     const message = encodeURIComponent('Qaqa, Sumqayıta gedirəm, 20 $GAPiyin olmaz?');
     window.open(`https://t.me/share/url?url=${link}&text=${message}`, '_blank');
@@ -142,8 +142,6 @@ const Friends: React.FC = () => {
     return;
   }
 
-  // 1) Запоминаем сумму ДО запроса (на случай пустого/не-JSON ответа)
-  const preClaimAmount = refBalance?.amount ?? 0;
 
   try {
     setClaimLoading(true);
@@ -157,7 +155,7 @@ const Friends: React.FC = () => {
       body: JSON.stringify({ init_data: WebApp.initData }),
     });
 
-    let data: any = null;
+    let data: { status?: string; claimed_amount?: number; detail?: unknown } | null = null;
     let parsed = false;
     try {
       const ct = res.headers.get('content-type') || '';
@@ -176,7 +174,7 @@ const Friends: React.FC = () => {
     if (!res.ok) {
       WebApp.showPopup?.({
         title: String(res.status),
-        message: (data?.detail as string) || (t('try_again') as string),
+        message: typeof data?.detail === 'string' ? data.detail : t('try_again'),
       });
       return;
     }
@@ -184,7 +182,7 @@ const Friends: React.FC = () => {
     // 3) У нас ok. Если JSON есть — обрабатываем статусы, как обычно
     if (parsed && data && typeof data.status === 'string') {
       const status = data.status;
-      if (status === 'ok') {
+      if (status === 'ok' && typeof data.claimed_amount === 'number') {
         await fetchAll();
         WebApp.showPopup?.({
           title: '✓',
@@ -193,7 +191,7 @@ const Friends: React.FC = () => {
       } else if (status === 'expired') {
         WebApp.showPopup?.({ title: '!', message: t('expired') as string });
         await fetchAll();
-      } else if (status === 'nothing') {
+      } else if (status === 'nothing_to_claim') {
         WebApp.showPopup?.({ title: '!', message: t('nothing_to_claim') as string });
       } else {
         console.warn('[referral/claim] unexpected payload', data);
@@ -202,12 +200,11 @@ const Friends: React.FC = () => {
       return;
     }
 
-    // 4) ФОЛЛБЭК: ok, но JSON нет/неожидан. Считаем клейм успешным.
-    // Показываем, что собрали то, что было на экране до клика:
+    // Refresh the balance, but do not claim success without a confirmed payout.
     await fetchAll();
     WebApp.showPopup?.({
-      title: '✓',
-      message: `${t('claimed_success')}: +${preClaimAmount} $GAP`,
+      title: '!',
+      message: t('try_again'),
     });
 
   } catch (e) {

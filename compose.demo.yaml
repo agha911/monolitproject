@@ -1,0 +1,35 @@
+# Local-only packaged demo. Do not change the host binding for public hosting.
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: monolit_demo
+      POSTGRES_USER: monolit
+      POSTGRES_PASSWORD: local_demo_only
+    volumes:
+      - packaged_demo_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U monolit -d monolit_demo"]
+      interval: 5s
+      timeout: 3s
+      retries: 15
+  demo:
+    build:
+      context: .
+      dockerfile: Dockerfile.demo
+    environment:
+      DATABASE_URL: postgresql+asyncpg://monolit:local_demo_only@db:5432/monolit_demo
+      MONOLIT_DEMO_CONTAINER: "true"
+    ports:
+      - "127.0.0.1:8080:8080"
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=3)"]
+      interval: 5s
+      timeout: 5s
+      retries: 15
+      start_period: 10s
+volumes:
+  packaged_demo_data:

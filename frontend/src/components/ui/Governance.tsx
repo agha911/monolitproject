@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useMemo } from 'react';
-import WebApp from '@twa-dev/sdk';
+import WebApp from '../../telegram';
 import { useTranslation } from 'react-i18next';
 import API_BASE_URL from '../config';
 
@@ -29,6 +29,7 @@ type VoteItem = {
 };
 
 type VoteResponse = {
+  detail?: string;
   status: string;
   used_weight: number;
   balance: number; // остаток DAO-баланса (remaining)
@@ -59,7 +60,7 @@ const resolveImageUrl = (src: string | null): string | null => {
       const u = new URL(src);
       return u.pathname || null;
     }
-  } catch {}
+  } catch (error) { console.warn('Could not resolve artwork URL', error); }
 
   if (!src.startsWith('/')) src = '/' + src;
   return src;
@@ -68,22 +69,22 @@ const resolveImageUrl = (src: string | null): string | null => {
 const DaoPage: React.FC = () => {
   const { t } = useTranslation('dao');
 
-  const [telegramUser, setTelegramUser] = useState<any | null>(null);
+  const [, setTelegramUser] = useState<typeof WebApp.initDataUnsafe.user>(undefined);
 
   const [proposals, setProposals] = useState<DaoProposal[]>([]);
   const [loadingProposals, setLoadingProposals] = useState(true);
 
   // финальные результаты (когда голосование завершено)
   const [results, setResults] = useState<DaoResultsOut | null>(null);
-  const [loadingResults, setLoadingResults] = useState(false);
+  const [, setLoadingResults] = useState(false);
 
   // лайв-результаты по активному голосованию
   const [liveResults, setLiveResults] = useState<DaoResultsOut | null>(null);
-  const [loadingLiveResults, setLoadingLiveResults] = useState(false);
+  const [, setLoadingLiveResults] = useState(false);
 
   // общий GAP (total_xp)
   const [balance, setBalance] = useState<number>(0);
-  const [loadingBalance, setLoadingBalance] = useState(true);
+  const [, setLoadingBalance] = useState(true);
 
   // DAO-баланс (остаток лимита по текущему голосованию)
   const [votingBalance, setVotingBalance] = useState<number>(0);
@@ -212,7 +213,7 @@ const DaoPage: React.FC = () => {
         setVotingBalance(0);
       }
     })();
-  }, [initData, selectedProposal?.id]);
+  }, [initData, selectedProposal]);
 
   const usedLocally = useMemo(
     () => Object.values(votes).reduce((s, w) => s + w, 0),
@@ -301,7 +302,7 @@ const DaoPage: React.FC = () => {
         }
       );
 
-      const data: VoteResponse | any = await res.json();
+      const data: VoteResponse = await res.json();
 
       if (!res.ok) {
         const detail = (data && data.detail) || 'unknown';
@@ -350,7 +351,7 @@ const DaoPage: React.FC = () => {
       } catch (err) {
         console.error('Ошибка обновления live-results после голосования:', err);
       }
-    } catch (e) {
+    } catch {
       setError(
         t('errors.vote_error', {
           defaultValue: 'Səsvermə zamanı xəta baş verdi',
