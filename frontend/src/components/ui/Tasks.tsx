@@ -194,6 +194,7 @@ const Tasks: React.FC = () => {
 
   /** ---------- Partner Task: load on mount ---------- */
   useEffect(() => {
+    if (isDemo) return;
     const loadPartnerTask = async () => {
       try {
         const res = await fetch(`${API_BASE_URL}/api/partner/task`, {

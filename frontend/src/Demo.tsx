@@ -36,7 +36,7 @@ export default function Demo() {
     let cancelled = false;
     (async () => {
       try {
-        const res = await fetch(`${API_BASE_URL}/demo/session`);
+        const res = await fetch(`${API_BASE_URL}/demo/session`, { method: 'POST', credentials: 'include' });
         if (!res.ok) throw new Error('Start the demo server to open this playground.');
         const auth: Session = await res.json();
         if (cancelled) return;

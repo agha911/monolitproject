@@ -472,17 +472,9 @@ async def clicks_flush(
 
     except HTTPException:
         raise
-    except Exception as e:
+    except Exception:
         api_log.exception("FLUSH error")
-        return ClicksFlushOut(
-            status=f"error: {str(e)}",
-            accepted_clicks=0,
-            energy=0,
-            total_xp=0,
-            daily_progress=0,
-            server_seq=0,
-            task_completed=False,
-        )
+        raise HTTPException(status_code=503, detail="Could not save clicks. Please try again") from None
 
 @app.post("/api/daily/claim_reward")
 async def claim_daily_reward(data: dict = Body(...), session: AsyncSession = Depends(get_async_session)):

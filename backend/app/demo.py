@@ -50,6 +50,7 @@ async def seed_demo():
 
 
 @app.get("/demo/session")
+@app.post("/demo/session")
 async def demo_session():
     data = {"auth_date": str(int(time.time())), "user": json.dumps({"id": 900000001, "first_name": "Demo Explorer"})}
     secret = hmac.new(b"WebAppData", DEMO_TOKEN.encode(), hashlib.sha256).digest()

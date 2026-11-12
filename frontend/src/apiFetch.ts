@@ -1,4 +1,4 @@
-import WebApp from './telegram';
+import WebApp, { isDemo } from './telegram';
 import API_BASE_URL from './components/config';
 
 // Shared transport for existing screens, including their direct fetch calls.
@@ -11,5 +11,8 @@ window.fetch = (input: RequestInfo | URL, init?: RequestInit) => {
   }
   const headers = new Headers(init?.headers ?? (input instanceof Request ? input.headers : undefined));
   if (WebApp.initData) headers.set('X-Telegram-Init-Data', WebApp.initData);
-  return nativeFetch(input, { ...init, headers });
+  return nativeFetch(input, { ...init, headers, ...(isDemo ? { credentials: 'include' } : {}) }).then(response => {
+    if (isDemo && response.status === 401) window.dispatchEvent(new Event('demo-expired'));
+    return response;
+  });
 };

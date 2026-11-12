@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import WebApp from '../../telegram';
+import WebApp, { isDemo } from '../../telegram';
 import API_BASE_URL from '../config';
 
 function getTelegramId(): number | null {
@@ -1709,14 +1709,14 @@ const onMouseDown = (e: React.MouseEvent<HTMLButtonElement>) => {
           <div className="rounded-2xl bg-[#0e1a2b] border border-[#00f0ff40] p-4">
             <div className="font-bold">{t('pvp_live_duel', { defaultValue: 'Canlı duel' })}</div>
             <div className="mt-2 text-xs opacity-80">
-              {t('pvp_live_hint', { defaultValue: 'Dəvət linki yarat və rəqibinə göndər.' })}
+              {isDemo ? 'Live invitations are unavailable in the demo. Try Challenge mode below.' : t('pvp_live_hint', { defaultValue: 'Dəvət linki yarat və rəqibinə göndər.' })}
             </div>
 
             <div className="mt-3 space-y-2">
               <button
                 className="rounded-2xl bg-[#00f0ff] text-black font-bold py-3 w-full disabled:opacity-60"
                 onClick={onCreateInvite}
-                disabled={!canUse || loading}
+                disabled={!canUse || loading || isDemo}
               >
                 {t('pvp_create_invite', { defaultValue: 'Dəvət yarat' })}
               </button>

@@ -73,6 +73,10 @@ Docker is not installed there; the native single-origin entry point is tested lo
 
 ## Before a future public release
 
+The separate visitor-isolation candidate now implements the session, route and
+request boundaries described in [VISITOR_DEMO.md](VISITOR_DEMO.md). The original
+local recipe in this document deliberately retains its simpler shared player.
+
 Select hosting separately. This local recipe must not simply be exposed by changing
 the loopback binding. It currently shares one fictional player and uses an intentionally
 known demo signing token. A public version needs controlled demo identities/session

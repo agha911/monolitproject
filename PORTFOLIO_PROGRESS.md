@@ -1,4 +1,4 @@
-# Portfolio preparation — stages 1–6
+# Portfolio preparation — stages 1–7
 
 12 November 2026. Base: master / 628129e. Branch: codex/portfolio-readiness.
 
@@ -85,3 +85,14 @@ The demo is local only; public hosting, production migration, full feature verif
 - The complete local backend suite now has 44 passing tests.
 - Docker is not installed locally. A new GitHub Actions job builds/starts the complete Compose package and runs the same smoke check; its result is reported with the PR.
 - Runbook: docs/DEMO_RUNBOOK.md. Public exposure still requires a separate deployment configuration and demo isolation/session/request controls; this local package is not presented as ready for internet exposure.
+
+## Stage 7 — visitor isolation and public-demo boundary
+
+- User authorized hardening first, with hosting to be agreed afterward. No deployment, account creation or paid service was requested or performed.
+- Added a separate app.public_demo entry point with a per-process random signing token. Each cookie-bound session owns a separate temporary PostgreSQL schema and three synthetic players. Progress, rewards, ranking and challenge data are not shared between visitors.
+- Added a 20-minute lifetime, capacity of 12, periodic cleanup, in-flight leases and a single-worker advisory lock. Cleanup only targets generated demo schema names in the dedicated database; restart resets visitor progress.
+- Added an exact route/method allowlist, exact-origin POST checks, HttpOnly/SameSite cookies (Secure over HTTPS), bounded request/session/IP rate limits, streaming body/query limits and SQL timeouts. Compose preview limits server concurrency and disables untrusted proxy headers.
+- Browser responses have CSP, anti-framing and content-type/referrer headers; API/session responses are no-store. Internal click failures return a generic 503 rather than exception details and fake zero balances.
+- Frontend bootstraps via POST, includes demo credentials, explains expiry, and disables live invitations/partner promotion loads in demo mode while keeping challenge PvP and the original design.
+- Added independent-visitor, route, body, origin, capacity, expiry, cleanup and process-lock tests, plus a real two-cookie-jar HTTP smoke script. Compose visitor preview is exercised in its own CI job.
+- Hosting-specific TLS/domain, database credentials/networking, trusted-proxy edge limits and operating policy remain for the next agreed stage. Details: docs/VISITOR_DEMO.md.

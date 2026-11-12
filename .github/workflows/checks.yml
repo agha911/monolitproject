@@ -57,3 +57,17 @@ jobs:
       - name: Stop disposable CI demo
         if: always()
         run: docker compose -f compose.demo.yaml down --volumes
+  visitor-demo:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and start isolated visitors preview
+        run: docker compose -f compose.demo.yaml -f compose.visitors.yaml up --build --detach --wait --wait-timeout 180
+      - name: Check independent visitors and restricted operations
+        run: python scripts/check_visitor_demo.py
+      - name: Show logs on failure
+        if: failure()
+        run: docker compose -f compose.demo.yaml -f compose.visitors.yaml logs --no-color
+      - name: Stop disposable visitor preview
+        if: always()
+        run: docker compose -f compose.demo.yaml -f compose.visitors.yaml down --volumes

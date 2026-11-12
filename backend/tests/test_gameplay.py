@@ -108,6 +108,22 @@ def test_click_flush_does_not_double_credit(game):
     assert progress["daily_progress"] == 40
 
 
+def test_click_failure_does_not_expose_internal_errors_or_zero_the_balance(game, monkeypatch):
+    client, maker = game
+    seed(maker)
+    from app.crud import user as crud_user
+
+    async def fail(**kwargs):
+        raise RuntimeError("private-database-error")
+
+    monkeypatch.setattr(crud_user, "apply_clicks_flush", fail)
+    response = client.post("/api/game/clicks/flush", json={"init_data": signed(),
+        "delta_clicks": 10, "client_seq": 1, "session_id": "failed-clicks"})
+    assert response.status_code == 503
+    assert "private-database-error" not in response.text
+    assert user_state(maker).total_xp == 10000
+
+
 def test_daily_reward_is_awarded_once_under_concurrency(game):
     client, maker = game
     seed(maker, daily_completed=True)

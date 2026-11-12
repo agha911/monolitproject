@@ -12,6 +12,8 @@ The portfolio demo uses the original Telegram interface with synthetic players a
 
 For a compiled frontend and API on one local address, see the [demo package runbook](docs/DEMO_RUNBOOK.md). It includes a dedicated Docker Compose recipe and a native launch option. Public hosting is intentionally deferred.
 
+The [visitor-isolated demo candidate](docs/VISITOR_DEMO.md) adds private temporary games, cookie-bound sessions, route restrictions and traffic limits for the next hosting review. It has a separate local preview; hosting and HTTPS configuration are still to be agreed.
+
 Create a separate local PostgreSQL database named `monolit_demo`. The Compose recipe below creates one. Install backend and frontend dependencies as described in Local setup.
 
 Start the backend from `backend/` with a dedicated loopback `DATABASE_URL` and `python -m uvicorn app.demo:app --host 127.0.0.1 --port 8000`. For the Compose database use `postgresql+asyncpg://monolit:local_demo_only@127.0.0.1:5432/monolit_demo`. The demo entry point refuses non-loopback hosts and other database names, disables bot/notification workers, uses a dedicated non-secret demo signing token, and seeds three fictional players without deleting existing demo progress. Do not expose this entry point publicly.
